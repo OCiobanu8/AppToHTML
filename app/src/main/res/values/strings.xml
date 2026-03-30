@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">AppToHTML</string>
+    <string name="accessibility_capability_name">AppToHTML Accessibility</string>
+    <string name="accessibility_capability_description">Keeps AppToHTML ready to inspect the selected app when capture tools are available.</string>
+</resources>
