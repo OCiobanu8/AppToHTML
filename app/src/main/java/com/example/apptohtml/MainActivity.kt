@@ -174,7 +174,7 @@ private fun AppToHtmlScreen(
             enabled = canStartCapture,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("Start First Screen Capture")
+            Text("Start One-Layer Crawl")
         }
         Text(crawlerState.statusMessage)
         if (!canStartCapture) {
@@ -189,19 +189,45 @@ private fun AppToHtmlScreen(
             )
         } else {
             Text(
-                text = "The crawler relaunches the target app, scans the first screen for scrollable content, and saves merged HTML and XML output.",
+                text = "The crawler brings the target app to the foreground, backs out until no visible in-app back button remains, maps the root screen, opens safe child targets one layer deep, and saves a crawl index plus per-screen HTML and XML output.",
                 style = MaterialTheme.typography.bodySmall,
             )
         }
 
         when (crawlerState.phase) {
             CrawlerPhase.CAPTURED -> {
-                Text("Screen: ${crawlerState.screenName}")
+                Text("Root screen: ${crawlerState.screenName}")
                 crawlerState.scrollStepCount?.let { stepCount ->
-                    Text("Scroll steps: $stepCount")
+                    Text("Root scroll steps: $stepCount")
                 }
-                Text("Saved HTML: ${crawlerState.htmlPath}")
-                Text("Saved XML: ${crawlerState.xmlPath}")
+                crawlerState.capturedScreenCount?.let { count ->
+                    Text("Captured screens: $count")
+                }
+                crawlerState.capturedChildScreenCount?.let { count ->
+                    Text("Captured child screens: $count")
+                }
+                crawlerState.skippedElementCount?.let { count ->
+                    Text("Skipped targets: $count")
+                }
+                Text("Saved root HTML: ${crawlerState.htmlPath}")
+                Text("Saved root XML: ${crawlerState.xmlPath}")
+                Text("Saved crawl index: ${crawlerState.crawlIndexPath}")
+            }
+
+            CrawlerPhase.ABORTED -> {
+                Text("Partial crawl saved: ${crawlerState.failureMessage}")
+                crawlerState.capturedScreenCount?.let { count ->
+                    Text("Captured screens before abort: $count")
+                }
+                crawlerState.capturedChildScreenCount?.let { count ->
+                    Text("Captured child screens before abort: $count")
+                }
+                crawlerState.skippedElementCount?.let { count ->
+                    Text("Skipped targets: $count")
+                }
+                Text("Saved root HTML: ${crawlerState.htmlPath}")
+                Text("Saved root XML: ${crawlerState.xmlPath}")
+                Text("Saved crawl index: ${crawlerState.crawlIndexPath}")
             }
 
             CrawlerPhase.FAILED -> {

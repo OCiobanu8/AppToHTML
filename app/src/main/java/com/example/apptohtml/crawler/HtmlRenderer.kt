@@ -1,13 +1,16 @@
 package com.example.apptohtml.crawler
 
 object HtmlRenderer {
-    fun render(snapshot: ScreenSnapshot): String {
+    fun render(
+        snapshot: ScreenSnapshot,
+        resolvedChildLinks: Map<PressableElementLinkKey, String> = emptyMap(),
+    ): String {
         val title = escape(snapshot.screenName)
         val packageName = escape(snapshot.packageName)
         val elementMarkup = if (snapshot.elements.isEmpty()) {
             "    <p>No pressable elements were found on this screen.</p>"
         } else {
-            buildElementMarkup(snapshot.elements)
+            buildElementMarkup(snapshot.elements, resolvedChildLinks)
         }
 
         return """
@@ -29,7 +32,10 @@ $elementMarkup
         """.trimIndent()
     }
 
-    private fun buildElementMarkup(elements: List<PressableElement>): String {
+    private fun buildElementMarkup(
+        elements: List<PressableElement>,
+        resolvedChildLinks: Map<PressableElementLinkKey, String>,
+    ): String {
         val lines = mutableListOf<String>()
         var openList = false
 
@@ -42,7 +48,10 @@ $elementMarkup
                 openList = false
             }
 
-            val linkMarkup = renderAnchor(element)
+            val linkMarkup = renderAnchor(
+                element = element,
+                href = resolvedChildLinks[element.toLinkKey()]?.takeIf { it.isNotBlank() } ?: "#",
+            )
             if (element.isListItem) {
                 lines += "      <li>$linkMarkup</li>"
             } else {
@@ -57,12 +66,16 @@ $elementMarkup
         return lines.joinToString(separator = "\n")
     }
 
-    private fun renderAnchor(element: PressableElement): String {
+    private fun renderAnchor(
+        element: PressableElement,
+        href: String,
+    ): String {
+        val resolvedHref = escapeAttribute(href)
         val resourceId = escapeAttribute(element.resourceId.orEmpty())
         val className = escapeAttribute(element.className.orEmpty())
         val bounds = escapeAttribute(element.bounds)
         val label = escape(element.label)
-        return """<a href="#" data-resource-id="$resourceId" data-class-name="$className" data-bounds="$bounds">$label</a>"""
+        return """<a href="$resolvedHref" data-resource-id="$resourceId" data-class-name="$className" data-bounds="$bounds">$label</a>"""
     }
 
     private fun escape(input: String): String = buildString(input.length) {

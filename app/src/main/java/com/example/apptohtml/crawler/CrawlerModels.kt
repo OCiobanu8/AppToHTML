@@ -1,5 +1,7 @@
 package com.example.apptohtml.crawler
 
+import java.io.File
+import java.util.Locale
 import com.example.apptohtml.model.SelectedAppRef
 
 enum class CrawlerPhase {
@@ -7,7 +9,9 @@ enum class CrawlerPhase {
     LAUNCHING,
     WAITING_FOR_TARGET_SCREEN,
     SCANNING_TARGET_SCREEN,
+    TRAVERSING_CHILD_SCREENS,
     CAPTURED,
+    ABORTED,
     FAILED,
 }
 
@@ -19,12 +23,17 @@ data class CrawlerUiState(
     val screenName: String? = null,
     val htmlPath: String? = null,
     val xmlPath: String? = null,
+    val crawlIndexPath: String? = null,
     val scrollStepCount: Int? = null,
+    val capturedScreenCount: Int? = null,
+    val capturedChildScreenCount: Int? = null,
+    val skippedElementCount: Int? = null,
+    val partialResult: Boolean = false,
     val failureMessage: String? = null,
 ) {
     fun withLaunching(requestId: Long, selectedApp: SelectedAppRef, alreadyRunning: Boolean): CrawlerUiState {
         val message = if (alreadyRunning) {
-            "Target app appears to already be running. Relaunching it now."
+            "Target app appears to already be running. Bringing it to the foreground now."
         } else {
             "Launching the selected app."
         }
@@ -52,22 +61,53 @@ data class CrawlerUiState(
         screenName = null,
         htmlPath = null,
         xmlPath = null,
+        crawlIndexPath = null,
         scrollStepCount = null,
+        capturedScreenCount = null,
+        capturedChildScreenCount = null,
+        skippedElementCount = null,
+        partialResult = false,
         failureMessage = null,
     )
 
-    fun withCaptured(screenName: String, files: CapturedScreenFiles, scrollStepCount: Int): CrawlerUiState = copy(
+    fun withTraversingChildren(message: String): CrawlerUiState = copy(
+        phase = CrawlerPhase.TRAVERSING_CHILD_SCREENS,
+        statusMessage = message,
+        failureMessage = null,
+    )
+
+    fun withCaptured(summary: CrawlRunSummary): CrawlerUiState = copy(
         phase = CrawlerPhase.CAPTURED,
-        statusMessage = if (scrollStepCount > 1) {
-            "Captured the first visible screen across $scrollStepCount scroll steps."
+        statusMessage = if (summary.capturedChildScreenCount > 0) {
+            "Captured ${summary.capturedScreenCount} screen(s), including ${summary.capturedChildScreenCount} child screen(s)."
         } else {
             "Captured the first visible screen."
         },
-        screenName = screenName,
-        htmlPath = files.htmlFile.absolutePath,
-        xmlPath = files.xmlFile.absolutePath,
-        scrollStepCount = scrollStepCount,
+        screenName = summary.rootScreenName,
+        htmlPath = summary.rootFiles.htmlFile.absolutePath,
+        xmlPath = summary.rootFiles.xmlFile.absolutePath,
+        crawlIndexPath = summary.manifestFile.absolutePath,
+        scrollStepCount = summary.rootScrollStepCount,
+        capturedScreenCount = summary.capturedScreenCount,
+        capturedChildScreenCount = summary.capturedChildScreenCount,
+        skippedElementCount = summary.skippedElementCount,
+        partialResult = false,
         failureMessage = null,
+    )
+
+    fun withAborted(summary: CrawlRunSummary, message: String): CrawlerUiState = copy(
+        phase = CrawlerPhase.ABORTED,
+        statusMessage = message,
+        screenName = summary.rootScreenName,
+        htmlPath = summary.rootFiles.htmlFile.absolutePath,
+        xmlPath = summary.rootFiles.xmlFile.absolutePath,
+        crawlIndexPath = summary.manifestFile.absolutePath,
+        scrollStepCount = summary.rootScrollStepCount,
+        capturedScreenCount = summary.capturedScreenCount,
+        capturedChildScreenCount = summary.capturedChildScreenCount,
+        skippedElementCount = summary.skippedElementCount,
+        partialResult = true,
+        failureMessage = message,
     )
 
     fun withFailure(message: String): CrawlerUiState = copy(
@@ -77,7 +117,12 @@ data class CrawlerUiState(
         screenName = null,
         htmlPath = null,
         xmlPath = null,
+        crawlIndexPath = null,
         scrollStepCount = null,
+        capturedScreenCount = null,
+        capturedChildScreenCount = null,
+        skippedElementCount = null,
+        partialResult = false,
     )
 
     companion object {
@@ -91,8 +136,37 @@ data class PressableElement(
     val bounds: String,
     val className: String?,
     val isListItem: Boolean,
+    val childIndexPath: List<Int> = emptyList(),
+    val checkable: Boolean = false,
+    val checked: Boolean = false,
     val firstSeenStep: Int = 0,
 )
+
+data class PressableElementLinkKey(
+    val label: String,
+    val resourceId: String?,
+    val bounds: String,
+    val className: String?,
+    val isListItem: Boolean,
+    val childIndexPath: List<Int>,
+    val checkable: Boolean,
+    val checked: Boolean,
+    val firstSeenStep: Int,
+)
+
+internal fun PressableElement.toLinkKey(): PressableElementLinkKey {
+    return PressableElementLinkKey(
+        label = label,
+        resourceId = resourceId,
+        bounds = bounds,
+        className = className,
+        isListItem = isListItem,
+        childIndexPath = childIndexPath,
+        checkable = checkable,
+        checked = checked,
+        firstSeenStep = firstSeenStep,
+    )
+}
 
 data class ScrollCaptureStep(
     val stepIndex: Int,
@@ -118,9 +192,74 @@ data class AccessibilityNodeSnapshot(
     val clickable: Boolean,
     val supportsClickAction: Boolean,
     val scrollable: Boolean,
+    val checkable: Boolean = false,
+    val checked: Boolean = false,
     val enabled: Boolean,
     val visibleToUser: Boolean,
     val bounds: String,
     val children: List<AccessibilityNodeSnapshot>,
     val childIndexPath: List<Int> = emptyList(),
 )
+
+enum class CrawlRunStatus {
+    IN_PROGRESS,
+    COMPLETED,
+    PARTIAL_ABORT,
+    FAILED,
+}
+
+enum class CrawlEdgeStatus {
+    CAPTURED,
+    SKIPPED_BLACKLIST,
+    SKIPPED_NO_NAVIGATION,
+    FAILED,
+}
+
+data class CrawlScreenRecord(
+    val screenId: String,
+    val screenName: String,
+    val htmlPath: String,
+    val xmlPath: String,
+    val scrollStepCount: Int,
+    val parentScreenId: String?,
+    val triggerLabel: String?,
+    val triggerResourceId: String?,
+    val depth: Int,
+)
+
+data class CrawlEdgeRecord(
+    val edgeId: String,
+    val parentScreenId: String,
+    val childScreenId: String? = null,
+    val label: String,
+    val resourceId: String?,
+    val className: String?,
+    val bounds: String,
+    val childIndexPath: List<Int>,
+    val firstSeenStep: Int,
+    val status: CrawlEdgeStatus,
+    val message: String? = null,
+)
+
+data class CrawlManifest(
+    val sessionId: String,
+    val packageName: String,
+    val startedAt: Long,
+    val finishedAt: Long? = null,
+    val status: CrawlRunStatus = CrawlRunStatus.IN_PROGRESS,
+    val rootScreenId: String? = null,
+    val screens: List<CrawlScreenRecord> = emptyList(),
+    val edges: List<CrawlEdgeRecord> = emptyList(),
+)
+
+data class CrawlRunSummary(
+    val rootScreenName: String,
+    val rootFiles: CapturedScreenFiles,
+    val manifestFile: File,
+    val rootScrollStepCount: Int,
+    val capturedScreenCount: Int,
+    val capturedChildScreenCount: Int,
+    val skippedElementCount: Int,
+)
+
+internal fun CrawlRunStatus.displayName(): String = name.lowercase(Locale.US)

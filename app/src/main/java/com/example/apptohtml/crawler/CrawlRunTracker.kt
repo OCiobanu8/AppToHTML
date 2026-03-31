@@ -1,0 +1,89 @@
+package com.example.apptohtml.crawler
+
+class CrawlRunTracker(
+    private val sessionId: String,
+    private val packageName: String,
+    private val startedAt: Long,
+) {
+    private val screens = mutableListOf<CrawlScreenRecord>()
+    private val edges = mutableListOf<CrawlEdgeRecord>()
+    private var rootScreenId: String? = null
+    private var nextScreenSequence = 0
+    private var nextEdgeSequence = 0
+
+    fun nextScreenSequenceNumber(): Int = nextScreenSequence++
+
+    fun addScreen(
+        screenId: String,
+        snapshot: ScreenSnapshot,
+        files: CapturedScreenFiles,
+        parentScreenId: String?,
+        triggerElement: PressableElement?,
+        depth: Int,
+    ) {
+        screens += CrawlScreenRecord(
+            screenId = screenId,
+            screenName = snapshot.screenName,
+            htmlPath = files.htmlFile.absolutePath,
+            xmlPath = files.xmlFile.absolutePath,
+            scrollStepCount = snapshot.scrollStepCount,
+            parentScreenId = parentScreenId,
+            triggerLabel = triggerElement?.label,
+            triggerResourceId = triggerElement?.resourceId,
+            depth = depth,
+        )
+        if (depth == 0) {
+            rootScreenId = screenId
+        }
+    }
+
+    fun addEdge(
+        parentScreenId: String,
+        element: PressableElement,
+        status: CrawlEdgeStatus,
+        childScreenId: String? = null,
+        message: String? = null,
+    ) {
+        val edgeId = "edge_%03d".format(nextEdgeSequence++)
+        edges += CrawlEdgeRecord(
+            edgeId = edgeId,
+            parentScreenId = parentScreenId,
+            childScreenId = childScreenId,
+            label = element.label,
+            resourceId = element.resourceId,
+            className = element.className,
+            bounds = element.bounds,
+            childIndexPath = element.childIndexPath,
+            firstSeenStep = element.firstSeenStep,
+            status = status,
+            message = message,
+        )
+    }
+
+    fun buildManifest(
+        status: CrawlRunStatus,
+        finishedAt: Long = System.currentTimeMillis(),
+    ): CrawlManifest {
+        return CrawlManifest(
+            sessionId = sessionId,
+            packageName = packageName,
+            startedAt = startedAt,
+            finishedAt = finishedAt,
+            status = status,
+            rootScreenId = rootScreenId,
+            screens = screens.toList(),
+            edges = edges.toList(),
+        )
+    }
+
+    fun capturedScreenCount(): Int = screens.size
+
+    fun capturedChildScreenCount(): Int = screens.count { it.depth > 0 }
+
+    fun skippedElementCount(): Int {
+        return edges.count { edge ->
+            edge.status == CrawlEdgeStatus.SKIPPED_BLACKLIST ||
+                edge.status == CrawlEdgeStatus.SKIPPED_NO_NAVIGATION
+        }
+    }
+}
