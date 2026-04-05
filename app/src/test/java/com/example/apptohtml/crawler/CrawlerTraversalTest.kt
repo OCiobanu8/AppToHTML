@@ -1,6 +1,7 @@
 package com.example.apptohtml.crawler
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -59,12 +60,10 @@ class CrawlerTraversalTest {
         assertEquals(
             "blacklist-checkable",
             blacklist.skipReason(
-                PressableElement(
+                testElement(
                     label = "Notifications",
                     resourceId = "com.example:id/notifications",
-                    bounds = "[0,0][10,10]",
                     className = "android.widget.TextView",
-                    isListItem = false,
                     checkable = true,
                 )
             )
@@ -72,42 +71,85 @@ class CrawlerTraversalTest {
     }
 
     @Test
-    fun traversalPlanner_orders_by_step_then_screen_position_and_skips_blacklisted_targets() {
-        val blacklist = CrawlBlacklist(
-            labelTokens = setOf("remove"),
-            skipCheckable = true,
+    fun default_blacklist_blocks_representative_risky_actions_from_each_category() {
+        val blacklist = loadDefaultBlacklist()
+
+        assertEquals(
+            "blacklist-label",
+            blacklist.skipReason(testElement(label = "Switch account"))
         )
+        assertEquals(
+            "blacklist-label",
+            blacklist.skipReason(testElement(label = "Factory reset"))
+        )
+        assertEquals(
+            "blacklist-resource-id",
+            blacklist.skipReason(testElement(resourceId = "com.example:id/start_trial_button"))
+        )
+        assertEquals(
+            "blacklist-label",
+            blacklist.skipReason(testElement(label = "Submit"))
+        )
+        assertEquals(
+            "blacklist-label",
+            blacklist.skipReason(testElement(label = "Allow all the time"))
+        )
+        assertEquals(
+            "blacklist-resource-id",
+            blacklist.skipReason(testElement(resourceId = "com.example:id/open_in_browser_button"))
+        )
+        assertEquals(
+            "blacklist-label",
+            blacklist.skipReason(testElement(label = "Download"))
+        )
+        assertEquals(
+            "blacklist-resource-id",
+            blacklist.skipReason(testElement(resourceId = "com.example:id/take_photo_button"))
+        )
+        assertEquals(
+            "blacklist-class",
+            blacklist.skipReason(testElement(className = "android.widget.RadioButton"))
+        )
+        assertEquals(
+            "blacklist-checkable",
+            blacklist.skipReason(testElement(checkable = true))
+        )
+    }
+
+    @Test
+    fun traversalPlanner_keeps_safe_navigation_targets_and_skips_risky_ones_from_default_blacklist() {
+        val blacklist = loadDefaultBlacklist()
         val snapshot = ScreenSnapshot(
             screenName = "Home",
             packageName = "com.example.target",
             elements = listOf(
                 PressableElement(
-                    label = "Bottom row",
-                    resourceId = "com.example:id/bottom",
+                    label = "Details",
+                    resourceId = "com.example:id/details",
                     bounds = "[0,500][100,550]",
                     className = "android.widget.Button",
                     isListItem = false,
                     firstSeenStep = 0,
                 ),
                 PressableElement(
-                    label = "Remove app",
-                    resourceId = "com.example:id/remove",
+                    label = "Delete account",
+                    resourceId = "com.example:id/delete_account",
                     bounds = "[0,100][100,150]",
                     className = "android.widget.Button",
                     isListItem = false,
                     firstSeenStep = 0,
                 ),
                 PressableElement(
-                    label = "Top row",
-                    resourceId = "com.example:id/top",
+                    label = "Profile",
+                    resourceId = "com.example:id/profile",
                     bounds = "[0,50][100,100]",
                     className = "android.widget.Button",
                     isListItem = false,
                     firstSeenStep = 0,
                 ),
                 PressableElement(
-                    label = "Later step",
-                    resourceId = "com.example:id/later",
+                    label = "Send feedback",
+                    resourceId = "com.example:id/send_feedback",
                     bounds = "[0,40][100,90]",
                     className = "android.widget.Button",
                     isListItem = false,
@@ -119,8 +161,10 @@ class CrawlerTraversalTest {
 
         val plan = TraversalPlanner.planRootTraversal(snapshot, blacklist)
 
-        assertEquals(listOf("Top row", "Bottom row", "Later step"), plan.eligibleElements.map { it.label })
-        assertEquals(listOf("Remove app"), plan.skippedElements.map { it.element.label })
+        assertEquals(listOf("Profile", "Details"), plan.eligibleElements.map { it.label })
+        assertEquals(listOf("Delete account", "Send feedback"), plan.skippedElements.map { it.element.label })
+        assertNull(plan.eligibleElements.firstOrNull { it.label == "Delete account" })
+        assertNull(plan.eligibleElements.firstOrNull { it.label == "Send feedback" })
     }
 
     @Test
@@ -246,5 +290,31 @@ class CrawlerTraversalTest {
             eventClassName = "com.example.target.MainActivity",
             stepRoots = listOf(root),
         ).copy(screenName = screenName)
+    }
+
+    private fun loadDefaultBlacklist(): CrawlBlacklist {
+        val candidates = listOf(
+            File("src/main/res/raw/crawl_blacklist.json"),
+            File("app/src/main/res/raw/crawl_blacklist.json"),
+        )
+        val file = candidates.firstOrNull { it.exists() }
+            ?: error("Could not locate crawl_blacklist.json from test working directory.")
+        return CrawlBlacklistLoader.parse(file.readText())
+    }
+
+    private fun testElement(
+        label: String = "Safe target",
+        resourceId: String? = "com.example:id/safe_target",
+        className: String = "android.widget.Button",
+        checkable: Boolean = false,
+    ): PressableElement {
+        return PressableElement(
+            label = label,
+            resourceId = resourceId,
+            bounds = "[0,0][10,10]",
+            className = className,
+            isListItem = false,
+            checkable = checkable,
+        )
     }
 }
