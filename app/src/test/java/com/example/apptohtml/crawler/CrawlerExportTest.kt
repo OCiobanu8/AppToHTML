@@ -79,6 +79,206 @@ class CrawlerExportTest {
     }
 
     @Test
+    fun deriveScreenName_prefers_top_visible_title_text_for_settings_child_screen() {
+        val selectedApp = SelectedAppRef(
+            packageName = "com.android.settings",
+            appName = "Settings",
+            launcherActivity = "com.android.settings.Settings",
+            selectedAt = 123L,
+        )
+        val root = AccessibilityNodeSnapshot(
+            className = "android.widget.FrameLayout",
+            packageName = "com.android.settings",
+            viewIdResourceName = null,
+            text = null,
+            contentDescription = null,
+            clickable = false,
+            supportsClickAction = false,
+            scrollable = false,
+            enabled = true,
+            visibleToUser = true,
+            bounds = "[0,0][1080,2400]",
+            children = listOf(
+                AccessibilityNodeSnapshot(
+                    className = "android.widget.TextView",
+                    packageName = "com.android.settings",
+                    viewIdResourceName = "com.android.settings:id/action_bar_title",
+                    text = "Sound & vibration",
+                    contentDescription = null,
+                    clickable = false,
+                    supportsClickAction = false,
+                    scrollable = false,
+                    enabled = true,
+                    visibleToUser = true,
+                    bounds = "[48,72][640,148]",
+                    children = emptyList(),
+                ),
+                AccessibilityNodeSnapshot(
+                    className = "android.widget.ScrollView",
+                    packageName = "com.android.settings",
+                    viewIdResourceName = "com.android.settings:id/main_content_scrollable_container",
+                    text = null,
+                    contentDescription = null,
+                    clickable = false,
+                    supportsClickAction = false,
+                    scrollable = true,
+                    enabled = true,
+                    visibleToUser = true,
+                    bounds = "[0,180][1080,2337]",
+                    children = listOf(
+                        AccessibilityNodeSnapshot(
+                            className = "android.widget.TextView",
+                            packageName = "com.android.settings",
+                            viewIdResourceName = "android:id/title",
+                            text = "Media volume",
+                            contentDescription = null,
+                            clickable = false,
+                            supportsClickAction = false,
+                            scrollable = false,
+                            enabled = true,
+                            visibleToUser = true,
+                            bounds = "[144,240][480,286]",
+                            children = emptyList(),
+                        )
+                    ),
+                )
+            ),
+        )
+
+        val screenName = ScreenNaming.deriveScreenName(
+            eventClassName = "android.widget.FrameLayout",
+            selectedApp = selectedApp,
+            root = root,
+        )
+
+        assertEquals("Sound & vibration", screenName)
+    }
+
+    @Test
+    fun deriveScreenName_does_not_use_scrollable_row_text_as_screen_title() {
+        val selectedApp = SelectedAppRef(
+            packageName = "com.android.settings",
+            appName = "Settings",
+            launcherActivity = "com.android.settings.Settings",
+            selectedAt = 123L,
+        )
+        val root = AccessibilityNodeSnapshot(
+            className = "android.widget.FrameLayout",
+            packageName = "com.android.settings",
+            viewIdResourceName = null,
+            text = null,
+            contentDescription = null,
+            clickable = false,
+            supportsClickAction = false,
+            scrollable = false,
+            enabled = true,
+            visibleToUser = true,
+            bounds = "[0,0][1080,2400]",
+            children = listOf(
+                AccessibilityNodeSnapshot(
+                    className = "android.widget.ScrollView",
+                    packageName = "com.android.settings",
+                    viewIdResourceName = "com.android.settings:id/settings_homepage_container",
+                    text = null,
+                    contentDescription = null,
+                    clickable = false,
+                    supportsClickAction = false,
+                    scrollable = true,
+                    enabled = true,
+                    visibleToUser = true,
+                    bounds = "[0,0][1080,2337]",
+                    children = listOf(
+                        AccessibilityNodeSnapshot(
+                            className = "android.widget.TextView",
+                            packageName = "com.android.settings",
+                            viewIdResourceName = "android:id/title",
+                            text = "Search settings",
+                            contentDescription = null,
+                            clickable = false,
+                            supportsClickAction = false,
+                            scrollable = false,
+                            enabled = true,
+                            visibleToUser = true,
+                            bounds = "[42,157][500,220]",
+                            children = emptyList(),
+                        )
+                    ),
+                )
+            ),
+        )
+
+        val screenName = ScreenNaming.deriveScreenName(
+            eventClassName = "android.widget.FrameLayout",
+            selectedApp = selectedApp,
+            root = root,
+        )
+
+        assertEquals("Settings Homepage", screenName)
+    }
+
+    @Test
+    fun deriveScreenName_ignores_malformed_visible_text_and_falls_back_safely() {
+        val selectedApp = SelectedAppRef(
+            packageName = "com.android.settings",
+            appName = "Settings",
+            launcherActivity = "com.android.settings.Settings",
+            selectedAt = 123L,
+        )
+        val root = AccessibilityNodeSnapshot(
+            className = "android.widget.FrameLayout",
+            packageName = "com.android.settings",
+            viewIdResourceName = null,
+            text = null,
+            contentDescription = null,
+            clickable = false,
+            supportsClickAction = false,
+            scrollable = false,
+            enabled = true,
+            visibleToUser = true,
+            bounds = "[0,0][1080,2400]",
+            children = listOf(
+                AccessibilityNodeSnapshot(
+                    className = "android.widget.TextView",
+                    packageName = "com.android.settings",
+                    viewIdResourceName = "com.android.settings:id/action_bar_title",
+                    text = "\uD83D",
+                    contentDescription = null,
+                    clickable = false,
+                    supportsClickAction = false,
+                    scrollable = false,
+                    enabled = true,
+                    visibleToUser = true,
+                    bounds = "[48,72][640,148]",
+                    children = emptyList(),
+                ),
+                AccessibilityNodeSnapshot(
+                    className = "android.widget.ScrollView",
+                    packageName = "com.android.settings",
+                    viewIdResourceName = "com.android.settings:id/settings_homepage_container",
+                    text = null,
+                    contentDescription = null,
+                    clickable = false,
+                    supportsClickAction = false,
+                    scrollable = true,
+                    enabled = true,
+                    visibleToUser = true,
+                    bounds = "[0,0][1080,2337]",
+                    children = emptyList(),
+                ),
+            ),
+        )
+
+        val screenName = ScreenNaming.deriveScreenName(
+            eventClassName = "android.widget.FrameLayout",
+            selectedApp = selectedApp,
+            root = root,
+        )
+
+        assertEquals("Settings Homepage", screenName)
+        assertEquals("captured_screen", ScreenNaming.toFileBase("\uD83D"))
+    }
+
+    @Test
     fun chooseElementLabel_uses_expected_fallback_order() {
         assertEquals(
             "Primary CTA",
@@ -139,6 +339,34 @@ class CrawlerExportTest {
 
         assertTrue(html.contains("<title>Home Screen</title>"))
         assertTrue(html.contains("<h1>Home Screen</h1>"))
+        assertTrue(html.contains("""<a href="#" """))
+        assertTrue(html.contains(">Continue</a>"))
+    }
+
+    @Test
+    fun htmlRenderer_resolves_child_links_by_element_key() {
+        val element = PressableElement(
+            label = "Continue",
+            resourceId = "com.example.target:id/continue_button",
+            bounds = "[0,0][100,50]",
+            className = "android.widget.Button",
+            isListItem = false,
+            childIndexPath = listOf(0),
+            firstSeenStep = 1,
+        )
+        val snapshot = ScreenSnapshot(
+            screenName = "Home Screen",
+            packageName = "com.example.target",
+            elements = listOf(element),
+            xmlDump = "<screen />",
+        )
+
+        val html = HtmlRenderer.render(
+            snapshot = snapshot,
+            resolvedChildLinks = mapOf(element.toLinkKey() to "001_child_details_screen.html"),
+        )
+
+        assertTrue(html.contains("""<a href="001_child_details_screen.html""""))
         assertTrue(html.contains(">Continue</a>"))
     }
 
@@ -465,6 +693,33 @@ class CrawlerExportTest {
     }
 
     @Test
+    fun mergedScreenSnapshot_uses_actual_root_package_for_cross_package_child_screen() {
+        val snapshot = AccessibilityTreeSnapshotter.buildMergedScreenSnapshot(
+            selectedApp = selectedApp(),
+            eventClassName = "com.google.android.gms.SomeChildActivity",
+            stepRoots = listOf(
+                rootNode(
+                    className = "android.widget.FrameLayout",
+                    children = listOf(
+                        node(
+                            className = "android.widget.Button",
+                            packageName = "com.google.android.gms",
+                            viewIdResourceName = "com.google.android.gms:id/action_button",
+                            text = "Continue",
+                            clickable = true,
+                            supportsClickAction = true,
+                            childIndexPath = listOf(0),
+                        )
+                    ),
+                ).copy(packageName = "com.google.android.gms")
+            ),
+        )
+
+        assertEquals("com.google.android.gms", snapshot.packageName)
+        assertTrue(snapshot.xmlDump.contains("""package="com.google.android.gms""""))
+    }
+
+    @Test
     fun scrollScanCoordinator_stops_when_scroll_action_fails() = runBlocking {
         val coordinator = ScrollScanCoordinator(maxAdditionalScrolls = 8)
         var captureCalls = 0
@@ -767,6 +1022,188 @@ class CrawlerExportTest {
     }
 
     @Test
+    fun entryScreenBackAffordanceDetector_detects_toolbar_back_button() {
+        val root = toolbarBackRoot(
+            clickableNode(
+                text = "Detail Action",
+                resourceId = "com.example.target:id/detail_action",
+                bounds = "[0,240][100,290]",
+                childIndexPath = listOf(1, 0),
+            ),
+        )
+
+        assertTrue(EntryScreenBackAffordanceDetector.hasVisibleInAppBackAffordance(root))
+    }
+
+    @Test
+    fun entryScreenBackAffordanceDetector_ignores_body_back_button() {
+        val root = rootNode(
+            children = listOf(
+                node(
+                    className = "android.widget.LinearLayout",
+                    childIndexPath = listOf(0),
+                    children = listOf(
+                        node(
+                            className = "android.widget.Button",
+                            text = "Back",
+                            clickable = true,
+                            supportsClickAction = true,
+                            bounds = "[120,900][420,1020]",
+                            childIndexPath = listOf(0, 0),
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        assertFalse(EntryScreenBackAffordanceDetector.hasVisibleInAppBackAffordance(root))
+    }
+
+    @Test
+    fun rewindToEntryScreen_keeps_backing_while_back_affordance_is_visible() = runBlocking {
+        val coordinator = ScrollScanCoordinator(maxBackToEntryAttempts = 4)
+        var backAttempts = 0
+        val detailRoot = toolbarBackRoot(
+            clickableNode(
+                text = "Detail Action",
+                resourceId = "com.example.target:id/detail_action",
+                bounds = "[0,240][100,290]",
+                childIndexPath = listOf(1, 0),
+            )
+        )
+        val middleRoot = toolbarBackRoot(
+            clickableNode(
+                text = "Middle Action",
+                resourceId = "com.example.target:id/middle_action",
+                bounds = "[0,240][100,290]",
+                childIndexPath = listOf(1, 0),
+            )
+        )
+        val homeRoot = scrollableRoot(
+            clickableNode(
+                text = "Home Search",
+                resourceId = "com.example.target:id/home_search",
+                bounds = "[0,0][100,50]",
+                childIndexPath = listOf(0, 0),
+            )
+        )
+        val captures = mutableListOf<AccessibilityNodeSnapshot?>(
+            middleRoot,
+            middleRoot,
+            homeRoot,
+            homeRoot,
+        )
+
+        val result = coordinator.rewindToEntryScreen(
+            initialRoot = detailRoot,
+            targetPackageName = "com.example.target",
+            tryBack = {
+                backAttempts += 1
+                true
+            },
+            captureCurrentRoot = { captures.removeAt(0) },
+        )
+
+        assertEquals(2, backAttempts)
+        assertEquals(EntryScreenResetStopReason.NO_BACK_AFFORDANCE, result.stopReason)
+        assertEquals(listOf("Home Search"), AccessibilityTreeSnapshotter.collectPressableElements(result.root).map { it.label })
+    }
+
+    @Test
+    fun rewindToEntryScreen_keeps_current_root_when_no_back_affordance_is_visible() = runBlocking {
+        val coordinator = ScrollScanCoordinator(maxBackToEntryAttempts = 4)
+        var backAttempts = 0
+        val homeRoot = scrollableRoot(
+            clickableNode(
+                text = "Home Search",
+                resourceId = "com.example.target:id/home_search",
+                bounds = "[0,0][100,50]",
+                childIndexPath = listOf(0, 0),
+            )
+        )
+
+        val result = coordinator.rewindToEntryScreen(
+            initialRoot = homeRoot,
+            targetPackageName = "com.example.target",
+            tryBack = {
+                backAttempts += 1
+                true
+            },
+            captureCurrentRoot = { null },
+        )
+
+        assertEquals(0, backAttempts)
+        assertEquals(EntryScreenResetStopReason.NO_BACK_AFFORDANCE, result.stopReason)
+        assertEquals(listOf("Home Search"), AccessibilityTreeSnapshotter.collectPressableElements(result.root).map { it.label })
+    }
+
+    @Test
+    fun rewindToEntryScreen_reports_failure_when_back_affordance_never_disappears() = runBlocking {
+        val coordinator = ScrollScanCoordinator(maxBackToEntryAttempts = 2)
+        var backAttempts = 0
+        val detailRoot = toolbarBackRoot(
+            clickableNode(
+                text = "Detail Action",
+                resourceId = "com.example.target:id/detail_action",
+                bounds = "[0,240][100,290]",
+                childIndexPath = listOf(1, 0),
+            )
+        )
+        val captures = mutableListOf<AccessibilityNodeSnapshot?>(
+            detailRoot,
+            detailRoot,
+            detailRoot,
+            detailRoot,
+        )
+
+        val result = coordinator.rewindToEntryScreen(
+            initialRoot = detailRoot,
+            targetPackageName = "com.example.target",
+            tryBack = {
+                backAttempts += 1
+                true
+            },
+            captureCurrentRoot = { captures.removeAt(0) },
+        )
+
+        assertEquals(2, backAttempts)
+        assertEquals(EntryScreenResetStopReason.MAX_ATTEMPTS_REACHED, result.stopReason)
+        assertEquals(listOf("Navigate up", "Detail Action"), AccessibilityTreeSnapshotter.collectPressableElements(result.root).map { it.label })
+    }
+
+    @Test
+    fun rewindToEntryScreen_reports_failure_when_backing_leaves_target_app() = runBlocking {
+        val coordinator = ScrollScanCoordinator(maxBackToEntryAttempts = 4)
+        var backAttempts = 0
+        val detailRoot = toolbarBackRoot(
+            clickableNode(
+                text = "Detail Action",
+                resourceId = "com.example.target:id/detail_action",
+                bounds = "[0,240][100,290]",
+                childIndexPath = listOf(1, 0),
+            )
+        )
+        val launcherRoot = node(
+            className = "android.widget.FrameLayout",
+            packageName = "com.android.launcher",
+            bounds = "[0,0][1080,2400]",
+        )
+
+        val result = coordinator.rewindToEntryScreen(
+            initialRoot = detailRoot,
+            targetPackageName = "com.example.target",
+            tryBack = {
+                backAttempts += 1
+                true
+            },
+            captureCurrentRoot = { launcherRoot },
+        )
+
+        assertEquals(1, backAttempts)
+        assertEquals(EntryScreenResetStopReason.LEFT_TARGET_APP, result.stopReason)
+    }
+
+    @Test
     fun crawlerUiState_transitions_to_launching_captured_and_failed() {
         val selectedApp = SelectedAppRef(
             packageName = "com.example.target",
@@ -786,15 +1223,42 @@ class CrawlerExportTest {
         )
         val waiting = launching.withWaiting("Waiting")
         val scanning = waiting.withScanning("Scanning")
-        val captured = scanning.withCaptured("Home Screen", files, scrollStepCount = 3)
+        val traversing = scanning.withTraversingChildren("Traversing")
+        val captured = traversing.withCaptured(
+            CrawlRunSummary(
+                rootScreenName = "Home Screen",
+                rootFiles = files,
+                manifestFile = File("build/crawl-index.json"),
+                rootScrollStepCount = 3,
+                capturedScreenCount = 2,
+                capturedChildScreenCount = 1,
+                skippedElementCount = 4,
+            )
+        )
+        val aborted = traversing.withAborted(
+            summary = CrawlRunSummary(
+                rootScreenName = "Home Screen",
+                rootFiles = files,
+                manifestFile = File("build/crawl-index.json"),
+                rootScrollStepCount = 3,
+                capturedScreenCount = 1,
+                capturedChildScreenCount = 0,
+                skippedElementCount = 2,
+            ),
+            message = "Partial save",
+        )
         val failed = waiting.withFailure("Boom")
 
         assertEquals(CrawlerPhase.LAUNCHING, launching.phase)
         assertEquals(CrawlerPhase.WAITING_FOR_TARGET_SCREEN, waiting.phase)
         assertEquals(CrawlerPhase.SCANNING_TARGET_SCREEN, scanning.phase)
+        assertEquals(CrawlerPhase.TRAVERSING_CHILD_SCREENS, traversing.phase)
         assertEquals(CrawlerPhase.CAPTURED, captured.phase)
         assertEquals("Home Screen", captured.screenName)
         assertEquals(3, captured.scrollStepCount)
+        assertEquals(2, captured.capturedScreenCount)
+        assertEquals(CrawlerPhase.ABORTED, aborted.phase)
+        assertTrue(aborted.partialResult)
         assertEquals(CrawlerPhase.FAILED, failed.phase)
         assertEquals("Boom", failed.failureMessage)
     }
@@ -846,6 +1310,37 @@ class CrawlerExportTest {
                     childIndexPath = listOf(0),
                     children = children.toList(),
                 )
+            ),
+        )
+    }
+
+    private fun toolbarBackRoot(vararg bodyChildren: AccessibilityNodeSnapshot): AccessibilityNodeSnapshot {
+        return rootNode(
+            children = listOf(
+                node(
+                    className = "androidx.appcompat.widget.Toolbar",
+                    viewIdResourceName = "com.example.target:id/toolbar",
+                    bounds = "[0,0][1080,180]",
+                    childIndexPath = listOf(0),
+                    children = listOf(
+                        node(
+                            className = "android.widget.ImageButton",
+                            viewIdResourceName = "com.example.target:id/back_button",
+                            contentDescription = "Navigate up",
+                            clickable = true,
+                            supportsClickAction = true,
+                            bounds = "[0,0][120,120]",
+                            childIndexPath = listOf(0, 0),
+                        ),
+                    ),
+                ),
+                node(
+                    className = "androidx.recyclerview.widget.RecyclerView",
+                    scrollable = true,
+                    bounds = "[0,180][1080,2200]",
+                    childIndexPath = listOf(1),
+                    children = bodyChildren.toList(),
+                ),
             ),
         )
     }

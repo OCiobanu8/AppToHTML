@@ -58,6 +58,8 @@ object AccessibilityTreeSnapshotter {
             clickable = node.isClickable,
             supportsClickAction = node.actionList.any { it.id == AccessibilityNodeInfo.ACTION_CLICK },
             scrollable = node.isScrollable,
+            checkable = node.isCheckable,
+            checked = checkedState(node),
             enabled = node.isEnabled,
             visibleToUser = node.isVisibleToUser,
             bounds = bounds.toShortString(),
@@ -65,6 +67,9 @@ object AccessibilityTreeSnapshotter {
             childIndexPath = childIndexPath,
         )
     }
+
+    @Suppress("DEPRECATION")
+    private fun checkedState(node: AccessibilityNodeInfo): Boolean = node.isChecked
 
     internal fun collectPressableElements(node: AccessibilityNodeSnapshot): List<PressableElement> {
         return collectPressableElements(node, ancestorChain = emptyList())
@@ -91,6 +96,9 @@ object AccessibilityTreeSnapshotter {
                     bounds = node.bounds,
                     className = node.className,
                     isListItem = isInsideListLikeContainer(ancestorChain),
+                    childIndexPath = node.childIndexPath,
+                    checkable = node.checkable,
+                    checked = node.checked,
                 )
             )
         } else {

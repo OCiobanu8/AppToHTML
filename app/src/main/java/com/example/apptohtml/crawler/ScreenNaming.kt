@@ -1,10 +1,13 @@
 package com.example.apptohtml.crawler
 
+import com.example.apptohtml.diagnostics.DiagnosticLogger
 import com.example.apptohtml.model.SelectedAppRef
 import java.text.Normalizer
 import java.util.Locale
 
 object ScreenNaming {
+    private const val minStrongTextTitleScore = 160
+    private val boundsRegex = Regex("\\[(\\d+),(\\d+)]\\[(\\d+),(\\d+)]")
     private val genericWindowNames = setOf(
         "android.view.View",
         "android.view.ViewGroup",
@@ -49,6 +52,17 @@ object ScreenNaming {
         "wrapper",
     )
     private val homepageMarkers = setOf("homepage", "dashboard", "landing")
+    private val strongTitleIdMarkers = setOf(
+        "action_bar",
+        "app_bar",
+        "collapsing",
+        "header",
+        "heading",
+        "pane_title",
+        "screen_title",
+        "toolbar",
+        "top_bar",
+    )
 
     fun deriveScreenName(
         eventClassName: String?,
@@ -66,9 +80,33 @@ object ScreenNaming {
             return eventName
         }
 
-        val resourceBasedName = root?.let { deriveNameFromVisibleResourceIds(it, selectedApp) }
-        if (!resourceBasedName.isNullOrBlank()) {
-            return resourceBasedName
+        val textCandidate = root?.let { currentRoot ->
+            runCatching { deriveNameFromVisibleText(currentRoot) }
+                .onFailure { error ->
+                    DiagnosticLogger.error("Visible-text screen naming failed; falling back to other naming strategies.", error)
+                }
+                .getOrNull()
+        }
+        val resourceCandidate = root?.let { currentRoot ->
+            runCatching { deriveNameFromVisibleResourceIds(currentRoot, selectedApp) }
+                .onFailure { error ->
+                    DiagnosticLogger.error("Resource-id screen naming failed; falling back to launcher/app naming.", error)
+                }
+                .getOrNull()
+        }
+
+        when {
+            textCandidate != null && (
+                resourceCandidate == null ||
+                    textCandidate.score >= minStrongTextTitleScore ||
+                    textCandidate.score > resourceCandidate.score
+                ) -> {
+                return textCandidate.title
+            }
+
+            resourceCandidate != null -> {
+                return resourceCandidate.title
+            }
         }
 
         val launcherName = selectedApp.launcherActivity
@@ -105,13 +143,18 @@ object ScreenNaming {
     }
 
     fun toFileBase(screenName: String): String {
-        val normalized = Normalizer.normalize(screenName, Normalizer.Form.NFD)
-            .replace("\\p{M}+".toRegex(), "")
-        val slug = normalized
-            .lowercase(Locale.US)
-            .replace("[^a-z0-9]+".toRegex(), "_")
-            .trim('_')
-        return slug.ifBlank { "captured_screen" }
+        return runCatching {
+            val normalized = Normalizer.normalize(screenName, Normalizer.Form.NFD)
+                .replace("\\p{M}+".toRegex(), "")
+            val slug = normalized
+                .lowercase(Locale.US)
+                .replace("[^a-z0-9]+".toRegex(), "_")
+                .trim('_')
+            slug.ifBlank { "captured_screen" }
+        }.getOrElse { error ->
+            DiagnosticLogger.error("Failed to slugify screen name '$screenName'. Falling back to a generic filename.", error)
+            "captured_screen"
+        }
     }
 
     private fun isUsefulWindowClassName(className: String): Boolean {
@@ -144,10 +187,20 @@ object ScreenNaming {
     private fun deriveNameFromVisibleResourceIds(
         root: AccessibilityNodeSnapshot,
         selectedApp: SelectedAppRef,
-    ): String? {
+    ): ResourceTitleCandidate? {
         val appTokens = tokenizeIdentifier(selectedApp.appName).toSet()
         val candidates = collectVisibleResourceIdCandidates(root, appTokens)
-        return candidates.maxByOrNull { it.score }?.title
+        return candidates.maxByOrNull { it.score }
+    }
+
+    private fun deriveNameFromVisibleText(root: AccessibilityNodeSnapshot): TextTitleCandidate? {
+        val candidates = collectVisibleTextCandidates(
+            node = root,
+            depth = 0,
+            insideScrollableAncestor = false,
+            insideClickableAncestor = false,
+        )
+        return candidates.maxByOrNull { it.score }
     }
 
     private fun collectVisibleResourceIdCandidates(
@@ -162,6 +215,39 @@ object ScreenNaming {
 
         return current + node.children.flatMap { child ->
             collectVisibleResourceIdCandidates(child, appTokens)
+        }
+    }
+
+    private fun collectVisibleTextCandidates(
+        node: AccessibilityNodeSnapshot,
+        depth: Int,
+        insideScrollableAncestor: Boolean,
+        insideClickableAncestor: Boolean,
+    ): List<TextTitleCandidate> {
+        val current = buildList {
+            if (node.visibleToUser) {
+                runCatching {
+                    buildTextCandidate(
+                        node = node,
+                        depth = depth,
+                        insideScrollableAncestor = insideScrollableAncestor,
+                        insideClickableAncestor = insideClickableAncestor,
+                    )
+                }.onFailure { error ->
+                    DiagnosticLogger.error("Skipping a text-title candidate because its node content could not be parsed safely.", error)
+                }.getOrNull()?.let(::add)
+            }
+        }
+
+        val nextInsideScrollable = insideScrollableAncestor || node.scrollable
+        val nextInsideClickable = insideClickableAncestor || node.clickable || node.supportsClickAction
+        return current + node.children.flatMap { child ->
+            collectVisibleTextCandidates(
+                node = child,
+                depth = depth + 1,
+                insideScrollableAncestor = nextInsideScrollable,
+                insideClickableAncestor = nextInsideClickable,
+            )
         }
     }
 
@@ -202,6 +288,64 @@ object ScreenNaming {
         return ResourceTitleCandidate(title = title, score = score)
     }
 
+    private fun buildTextCandidate(
+        node: AccessibilityNodeSnapshot,
+        depth: Int,
+        insideScrollableAncestor: Boolean,
+        insideClickableAncestor: Boolean,
+    ): TextTitleCandidate? {
+        val rawText = sequenceOf(
+            node.text?.trim(),
+            node.contentDescription?.trim()?.takeIf { !node.clickable && !node.supportsClickAction },
+        )
+            .filterNotNull()
+            .firstOrNull { it.isNotBlank() }
+            ?: return null
+
+        val title = rawText.replace("\\s+".toRegex(), " ").trim()
+        if (title.length < 3 || title.length > 80) return null
+
+        val wordCount = title.split(Regex("\\s+")).size
+        if (wordCount > 8) return null
+
+        val bounds = parseBounds(node.bounds) ?: return null
+        val viewIdSegment = node.viewIdResourceName
+            ?.substringAfterLast('/')
+            ?.lowercase(Locale.US)
+            .orEmpty()
+
+        var score = 0
+        if (!node.clickable && !node.supportsClickAction) score += 35
+        if (!insideClickableAncestor) score += 20
+        score += when {
+            insideScrollableAncestor -> -150
+            else -> 110
+        }
+        score += when {
+            bounds.top <= 200 -> 80
+            bounds.top <= 400 -> 35
+            bounds.top <= 800 -> 10
+            else -> -30
+        }
+        score += (bounds.height / 2).coerceIn(0, 40)
+        score += (40 - depth * 8).coerceAtLeast(0)
+        score += when {
+            wordCount in 1..4 -> 20
+            wordCount <= 6 -> 5
+            else -> -20
+        }
+        if (strongTitleIdMarkers.any { marker -> marker in viewIdSegment }) {
+            score += 180
+        } else if ("title" in viewIdSegment && !insideScrollableAncestor) {
+            score += 40
+        }
+        if (title.contains(':') || title.endsWith('.')) {
+            score -= 20
+        }
+
+        return TextTitleCandidate(title = title, score = score)
+    }
+
     private fun tokenizeIdentifier(value: String): List<String> {
         return value
             .replace(Regex("([a-z])([A-Z])"), "$1_$2")
@@ -210,7 +354,27 @@ object ScreenNaming {
             .filter { it.isNotBlank() }
     }
 
+    private fun parseBounds(bounds: String): ScreenBounds? {
+        val match = boundsRegex.matchEntire(bounds) ?: return null
+        val top = match.groupValues[2].toInt()
+        val bottom = match.groupValues[4].toInt()
+        return ScreenBounds(
+            top = top,
+            height = (bottom - top).coerceAtLeast(0),
+        )
+    }
+
+    private data class ScreenBounds(
+        val top: Int,
+        val height: Int,
+    )
+
     private data class ResourceTitleCandidate(
+        val title: String,
+        val score: Int,
+    )
+
+    private data class TextTitleCandidate(
         val title: String,
         val score: Int,
     )

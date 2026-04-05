@@ -49,9 +49,26 @@ object AccessibilityXmlSerializer {
         builder.append(""" clickable="${node.clickable}"""")
         builder.append(""" click-action="${node.supportsClickAction}"""")
         builder.append(""" scrollable="${node.scrollable}"""")
+        builder.append(""" checkable="${node.checkable}"""")
+        builder.append(""" checked="${node.checked}"""")
         builder.append(""" enabled="${node.enabled}"""")
         builder.append(""" visible-to-user="${node.visibleToUser}"""")
         builder.append(""" bounds="${escape(node.bounds)}"""")
+        if (node.synthetic) {
+            builder.append(""" synthetic="true"""")
+        }
+        if (node.merged) {
+            builder.append(""" merged="true"""")
+        }
+        if (node.syntheticScrollContainer) {
+            builder.append(""" synthetic-scroll-container="true"""")
+        }
+        if (node.firstSeenStep != null) {
+            builder.append(""" first-seen-step="${node.firstSeenStep}"""")
+        }
+        if (node.sourceStepIndices.isNotEmpty()) {
+            builder.append(""" source-step-indices="${escape(node.sourceStepIndices.joinToString(","))}"""")
+        }
         if (node.children.isEmpty()) {
             builder.append(" />")
             builder.append('\n')
@@ -92,6 +109,9 @@ object AccessibilityXmlSerializer {
             builder.append(""" class="${escape(element.className.orEmpty())}"""")
             builder.append(""" bounds="${escape(element.bounds)}"""")
             builder.append(""" list-item="${element.isListItem}"""")
+            builder.append(""" child-index-path="${escape(element.childIndexPath.joinToString("."))}"""")
+            builder.append(""" checkable="${element.checkable}"""")
+            builder.append(""" checked="${element.checked}"""")
             builder.append(""" first-seen-step="${element.firstSeenStep}"""")
             builder.append(" />")
             builder.append('\n')

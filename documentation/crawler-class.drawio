@@ -1,0 +1,144 @@
+<mxfile host="app.diagrams.net" modified="2026-04-05T00:00:00.000Z" agent="Codex" version="24.7.17">
+  <diagram id="crawler-class" name="Crawler Class Diagram">
+    <mxGraphModel dx="1400" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2200" pageHeight="1400" math="0" shadow="0">
+      <root>
+        <mxCell id="0" />
+        <mxCell id="1" parent="0" />
+        <mxCell id="t1" value="Crawler Class Diagram" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontStyle=1;fontSize=22;" vertex="1" parent="1">
+          <mxGeometry x="20" y="10" width="300" height="30" as="geometry" />
+        </mxCell>
+
+        <mxCell id="z1" value="Runtime orchestration" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8f9fa;strokeColor=#adb5bd;align=left;verticalAlign=top;spacing=10;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="20" y="60" width="1060" height="520" as="geometry" />
+        </mxCell>
+        <mxCell id="z2" value="Crawler state and models" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8f9fa;strokeColor=#adb5bd;align=left;verticalAlign=top;spacing=10;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="20" y="620" width="1060" height="700" as="geometry" />
+        </mxCell>
+        <mxCell id="z3" value="Persistence and output" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8f9fa;strokeColor=#adb5bd;align=left;verticalAlign=top;spacing=10;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1120" y="60" width="1020" height="1260" as="geometry" />
+        </mxCell>
+
+        <mxCell id="c1" value="AppToHtmlAccessibilityService&#xa;------------------------------&#xa;+ onAccessibilityEvent()&#xa;+ attemptCapture()&#xa;- orchestrates root + child crawl" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=10;spacingTop=8;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="60" y="120" width="300" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="c2" value="CrawlerSession&#xa;------------------------------&#xa;+ startCapture()&#xa;+ updateProgress()&#xa;+ completeCapture()&#xa;- publishes StateFlow&lt;CrawlerUiState&gt;" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=10;spacingTop=8;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="400" y="120" width="290" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="c3" value="ScrollScanCoordinator&#xa;------------------------------&#xa;+ scan()&#xa;+ rewindToTop()&#xa;+ rewindToEntryScreen()&#xa;+ moveToStep()" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=10;spacingTop=8;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="60" y="320" width="300" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="c4" value="AccessibilityTreeSnapshotter&#xa;------------------------------&#xa;+ captureRootSnapshot()&#xa;+ collectPressableElements()&#xa;+ findPrimaryScrollableNodePath()" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=10;spacingTop=8;fillColor=#fce5cd;strokeColor=#d79b00;" vertex="1" parent="1">
+          <mxGeometry x="400" y="320" width="320" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="c5" value="TraversalPlanner&#xa;------------------------------&#xa;+ planRootTraversal()&#xa;+ orderedElements()" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=10;spacingTop=8;fillColor=#d9ead3;strokeColor=#6aa84f;" vertex="1" parent="1">
+          <mxGeometry x="760" y="320" width="260" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="c6" value="AppLaunchHelper&#xa;------------------------------&#xa;+ launchSelectedApp()&#xa;+ appearsToBeRunning()" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=10;spacingTop=8;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="730" y="120" width="290" height="100" as="geometry" />
+        </mxCell>
+
+        <mxCell id="m1" value="CrawlerUiState&#xa;------------------------------&#xa;phase&#xa;statusMessage&#xa;output paths&#xa;counts / failureMessage" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=10;spacingTop=8;fillColor=#ffffff;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="60" y="680" width="250" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="m2" value="ScreenSnapshot&#xa;------------------------------&#xa;screenName&#xa;packageName&#xa;elements&#xa;xmlDump / mergedXmlDump&#xa;scrollStepCount" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=10;spacingTop=8;fillColor=#ffffff;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="350" y="680" width="300" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="m3" value="AccessibilityNodeSnapshot&#xa;------------------------------&#xa;className / packageName&#xa;text / contentDescription&#xa;clickable / scrollable&#xa;bounds&#xa;children[]" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=10;spacingTop=8;fillColor=#ffffff;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="690" y="680" width="320" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="m4" value="PressableElement&#xa;------------------------------&#xa;label&#xa;resourceId&#xa;bounds&#xa;childIndexPath&#xa;firstSeenStep" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=10;spacingTop=8;fillColor=#ffffff;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="60" y="910" width="250" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="m5" value="CrawlManifest&#xa;------------------------------&#xa;sessionId&#xa;status&#xa;rootScreenId&#xa;screens[] / edges[]" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=10;spacingTop=8;fillColor=#ffffff;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="350" y="910" width="250" height="120" as="geometry" />
+        </mxCell>
+        <mxCell id="m6" value="CrawlRunSummary&#xa;------------------------------&#xa;rootScreenName&#xa;rootFiles&#xa;manifestFile&#xa;captured counts" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=10;spacingTop=8;fillColor=#ffffff;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="640" y="910" width="250" height="120" as="geometry" />
+        </mxCell>
+
+        <mxCell id="p1" value="CaptureFileStore&#xa;------------------------------&#xa;+ createSession()&#xa;+ saveScreen()&#xa;+ rewriteScreenHtml()&#xa;+ saveManifest()" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=10;spacingTop=8;fillColor=#d9ead3;strokeColor=#6aa84f;" vertex="1" parent="1">
+          <mxGeometry x="1160" y="120" width="300" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="p2" value="CrawlRunTracker&#xa;------------------------------&#xa;+ addScreen()&#xa;+ addEdge()&#xa;+ buildManifest()&#xa;+ capturedScreenCount()" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=10;spacingTop=8;fillColor=#ead1dc;strokeColor=#c27ba0;" vertex="1" parent="1">
+          <mxGeometry x="1500" y="120" width="310" height="130" as="geometry" />
+        </mxCell>
+        <mxCell id="p3" value="HtmlRenderer&#xa;------------------------------&#xa;+ render()" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=10;spacingTop=8;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="1160" y="320" width="300" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="p4" value="CrawlManifestStore&#xa;------------------------------&#xa;+ write()&#xa;+ toJson()" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=10;spacingTop=8;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
+          <mxGeometry x="1500" y="320" width="310" height="90" as="geometry" />
+        </mxCell>
+        <mxCell id="p5" value="CapturedScreenFiles&#xa;------------------------------&#xa;htmlFile&#xa;xmlFile&#xa;mergedXmlFile" style="rounded=1;whiteSpace=wrap;html=1;align=left;spacingLeft=10;spacingTop=8;fillColor=#ffffff;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="1840" y="320" width="250" height="100" as="geometry" />
+        </mxCell>
+        <mxCell id="note" value="Root and child captures are persisted under a crawl session directory. Root HTML is rewritten as child links become available." style="rounded=1;whiteSpace=wrap;html=1;align=left;verticalAlign=top;spacing=10;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="1160" y="470" width="930" height="80" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e1" value="updates" style="endArrow=block;html=1;strokeWidth=2;" edge="1" parent="1" source="c1" target="c2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e2" value="launch / relaunch" style="endArrow=block;html=1;strokeWidth=2;" edge="1" parent="1" source="c1" target="c6">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e3" value="delegates" style="endArrow=block;html=1;strokeWidth=2;" edge="1" parent="1" source="c1" target="c3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e4" value="captures roots" style="endArrow=block;html=1;strokeWidth=2;" edge="1" parent="1" source="c1" target="c4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e5" value="selects child targets" style="endArrow=block;html=1;strokeWidth=2;" edge="1" parent="1" source="c1" target="c5">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e6" value="persists outputs" style="endArrow=block;html=1;strokeWidth=2;" edge="1" parent="1" source="c1" target="p1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" value="tracks crawl graph" style="endArrow=block;html=1;strokeWidth=2;" edge="1" parent="1" source="c1" target="p2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" value="publishes" style="endArrow=block;html=1;strokeWidth=2;" edge="1" parent="1" source="c2" target="m1">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e9" value="completes with" style="endArrow=block;html=1;strokeWidth=2;" edge="1" parent="1" source="c2" target="m6">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e10" value="uses" style="endArrow=block;html=1;strokeWidth=2;" edge="1" parent="1" source="c3" target="c4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e11" value="produces" style="endArrow=block;html=1;strokeWidth=2;" edge="1" parent="1" source="c3" target="m2">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e12" value="extracts" style="endArrow=block;html=1;strokeWidth=2;" edge="1" parent="1" source="c4" target="m4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e13" value="snapshots" style="endArrow=block;html=1;strokeWidth=2;" edge="1" parent="1" source="c4" target="m3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e14" value="filters / orders" style="endArrow=block;html=1;strokeWidth=2;" edge="1" parent="1" source="c5" target="m4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e15" value="renders html" style="endArrow=block;html=1;strokeWidth=2;" edge="1" parent="1" source="p1" target="p3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e16" value="writes manifest" style="endArrow=block;html=1;strokeWidth=2;" edge="1" parent="1" source="p1" target="p4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e17" value="returns" style="endArrow=block;html=1;strokeWidth=2;" edge="1" parent="1" source="p1" target="p5">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e18" value="builds" style="endArrow=block;html=1;strokeWidth=2;" edge="1" parent="1" source="p2" target="m5">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e19" value="captures *" style="endArrow=block;html=1;strokeWidth=2;dashed=1;" edge="1" parent="1" source="m2" target="m4">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e20" value="merged roots / steps" style="endArrow=block;html=1;strokeWidth=2;dashed=1;" edge="1" parent="1" source="m2" target="m3">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e21" value="references" style="endArrow=block;html=1;strokeWidth=2;" edge="1" parent="1" source="m6" target="p5">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>

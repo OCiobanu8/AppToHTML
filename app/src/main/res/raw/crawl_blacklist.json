@@ -1,0 +1,31 @@
+{
+  "labelTokens": [
+    "search",
+    "install",
+    "remove",
+    "uninstall",
+    "delete",
+    "sign out",
+    "logout",
+    "log out",
+    "buy",
+    "subscribe",
+    "payment"
+  ],
+  "resourceIdTokens": [
+    "search",
+    "install",
+    "remove",
+    "uninstall",
+    "delete",
+    "toggle",
+    "switch",
+    "checkbox"
+  ],
+  "classNameTokens": [
+    "switch",
+    "checkbox",
+    "togglebutton"
+  ],
+  "skipCheckable": true
+}

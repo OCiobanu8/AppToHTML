@@ -6,6 +6,7 @@ internal class ScrollScanCoordinator(
     private val maxAdditionalScrolls: Int = 8,
     private val maxViewportSettleCaptures: Int = 2,
     private val maxScrollToTopAttempts: Int = 12,
+    private val maxBackToEntryAttempts: Int = 12,
 ) {
     suspend fun scan(
         selectedApp: SelectedAppRef,
@@ -17,7 +18,7 @@ internal class ScrollScanCoordinator(
         onProgress: (String) -> Unit = {},
     ): ScreenSnapshot {
         var currentRoot = settleViewport(initialRoot, captureCurrentRoot)
-        currentRoot = scrollToTop(
+        currentRoot = rewindToTop(
             selectedApp = selectedApp,
             initialRoot = currentRoot,
             tryScrollBackward = tryScrollBackward,
@@ -47,7 +48,7 @@ internal class ScrollScanCoordinator(
 
             val nextRoot = captureCurrentRoot() ?: break
             val settledRoot = settleViewport(nextRoot, captureCurrentRoot)
-            val viewportChanged = viewportFingerprint(settledRoot) != viewportFingerprint(currentRoot)
+            val viewportChanged = fingerprint(settledRoot) != fingerprint(currentRoot)
             currentRoot = settledRoot
 
             if (!viewportChanged) {
@@ -68,7 +69,7 @@ internal class ScrollScanCoordinator(
         return accumulator.build()
     }
 
-    private suspend fun scrollToTop(
+    suspend fun rewindToTop(
         selectedApp: SelectedAppRef,
         initialRoot: AccessibilityNodeSnapshot,
         tryScrollBackward: (List<Int>) -> Boolean,
@@ -91,7 +92,7 @@ internal class ScrollScanCoordinator(
 
             val nextRoot = captureCurrentRoot() ?: return currentRoot
             val settledRoot = settleViewport(nextRoot, captureCurrentRoot)
-            if (viewportFingerprint(settledRoot) == viewportFingerprint(currentRoot)) {
+            if (fingerprint(settledRoot) == fingerprint(currentRoot)) {
                 return currentRoot
             }
             currentRoot = settledRoot
@@ -100,7 +101,64 @@ internal class ScrollScanCoordinator(
         return currentRoot
     }
 
-    private suspend fun settleViewport(
+    suspend fun rewindToEntryScreen(
+        initialRoot: AccessibilityNodeSnapshot,
+        targetPackageName: String,
+        tryBack: () -> Boolean,
+        captureCurrentRoot: suspend () -> AccessibilityNodeSnapshot?,
+        onProgress: (String) -> Unit = {},
+    ): EntryScreenResetResult {
+        var currentRoot = initialRoot
+        var backAttempts = 0
+
+        while (true) {
+            if (!EntryScreenBackAffordanceDetector.hasVisibleInAppBackAffordance(currentRoot)) {
+                onProgress("Resetting to the first screen. No visible in-app back button was found.")
+                return EntryScreenResetResult(
+                    root = currentRoot,
+                    stopReason = EntryScreenResetStopReason.NO_BACK_AFFORDANCE,
+                )
+            }
+
+            if (backAttempts >= maxBackToEntryAttempts) {
+                return EntryScreenResetResult(
+                    root = currentRoot,
+                    stopReason = EntryScreenResetStopReason.MAX_ATTEMPTS_REACHED,
+                )
+            }
+
+            onProgress("Resetting to the first screen. Back attempt ${backAttempts + 1} of $maxBackToEntryAttempts.")
+
+            if (!tryBack()) {
+                return EntryScreenResetResult(
+                    root = currentRoot,
+                    stopReason = EntryScreenResetStopReason.BACK_ACTION_FAILED,
+                )
+            }
+            backAttempts += 1
+
+            val nextRoot = captureCurrentRoot()
+                ?: return EntryScreenResetResult(
+                    root = currentRoot,
+                    stopReason = EntryScreenResetStopReason.LEFT_TARGET_APP,
+                )
+            if (nextRoot.packageName != targetPackageName) {
+                return EntryScreenResetResult(
+                    root = currentRoot,
+                    stopReason = EntryScreenResetStopReason.LEFT_TARGET_APP,
+                )
+            }
+
+            val settledRoot = settleViewport(nextRoot) {
+                captureCurrentRoot()?.takeIf { candidate ->
+                    candidate.packageName == targetPackageName
+                }
+            }
+            currentRoot = settledRoot
+        }
+    }
+
+    suspend fun settleViewport(
         initialRoot: AccessibilityNodeSnapshot,
         captureCurrentRoot: suspend () -> AccessibilityNodeSnapshot?,
     ): AccessibilityNodeSnapshot {
@@ -128,13 +186,44 @@ internal class ScrollScanCoordinator(
         return bestRoot
     }
 
+    suspend fun moveToStep(
+        selectedApp: SelectedAppRef,
+        initialRoot: AccessibilityNodeSnapshot,
+        targetStepIndex: Int,
+        tryScrollForward: (List<Int>) -> Boolean,
+        captureCurrentRoot: suspend () -> AccessibilityNodeSnapshot?,
+        onProgress: (String) -> Unit = {},
+    ): AccessibilityNodeSnapshot? {
+        var currentRoot = initialRoot
+        if (targetStepIndex <= 0) {
+            return currentRoot
+        }
+
+        repeat(targetStepIndex) { step ->
+            val scrollPath = AccessibilityTreeSnapshotter.findPrimaryScrollableNodePath(
+                root = currentRoot,
+                targetPackageName = selectedApp.packageName,
+            ) ?: return null
+
+            onProgress("Preparing child traversal. Replaying root scroll step ${step + 1} of $targetStepIndex.")
+            if (!tryScrollForward(scrollPath)) {
+                return null
+            }
+
+            val nextRoot = captureCurrentRoot() ?: return null
+            currentRoot = settleViewport(nextRoot, captureCurrentRoot)
+        }
+
+        return currentRoot
+    }
+
     private fun visiblePressableCount(root: AccessibilityNodeSnapshot): Int {
         return AccessibilityTreeSnapshotter.collectPressableElements(root)
             .distinctBy(::mergedElementFingerprint)
             .size
     }
 
-    private fun viewportFingerprint(root: AccessibilityNodeSnapshot): String {
+    fun fingerprint(root: AccessibilityNodeSnapshot): String {
         val elements = AccessibilityTreeSnapshotter.collectPressableElements(root)
             .distinctBy(::mergedElementFingerprint)
             .map { element ->
@@ -163,8 +252,122 @@ internal class ScrollScanCoordinator(
             element.resourceId.orEmpty(),
             element.className.orEmpty(),
             element.isListItem.toString(),
+            element.checkable.toString(),
         ).joinToString("|")
     }
+}
+
+internal data class EntryScreenResetResult(
+    val root: AccessibilityNodeSnapshot,
+    val stopReason: EntryScreenResetStopReason,
+)
+
+internal enum class EntryScreenResetStopReason {
+    NO_BACK_AFFORDANCE,
+    BACK_ACTION_FAILED,
+    LEFT_TARGET_APP,
+    MAX_ATTEMPTS_REACHED,
+}
+
+internal object EntryScreenBackAffordanceDetector {
+    fun hasVisibleInAppBackAffordance(root: AccessibilityNodeSnapshot): Boolean {
+        val rootBounds = parseBounds(root.bounds)
+        return hasVisibleInAppBackAffordance(root, ancestorChain = emptyList(), rootBounds = rootBounds)
+    }
+
+    private fun hasVisibleInAppBackAffordance(
+        node: AccessibilityNodeSnapshot,
+        ancestorChain: List<AccessibilityNodeSnapshot>,
+        rootBounds: ParsedBounds?,
+    ): Boolean {
+        if (isLikelyInAppBackAffordance(node, ancestorChain, rootBounds)) {
+            return true
+        }
+        val nextAncestors = ancestorChain + node
+        return node.children.any { child ->
+            hasVisibleInAppBackAffordance(child, nextAncestors, rootBounds)
+        }
+    }
+
+    private fun isLikelyInAppBackAffordance(
+        node: AccessibilityNodeSnapshot,
+        ancestorChain: List<AccessibilityNodeSnapshot>,
+        rootBounds: ParsedBounds?,
+    ): Boolean {
+        if (!node.visibleToUser || !node.enabled || (!node.clickable && !node.supportsClickAction)) {
+            return false
+        }
+
+        val normalizedLabel = normalize(node.contentDescription ?: node.text)
+        val normalizedResourceId = normalize(node.viewIdResourceName)
+        val hasResourceSignal = normalizedResourceId.contains("back") ||
+            normalizedResourceId.contains("navigate up") ||
+            normalizedResourceId.contains("navigateup") ||
+            normalizedResourceId.contains("up button") ||
+            normalizedResourceId.contains("upbutton") ||
+            normalizedResourceId.contains("nav button") ||
+            normalizedResourceId.contains("navbutton")
+        val hasStrongLabelSignal = normalizedLabel == "navigate up" ||
+            normalizedLabel == "go back" ||
+            normalizedLabel == "navigate back"
+        val hasWeakLabelSignal = normalizedLabel == "back" || normalizedLabel == "up"
+        if (!hasResourceSignal && !hasStrongLabelSignal && !hasWeakLabelSignal) {
+            return false
+        }
+
+        val toolbarContext = (ancestorChain + node).any(::isToolbarLikeNode)
+        val topAligned = parseBounds(node.bounds)?.top?.let { top ->
+            val rootTop = rootBounds?.top ?: 0
+            top <= rootTop + 300
+        } ?: false
+        if (!toolbarContext && !topAligned) {
+            return false
+        }
+
+        return hasResourceSignal || hasStrongLabelSignal || (hasWeakLabelSignal && toolbarContext)
+    }
+
+    private fun isToolbarLikeNode(node: AccessibilityNodeSnapshot): Boolean {
+        val className = normalize(node.className)
+        val resourceId = normalize(node.viewIdResourceName)
+        return className.contains("toolbar") ||
+            className.contains("actionbar") ||
+            className.contains("appbar") ||
+            className.contains("topappbar") ||
+            resourceId.contains("toolbar") ||
+            resourceId.contains("action bar") ||
+            resourceId.contains("actionbar") ||
+            resourceId.contains("app bar") ||
+            resourceId.contains("appbar")
+    }
+
+    private fun normalize(value: String?): String {
+        return value
+            ?.substringAfterLast('/')
+            ?.lowercase()
+            ?.replace(Regex("[^a-z0-9]+"), " ")
+            ?.trim()
+            .orEmpty()
+    }
+
+    private fun parseBounds(bounds: String): ParsedBounds? {
+        val match = BOUNDS_REGEX.matchEntire(bounds) ?: return null
+        return ParsedBounds(
+            left = match.groupValues[1].toInt(),
+            top = match.groupValues[2].toInt(),
+            right = match.groupValues[3].toInt(),
+            bottom = match.groupValues[4].toInt(),
+        )
+    }
+
+    private data class ParsedBounds(
+        val left: Int,
+        val top: Int,
+        val right: Int,
+        val bottom: Int,
+    )
+
+    private val BOUNDS_REGEX = Regex("""\[(\d+),(\d+)]\[(\d+),(\d+)]""")
 }
 
 internal class ScrollScanAccumulator(
@@ -177,7 +380,7 @@ internal class ScrollScanAccumulator(
         selectedApp = selectedApp,
         root = initialRoot,
     )
-    private val packageName = selectedApp.packageName
+    private val packageName = initialRoot.packageName ?: selectedApp.packageName
     private val mergedElements = LinkedHashMap<MergedElementKey, PressableElement>()
     private val stepSnapshots = mutableListOf<ScrollCaptureStep>()
 
@@ -210,7 +413,7 @@ internal class ScrollScanAccumulator(
     }
 
     fun build(): ScreenSnapshot {
-        val snapshot = ScreenSnapshot(
+        val baseSnapshot = ScreenSnapshot(
             screenName = screenName,
             packageName = packageName,
             elements = mergedElements.values.toList(),
@@ -218,7 +421,20 @@ internal class ScrollScanAccumulator(
             stepSnapshots = stepSnapshots.toList(),
             scrollStepCount = stepSnapshots.size.coerceAtLeast(1),
         )
-        return snapshot.copy(xmlDump = AccessibilityXmlSerializer.serialize(snapshot))
+        val mergedRoot = SyntheticAccessibilityTreeBuilder.build(baseSnapshot)
+        val xmlDump = AccessibilityXmlSerializer.serialize(baseSnapshot)
+        val mergedXmlDump = mergedRoot?.let { root ->
+            AccessibilityXmlSerializer.serialize(
+                screenName = screenName,
+                packageName = packageName,
+                root = root,
+            )
+        }
+        return baseSnapshot.copy(
+            xmlDump = xmlDump,
+            mergedRoot = mergedRoot,
+            mergedXmlDump = mergedXmlDump,
+        )
     }
 
     private fun toMergedKey(element: PressableElement): MergedElementKey {
@@ -227,6 +443,8 @@ internal class ScrollScanAccumulator(
             resourceId = element.resourceId,
             className = element.className,
             isListItem = element.isListItem,
+            checkable = element.checkable,
+            checked = element.checked,
         )
     }
 
@@ -235,5 +453,7 @@ internal class ScrollScanAccumulator(
         val resourceId: String?,
         val className: String?,
         val isListItem: Boolean,
+        val checkable: Boolean,
+        val checked: Boolean,
     )
 }

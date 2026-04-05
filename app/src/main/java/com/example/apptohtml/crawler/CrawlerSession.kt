@@ -63,9 +63,9 @@ object CrawlerSession {
         }
 
         val waitingMessage = if (launchResult.alreadyRunning) {
-            "Relaunched the selected app. Waiting for the first screen."
+            "Target app brought to the foreground. Waiting to inspect the visible screen."
         } else {
-            "Selected app launched. Waiting for the first screen."
+            "Selected app launched. Waiting to inspect the visible screen."
         }
         _uiState.value = _uiState.value.withWaiting(waitingMessage)
 
@@ -98,6 +98,7 @@ object CrawlerSession {
         }
 
         _uiState.value = current.withScanning(message)
+        timeoutJob?.cancel()
     }
 
     @Synchronized
@@ -107,28 +108,49 @@ object CrawlerSession {
             current.requestId != requestId ||
             (
                 current.phase != CrawlerPhase.WAITING_FOR_TARGET_SCREEN &&
-                    current.phase != CrawlerPhase.SCANNING_TARGET_SCREEN
+                    current.phase != CrawlerPhase.SCANNING_TARGET_SCREEN &&
+                    current.phase != CrawlerPhase.TRAVERSING_CHILD_SCREENS
                 )
         ) {
             return
         }
 
-        _uiState.value = current.withScanning(message)
+        _uiState.value = if (current.phase == CrawlerPhase.TRAVERSING_CHILD_SCREENS) {
+            current.withTraversingChildren(message)
+        } else {
+            current.withScanning(message)
+        }
+    }
+
+    @Synchronized
+    fun beginTraversingChildren(requestId: Long, message: String) {
+        val current = _uiState.value
+        if (
+            current.requestId != requestId ||
+            (
+                current.phase != CrawlerPhase.SCANNING_TARGET_SCREEN &&
+                    current.phase != CrawlerPhase.TRAVERSING_CHILD_SCREENS
+                )
+        ) {
+            return
+        }
+
+        timeoutJob?.cancel()
+        _uiState.value = current.withTraversingChildren(message)
     }
 
     @Synchronized
     fun completeCapture(
         requestId: Long,
-        screenName: String,
-        files: CapturedScreenFiles,
-        scrollStepCount: Int,
+        summary: CrawlRunSummary,
     ) {
         val current = _uiState.value
         if (
             current.requestId != requestId ||
             (
                 current.phase != CrawlerPhase.WAITING_FOR_TARGET_SCREEN &&
-                    current.phase != CrawlerPhase.SCANNING_TARGET_SCREEN
+                    current.phase != CrawlerPhase.SCANNING_TARGET_SCREEN &&
+                    current.phase != CrawlerPhase.TRAVERSING_CHILD_SCREENS
                 )
         ) {
             return
@@ -136,9 +158,33 @@ object CrawlerSession {
 
         timeoutJob?.cancel()
         DiagnosticLogger.log(
-            "Captured first screen '$screenName' for ${current.selectedApp?.packageName} across $scrollStepCount step(s); html=${files.htmlFile.absolutePath}; xml=${files.xmlFile.absolutePath}"
+            "Captured crawl rooted at '${summary.rootScreenName}' for ${current.selectedApp?.packageName}; screens=${summary.capturedScreenCount}; manifest=${summary.manifestFile.absolutePath}"
         )
-        _uiState.value = current.withCaptured(screenName, files, scrollStepCount)
+        _uiState.value = current.withCaptured(summary)
+        returnToApp()
+    }
+
+    @Synchronized
+    fun abortCapture(
+        requestId: Long,
+        summary: CrawlRunSummary,
+        message: String,
+    ) {
+        val current = _uiState.value
+        if (
+            current.requestId != requestId ||
+            (
+                current.phase != CrawlerPhase.WAITING_FOR_TARGET_SCREEN &&
+                    current.phase != CrawlerPhase.SCANNING_TARGET_SCREEN &&
+                    current.phase != CrawlerPhase.TRAVERSING_CHILD_SCREENS
+                )
+        ) {
+            return
+        }
+
+        timeoutJob?.cancel()
+        DiagnosticLogger.error("Crawl aborted after partial save: $message")
+        _uiState.value = current.withAborted(summary, message)
         returnToApp()
     }
 
