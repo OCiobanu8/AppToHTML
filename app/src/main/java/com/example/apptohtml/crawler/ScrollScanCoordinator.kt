@@ -413,7 +413,7 @@ internal class ScrollScanAccumulator(
     }
 
     fun build(): ScreenSnapshot {
-        val snapshot = ScreenSnapshot(
+        val baseSnapshot = ScreenSnapshot(
             screenName = screenName,
             packageName = packageName,
             elements = mergedElements.values.toList(),
@@ -421,7 +421,20 @@ internal class ScrollScanAccumulator(
             stepSnapshots = stepSnapshots.toList(),
             scrollStepCount = stepSnapshots.size.coerceAtLeast(1),
         )
-        return snapshot.copy(xmlDump = AccessibilityXmlSerializer.serialize(snapshot))
+        val mergedRoot = SyntheticAccessibilityTreeBuilder.build(baseSnapshot)
+        val xmlDump = AccessibilityXmlSerializer.serialize(baseSnapshot)
+        val mergedXmlDump = mergedRoot?.let { root ->
+            AccessibilityXmlSerializer.serialize(
+                screenName = screenName,
+                packageName = packageName,
+                root = root,
+            )
+        }
+        return baseSnapshot.copy(
+            xmlDump = xmlDump,
+            mergedRoot = mergedRoot,
+            mergedXmlDump = mergedXmlDump,
+        )
     }
 
     private fun toMergedKey(element: PressableElement): MergedElementKey {

@@ -30,6 +30,7 @@ object CrawlManifestStore {
                     appendLine("""      "screenName": "${escape(screen.screenName)}",""")
                     appendLine("""      "htmlPath": "${escape(screen.htmlPath)}",""")
                     appendLine("""      "xmlPath": "${escape(screen.xmlPath)}",""")
+                    appendLine("""      "mergedXmlPath": ${quotedOrNull(screen.mergedXmlPath)},""")
                     appendLine("""      "scrollStepCount": ${screen.scrollStepCount},""")
                     appendLine("""      "parentScreenId": ${quotedOrNull(screen.parentScreenId)},""")
                     appendLine("""      "triggerLabel": ${quotedOrNull(screen.triggerLabel)},""")

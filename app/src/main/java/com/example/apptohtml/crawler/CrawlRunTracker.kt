@@ -26,6 +26,7 @@ class CrawlRunTracker(
             screenName = snapshot.screenName,
             htmlPath = files.htmlFile.absolutePath,
             xmlPath = files.xmlFile.absolutePath,
+            mergedXmlPath = files.mergedXmlFile?.absolutePath,
             scrollStepCount = snapshot.scrollStepCount,
             parentScreenId = parentScreenId,
             triggerLabel = triggerElement?.label,

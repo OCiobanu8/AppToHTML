@@ -211,6 +211,9 @@ private fun AppToHtmlScreen(
                 }
                 Text("Saved root HTML: ${crawlerState.htmlPath}")
                 Text("Saved root XML: ${crawlerState.xmlPath}")
+                crawlerState.mergedXmlPath?.let { path ->
+                    Text("Saved merged accessibility XML: $path")
+                }
                 Text("Saved crawl index: ${crawlerState.crawlIndexPath}")
             }
 
@@ -227,6 +230,9 @@ private fun AppToHtmlScreen(
                 }
                 Text("Saved root HTML: ${crawlerState.htmlPath}")
                 Text("Saved root XML: ${crawlerState.xmlPath}")
+                crawlerState.mergedXmlPath?.let { path ->
+                    Text("Saved merged accessibility XML: $path")
+                }
                 Text("Saved crawl index: ${crawlerState.crawlIndexPath}")
             }
 

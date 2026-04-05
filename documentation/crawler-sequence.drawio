@@ -1,67 +1,96 @@
-<mxfile host="app.diagrams.net" modified="2026-03-30T00:00:00.000Z" agent="Codex" version="24.7.17">
+<mxfile host="app.diagrams.net" modified="2026-04-05T00:00:00.000Z" agent="Codex" version="24.7.17">
   <diagram id="crawler-sequence" name="Crawler Sequence">
-    <mxGraphModel dx="1280" dy="720" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1800" pageHeight="1000" math="0" shadow="0">
+    <mxGraphModel dx="1400" dy="800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2200" pageHeight="1200" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
-        <mxCell id="a" value="User / UI" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;" vertex="1" parent="1">
-          <mxGeometry x="60" y="40" width="140" height="60" as="geometry" />
+        <mxCell id="t1" value="Crawler Sequence Diagram" style="text;html=1;strokeColor=none;fillColor=none;align=left;fontStyle=1;fontSize=22;" vertex="1" parent="1">
+          <mxGeometry x="40" y="10" width="320" height="30" as="geometry" />
         </mxCell>
-        <mxCell id="b" value="CrawlerSession" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
-          <mxGeometry x="260" y="40" width="160" height="60" as="geometry" />
+        <mxCell id="p1" value="User / UI" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="40" y="60" width="160" height="50" as="geometry" />
         </mxCell>
-        <mxCell id="c" value="AppLaunchHelper" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
-          <mxGeometry x="480" y="40" width="160" height="60" as="geometry" />
+        <mxCell id="p2" value="CrawlerSession" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="260" y="60" width="170" height="50" as="geometry" />
         </mxCell>
-        <mxCell id="d" value="Accessibility Service" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
-          <mxGeometry x="700" y="40" width="180" height="60" as="geometry" />
+        <mxCell id="p3" value="AppLaunchHelper" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="490" y="60" width="170" height="50" as="geometry" />
         </mxCell>
-        <mxCell id="e" value="ScrollScanCoordinator" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;" vertex="1" parent="1">
-          <mxGeometry x="940" y="40" width="190" height="60" as="geometry" />
+        <mxCell id="p4" value="Accessibility Service" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="720" y="60" width="180" height="50" as="geometry" />
         </mxCell>
-        <mxCell id="f" value="Export Layer" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffe6cc;strokeColor=#d79b00;" vertex="1" parent="1">
-          <mxGeometry x="1190" y="40" width="160" height="60" as="geometry" />
+        <mxCell id="p5" value="ScrollScanCoordinator" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="960" y="60" width="190" height="50" as="geometry" />
         </mxCell>
-        <mxCell id="g" value="Target App" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="1">
-          <mxGeometry x="1410" y="40" width="140" height="60" as="geometry" />
+        <mxCell id="p6" value="Traversal + Persistence" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d9ead3;strokeColor=#6aa84f;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1210" y="60" width="200" height="50" as="geometry" />
         </mxCell>
+        <mxCell id="p7" value="Tracker / Manifest" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ead1dc;strokeColor=#c27ba0;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1470" y="60" width="180" height="50" as="geometry" />
+        </mxCell>
+        <mxCell id="p8" value="Target App / Android" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="1710" y="60" width="180" height="50" as="geometry" />
+        </mxCell>
+
         <mxCell id="s1" value="1. Start capture" style="shape=process;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;" vertex="1" parent="1">
-          <mxGeometry x="60" y="160" width="180" height="50" as="geometry" />
+          <mxGeometry x="40" y="170" width="170" height="44" as="geometry" />
         </mxCell>
-        <mxCell id="s2" value="2. Launch selected app" style="shape=process;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;" vertex="1" parent="1">
-          <mxGeometry x="300" y="160" width="190" height="50" as="geometry" />
+        <mxCell id="s2" value="2. startCapture()&#xa;set requestId + waiting state" style="shape=process;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="250" y="170" width="190" height="56" as="geometry" />
         </mxCell>
-        <mxCell id="s3" value="3. Accessibility events arrive" style="shape=process;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;" vertex="1" parent="1">
-          <mxGeometry x="560" y="160" width="210" height="50" as="geometry" />
+        <mxCell id="s3" value="3. launchSelectedApp()" style="shape=process;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="500" y="250" width="160" height="44" as="geometry" />
         </mxCell>
-        <mxCell id="s4" value="4. Settle viewport and scroll to top" style="shape=process;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;" vertex="1" parent="1">
-          <mxGeometry x="840" y="160" width="220" height="50" as="geometry" />
+        <mxCell id="s4" value="4. startActivity()&#xa;target app moves foreground" style="shape=process;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="1700" y="250" width="190" height="56" as="geometry" />
         </mxCell>
-        <mxCell id="s5" value="5. Crawl downward while viewport changes" style="shape=process;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;" vertex="1" parent="1">
-          <mxGeometry x="840" y="260" width="250" height="50" as="geometry" />
+        <mxCell id="s5" value="5. onAccessibilityEvent()&#xa;debounced attemptCapture()" style="shape=process;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="720" y="340" width="190" height="56" as="geometry" />
         </mxCell>
-        <mxCell id="s6" value="6. Render HTML + XML" style="shape=process;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;" vertex="1" parent="1">
-          <mxGeometry x="1160" y="260" width="180" height="50" as="geometry" />
+        <mxCell id="s6" value="6. rewindToEntryScreen()&#xa;then scan() root screen" style="shape=process;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="960" y="430" width="210" height="56" as="geometry" />
         </mxCell>
-        <mxCell id="s7" value="7. Return to AppToHTML" style="shape=process;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;" vertex="1" parent="1">
-          <mxGeometry x="1160" y="360" width="180" height="50" as="geometry" />
+        <mxCell id="s7" value="7. createSession()&#xa;save root screen&#xa;plan traversal" style="shape=process;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="1210" y="520" width="210" height="72" as="geometry" />
         </mxCell>
-        <mxCell id="x1" value="" style="endArrow=block;html=1;" edge="1" parent="1" source="s1" target="s2">
+        <mxCell id="s8" value="8. add root screen + skipped edges&#xa;save in-progress manifest" style="shape=process;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="1460" y="610" width="210" height="56" as="geometry" />
+        </mxCell>
+        <mxCell id="loop" value="Loop over eligible root elements: rewind to top, replay root scroll step, click, detect navigation, scan child screen, save child output, rewrite root HTML links, add edge status, and recover back to the original root screen." style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8f9fa;strokeColor=#7f8c8d;dashed=1;align=left;verticalAlign=top;spacing=10;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="940" y="720" width="980" height="140" as="geometry" />
+        </mxCell>
+        <mxCell id="s9" value="9. completeCapture(summary)&#xa;or abort/fail terminal state" style="shape=process;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="250" y="930" width="200" height="56" as="geometry" />
+        </mxCell>
+        <mxCell id="s10" value="10. UI observes final state&#xa;AppToHTML returns foreground" style="shape=process;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="40" y="1020" width="190" height="56" as="geometry" />
+        </mxCell>
+
+        <mxCell id="e1" value="" style="endArrow=block;html=1;strokeWidth=2;" edge="1" parent="1" source="s1" target="s2">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="x2" value="" style="endArrow=block;html=1;" edge="1" parent="1" source="s2" target="s3">
+        <mxCell id="e2" value="" style="endArrow=block;html=1;strokeWidth=2;" edge="1" parent="1" source="s2" target="s3">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="x3" value="" style="endArrow=block;html=1;" edge="1" parent="1" source="s3" target="s4">
+        <mxCell id="e3" value="" style="endArrow=block;html=1;strokeWidth=2;" edge="1" parent="1" source="s3" target="s4">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="x4" value="" style="endArrow=block;html=1;" edge="1" parent="1" source="s4" target="s5">
+        <mxCell id="e4" value="window/content events" style="endArrow=block;html=1;strokeWidth=2;" edge="1" parent="1" source="s4" target="s5">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="x5" value="" style="endArrow=block;html=1;" edge="1" parent="1" source="s5" target="s6">
+        <mxCell id="e5" value="" style="endArrow=block;html=1;strokeWidth=2;" edge="1" parent="1" source="s5" target="s6">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="x6" value="" style="endArrow=block;html=1;" edge="1" parent="1" source="s6" target="s7">
+        <mxCell id="e6" value="" style="endArrow=block;html=1;strokeWidth=2;" edge="1" parent="1" source="s6" target="s7">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e7" value="" style="endArrow=block;html=1;strokeWidth=2;" edge="1" parent="1" source="s7" target="s8">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e8" value="completed / partial abort / failed" style="endArrow=block;html=1;strokeWidth=2;" edge="1" parent="1" source="loop" target="s9">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e9" value="" style="endArrow=block;html=1;strokeWidth=2;" edge="1" parent="1" source="s9" target="s10">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
       </root>

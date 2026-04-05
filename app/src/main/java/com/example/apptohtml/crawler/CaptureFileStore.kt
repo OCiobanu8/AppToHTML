@@ -9,6 +9,7 @@ import java.util.Locale
 data class CapturedScreenFiles(
     val htmlFile: File,
     val xmlFile: File,
+    val mergedXmlFile: File? = null,
 )
 
 object CaptureFileStore {
@@ -55,13 +56,18 @@ object CaptureFileStore {
         )
         val htmlFile = File(session.directory, "$baseName.html")
         val xmlFile = File(session.directory, "$baseName.xml")
+        val mergedXmlFile = snapshot.mergedXmlDump?.let {
+            File(session.directory, "${baseName}_merged_accessibility.xml")
+        }
 
         htmlFile.writeText(HtmlRenderer.render(snapshot, resolvedChildLinks), Charsets.UTF_8)
         xmlFile.writeText(snapshot.xmlDump, Charsets.UTF_8)
+        mergedXmlFile?.writeText(snapshot.mergedXmlDump.orEmpty(), Charsets.UTF_8)
 
         return CapturedScreenFiles(
             htmlFile = htmlFile,
             xmlFile = xmlFile,
+            mergedXmlFile = mergedXmlFile,
         )
     }
 
@@ -91,13 +97,18 @@ object CaptureFileStore {
         val baseName = ScreenNaming.toFileBase(snapshot.screenName)
         val htmlFile = File(baseDir, "$baseName.html")
         val xmlFile = File(baseDir, "$baseName.xml")
+        val mergedXmlFile = snapshot.mergedXmlDump?.let {
+            File(baseDir, "${baseName}_merged_accessibility.xml")
+        }
 
         htmlFile.writeText(HtmlRenderer.render(snapshot, resolvedChildLinks), Charsets.UTF_8)
         xmlFile.writeText(snapshot.xmlDump, Charsets.UTF_8)
+        mergedXmlFile?.writeText(snapshot.mergedXmlDump.orEmpty(), Charsets.UTF_8)
 
         return CapturedScreenFiles(
             htmlFile = htmlFile,
             xmlFile = xmlFile,
+            mergedXmlFile = mergedXmlFile,
         )
     }
 

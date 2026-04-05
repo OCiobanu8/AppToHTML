@@ -182,11 +182,14 @@ class CrawlerTraversalTest {
 
             assertTrue(rootFiles.htmlFile.exists())
             assertTrue(rootFiles.xmlFile.exists())
+            assertTrue(rootFiles.mergedXmlFile?.exists() == true)
             assertTrue(childFiles.htmlFile.exists())
             assertTrue(childFiles.xmlFile.exists())
+            assertTrue(childFiles.mergedXmlFile?.exists() == true)
             assertTrue(manifestFile.exists())
             assertEquals("000_root_home_screen.html", rootFiles.htmlFile.name)
             assertEquals("001_child_details_screen.html", childFiles.htmlFile.name)
+            assertEquals("000_root_home_screen_merged_accessibility.xml", rootFiles.mergedXmlFile?.name)
             val rootHtml = rootFiles.htmlFile.readText()
             assertTrue(rootHtml.contains("""href="001_child_details_screen.html""""))
             assertTrue(rootHtml.contains(">Open Details</a>"))
@@ -195,6 +198,7 @@ class CrawlerTraversalTest {
             assertTrue(manifestJson.contains("screen_000"))
             assertTrue(manifestJson.contains("screen_001"))
             assertTrue(manifestJson.contains("captured"))
+            assertTrue(manifestJson.contains("mergedXmlPath"))
             assertTrue(CrawlManifestStore.toJson(tracker.buildManifest(CrawlRunStatus.COMPLETED)).contains(""""screens": ["""))
         } finally {
             baseDir.deleteRecursively()
