@@ -223,6 +223,7 @@ enum class CrawlRunStatus {
 
 enum class CrawlEdgeStatus {
     CAPTURED,
+    LINKED_EXISTING,
     SKIPPED_BLACKLIST,
     SKIPPED_NO_NAVIGATION,
     FAILED,
@@ -231,6 +232,7 @@ enum class CrawlEdgeStatus {
 data class CrawlScreenRecord(
     val screenId: String,
     val screenName: String,
+    val screenFingerprint: String,
     val htmlPath: String,
     val xmlPath: String,
     val mergedXmlPath: String? = null,

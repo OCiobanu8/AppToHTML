@@ -21,6 +21,7 @@ import com.example.apptohtml.crawler.CrawlerSession
 import com.example.apptohtml.crawler.EntryScreenResetStopReason
 import com.example.apptohtml.crawler.PressableElementLinkKey
 import com.example.apptohtml.crawler.PressableElement
+import com.example.apptohtml.crawler.ScreenNaming
 import com.example.apptohtml.crawler.ScreenSnapshot
 import com.example.apptohtml.crawler.ScrollScanCoordinator
 import com.example.apptohtml.crawler.TraversalPlanner
@@ -163,6 +164,7 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
 
             val rootSequence = tracker.nextScreenSequenceNumber()
             val rootScreenId = screenIdFor(rootSequence)
+            val rootScreenFingerprint = ScreenNaming.dedupFingerprint(rootSnapshot.screenName)
             val rootFiles = CaptureFileStore.saveScreen(
                 session = session,
                 snapshot = rootSnapshot,
@@ -173,6 +175,7 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
             tracker.addScreen(
                 screenId = rootScreenId,
                 snapshot = rootSnapshot,
+                screenFingerprint = rootScreenFingerprint,
                 files = rootFiles,
                 parentScreenId = null,
                 triggerElement = null,
@@ -181,7 +184,7 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
 
             val rootTopSnapshot = rootSnapshot.stepSnapshots.firstOrNull()?.root
                 ?: throw IllegalStateException("Root capture did not preserve a top-of-screen snapshot.")
-            val rootTopFingerprint = scrollScanCoordinator.fingerprint(rootTopSnapshot)
+            val rootTopFingerprint = scrollScanCoordinator.viewportFingerprint(rootTopSnapshot)
 
             val traversalPlan = TraversalPlanner.planRootTraversal(rootSnapshot, blacklist)
             traversalPlan.skippedElements.forEach { skipped ->
@@ -217,7 +220,7 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
                         message = "Could not restore the root screen before opening '${element.label}'.",
                     )
 
-                    if (scrollScanCoordinator.fingerprint(topRoot) != rootTopFingerprint) {
+                    if (scrollScanCoordinator.viewportFingerprint(topRoot) != rootTopFingerprint) {
                         failCurrentEdge(
                             element = element,
                             message = "The root screen no longer matches the original screen before opening '${element.label}'.",
@@ -243,7 +246,7 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
                         message = "Could not scroll back to '${element.label}' on the root screen.",
                     )
 
-                    val beforeClickFingerprint = scrollScanCoordinator.fingerprint(targetStepRoot)
+                    val beforeClickFingerprint = scrollScanCoordinator.viewportFingerprint(targetStepRoot)
                     val liveRoot = rootInActiveWindow ?: failCurrentEdge(
                         element = element,
                         message = "Lost the live root before clicking '${element.label}'.",
@@ -261,7 +264,7 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
                         message = "The target app was lost immediately after clicking '${element.label}'.",
                     )
                     val childPackageName = childInitialRoot.packageName ?: targetPackageName
-                    val afterClickFingerprint = scrollScanCoordinator.fingerprint(childInitialRoot)
+                    val afterClickFingerprint = scrollScanCoordinator.viewportFingerprint(childInitialRoot)
                     if (afterClickFingerprint == beforeClickFingerprint || afterClickFingerprint == rootTopFingerprint) {
                         tracker.addEdge(
                             parentScreenId = rootScreenId,
@@ -286,31 +289,49 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
                         requestId = requestId,
                         progressPrefix = "Mapping child screen '${element.label}'.",
                     )
+                    val childScreenFingerprint = ScreenNaming.dedupFingerprint(childSnapshot.screenName)
+                    val existingChildScreenId = tracker.findScreenIdByFingerprint(childScreenFingerprint)
 
-                    val childSequence = tracker.nextScreenSequenceNumber()
-                    val childScreenId = screenIdFor(childSequence)
-                    val childFiles = CaptureFileStore.saveScreen(
-                        session = session,
-                        snapshot = childSnapshot,
-                        sequenceNumber = childSequence,
-                        screenPrefix = "child",
-                    )
-                    tracker.addScreen(
-                        screenId = childScreenId,
-                        snapshot = childSnapshot,
-                        files = childFiles,
-                        parentScreenId = rootScreenId,
-                        triggerElement = element,
-                        depth = 1,
-                    )
-                    tracker.addEdge(
-                        parentScreenId = rootScreenId,
-                        childScreenId = childScreenId,
-                        element = element,
-                        status = CrawlEdgeStatus.CAPTURED,
-                        message = "Captured child screen '${childSnapshot.screenName}'.",
-                    )
-                    resolvedRootLinks[element.toLinkKey()] = childFiles.htmlFile.name
+                    if (existingChildScreenId != null) {
+                        val existingChildScreen = tracker.findScreen(existingChildScreenId)
+                            ?: throw IllegalStateException(
+                                "Existing screen '$existingChildScreenId' was not found for fingerprint '$childScreenFingerprint'."
+                            )
+                        tracker.addEdge(
+                            parentScreenId = rootScreenId,
+                            childScreenId = existingChildScreenId,
+                            element = element,
+                            status = CrawlEdgeStatus.LINKED_EXISTING,
+                            message = "Linked to existing screen '${existingChildScreen.screenName}'.",
+                        )
+                        resolvedRootLinks[element.toLinkKey()] = File(existingChildScreen.htmlPath).name
+                    } else {
+                        val childSequence = tracker.nextScreenSequenceNumber()
+                        val childScreenId = screenIdFor(childSequence)
+                        val childFiles = CaptureFileStore.saveScreen(
+                            session = session,
+                            snapshot = childSnapshot,
+                            sequenceNumber = childSequence,
+                            screenPrefix = "child",
+                        )
+                        tracker.addScreen(
+                            screenId = childScreenId,
+                            snapshot = childSnapshot,
+                            screenFingerprint = childScreenFingerprint,
+                            files = childFiles,
+                            parentScreenId = rootScreenId,
+                            triggerElement = element,
+                            depth = 1,
+                        )
+                        tracker.addEdge(
+                            parentScreenId = rootScreenId,
+                            childScreenId = childScreenId,
+                            element = element,
+                            status = CrawlEdgeStatus.CAPTURED,
+                            message = "Captured child screen '${childSnapshot.screenName}'.",
+                        )
+                        resolvedRootLinks[element.toLinkKey()] = childFiles.htmlFile.name
+                    }
                     CaptureFileStore.rewriteScreenHtml(
                         files = rootFiles,
                         snapshot = rootSnapshot,
@@ -328,7 +349,7 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
                         message = "Captured '${childSnapshot.screenName}', but could not return to the original root screen afterward.",
                     )
 
-                    if (scrollScanCoordinator.fingerprint(returnedRoot) != rootTopFingerprint) {
+                    if (scrollScanCoordinator.viewportFingerprint(returnedRoot) != rootTopFingerprint) {
                         failCurrentEdge(
                             element = element,
                             message = "Returned from '${childSnapshot.screenName}', but the root screen no longer matches the original map.",
@@ -534,7 +555,7 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
                 requestId = requestId,
             ) ?: return@repeat
 
-            if (scrollScanCoordinator.fingerprint(rewoundRoot) == expectedRootFingerprint) {
+            if (scrollScanCoordinator.viewportFingerprint(rewoundRoot) == expectedRootFingerprint) {
                 return rewoundRoot
             }
         }
@@ -555,7 +576,7 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
                 targetPackageName = targetPackageName,
                 requestId = requestId,
             )
-            if (rewoundRoot != null && scrollScanCoordinator.fingerprint(rewoundRoot) == expectedRootFingerprint) {
+            if (rewoundRoot != null && scrollScanCoordinator.viewportFingerprint(rewoundRoot) == expectedRootFingerprint) {
                 return true
             }
         }
@@ -567,7 +588,7 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
             requestId = requestId,
         )
         return returnedRoot != null &&
-            scrollScanCoordinator.fingerprint(returnedRoot) == expectedRootFingerprint
+            scrollScanCoordinator.viewportFingerprint(returnedRoot) == expectedRootFingerprint
     }
 
     private suspend fun captureCurrentRootSnapshot(expectedPackageName: String?): AccessibilityNodeSnapshot? {

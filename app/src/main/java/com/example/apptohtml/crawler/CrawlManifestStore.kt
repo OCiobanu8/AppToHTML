@@ -28,6 +28,7 @@ object CrawlManifestStore {
                     appendLine("    {")
                     appendLine("""      "screenId": "${escape(screen.screenId)}",""")
                     appendLine("""      "screenName": "${escape(screen.screenName)}",""")
+                    appendLine("""      "screenFingerprint": "${escape(screen.screenFingerprint)}",""")
                     appendLine("""      "htmlPath": "${escape(screen.htmlPath)}",""")
                     appendLine("""      "xmlPath": "${escape(screen.xmlPath)}",""")
                     appendLine("""      "mergedXmlPath": ${quotedOrNull(screen.mergedXmlPath)},""")

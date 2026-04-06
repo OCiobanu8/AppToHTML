@@ -157,6 +157,14 @@ object ScreenNaming {
         }
     }
 
+    fun dedupFingerprint(screenName: String): String {
+        val normalized = screenName
+            .trim()
+            .replace("\\s+".toRegex(), " ")
+            .lowercase(Locale.US)
+        return "v1:name:$normalized"
+    }
+
     private fun isUsefulWindowClassName(className: String): Boolean {
         if (className.isBlank()) return false
         if (genericWindowNames.contains(className)) return false

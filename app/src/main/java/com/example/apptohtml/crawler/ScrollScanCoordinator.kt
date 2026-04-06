@@ -48,7 +48,7 @@ internal class ScrollScanCoordinator(
 
             val nextRoot = captureCurrentRoot() ?: break
             val settledRoot = settleViewport(nextRoot, captureCurrentRoot)
-            val viewportChanged = fingerprint(settledRoot) != fingerprint(currentRoot)
+            val viewportChanged = viewportFingerprint(settledRoot) != viewportFingerprint(currentRoot)
             currentRoot = settledRoot
 
             if (!viewportChanged) {
@@ -92,7 +92,7 @@ internal class ScrollScanCoordinator(
 
             val nextRoot = captureCurrentRoot() ?: return currentRoot
             val settledRoot = settleViewport(nextRoot, captureCurrentRoot)
-            if (fingerprint(settledRoot) == fingerprint(currentRoot)) {
+            if (viewportFingerprint(settledRoot) == viewportFingerprint(currentRoot)) {
                 return currentRoot
             }
             currentRoot = settledRoot
@@ -223,7 +223,7 @@ internal class ScrollScanCoordinator(
             .size
     }
 
-    fun fingerprint(root: AccessibilityNodeSnapshot): String {
+    fun viewportFingerprint(root: AccessibilityNodeSnapshot): String {
         val elements = AccessibilityTreeSnapshotter.collectPressableElements(root)
             .distinctBy(::mergedElementFingerprint)
             .map { element ->

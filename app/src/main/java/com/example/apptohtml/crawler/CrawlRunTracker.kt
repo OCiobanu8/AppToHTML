@@ -7,6 +7,7 @@ class CrawlRunTracker(
 ) {
     private val screens = mutableListOf<CrawlScreenRecord>()
     private val edges = mutableListOf<CrawlEdgeRecord>()
+    private val screenFingerprintToId = linkedMapOf<String, String>()
     private var rootScreenId: String? = null
     private var nextScreenSequence = 0
     private var nextEdgeSequence = 0
@@ -16,6 +17,7 @@ class CrawlRunTracker(
     fun addScreen(
         screenId: String,
         snapshot: ScreenSnapshot,
+        screenFingerprint: String,
         files: CapturedScreenFiles,
         parentScreenId: String?,
         triggerElement: PressableElement?,
@@ -24,6 +26,7 @@ class CrawlRunTracker(
         screens += CrawlScreenRecord(
             screenId = screenId,
             screenName = snapshot.screenName,
+            screenFingerprint = screenFingerprint,
             htmlPath = files.htmlFile.absolutePath,
             xmlPath = files.xmlFile.absolutePath,
             mergedXmlPath = files.mergedXmlFile?.absolutePath,
@@ -33,6 +36,7 @@ class CrawlRunTracker(
             triggerResourceId = triggerElement?.resourceId,
             depth = depth,
         )
+        screenFingerprintToId.putIfAbsent(screenFingerprint, screenId)
         if (depth == 0) {
             rootScreenId = screenId
         }
@@ -75,6 +79,14 @@ class CrawlRunTracker(
             screens = screens.toList(),
             edges = edges.toList(),
         )
+    }
+
+    fun findScreenIdByFingerprint(screenFingerprint: String): String? {
+        return screenFingerprintToId[screenFingerprint]
+    }
+
+    fun findScreen(screenId: String): CrawlScreenRecord? {
+        return screens.firstOrNull { screen -> screen.screenId == screenId }
     }
 
     fun capturedScreenCount(): Int = screens.size
