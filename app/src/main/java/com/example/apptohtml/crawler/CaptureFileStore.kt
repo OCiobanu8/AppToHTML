@@ -38,6 +38,7 @@ object CaptureFileStore {
             sessionId = sessionId,
             directory = sessionDir,
             manifestFile = File(sessionDir, "crawl-index.json"),
+            logFile = File(sessionDir, "crawl.log"),
         )
     }
 

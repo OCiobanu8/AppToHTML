@@ -85,20 +85,18 @@ object CrawlerSession {
     }
 
     @Synchronized
-    fun beginScanning(requestId: Long, message: String) {
+    fun claimScanning(requestId: Long, message: String): Boolean {
         val current = _uiState.value
         if (
             current.requestId != requestId ||
-            (
-                current.phase != CrawlerPhase.WAITING_FOR_TARGET_SCREEN &&
-                    current.phase != CrawlerPhase.SCANNING_TARGET_SCREEN
-                )
+            current.phase != CrawlerPhase.WAITING_FOR_TARGET_SCREEN
         ) {
-            return
+            return false
         }
 
         _uiState.value = current.withScanning(message)
         timeoutJob?.cancel()
+        return true
     }
 
     @Synchronized

@@ -7,6 +7,7 @@ import java.util.Locale
 
 object ScreenNaming {
     private const val minStrongTextTitleScore = 160
+    private const val minIdentityHintScore = 120
     private val boundsRegex = Regex("\\[(\\d+),(\\d+)]\\[(\\d+),(\\d+)]")
     private val genericWindowNames = setOf(
         "android.view.View",
@@ -63,12 +64,84 @@ object ScreenNaming {
         "toolbar",
         "top_bar",
     )
+    private val weakChromeTitles = setOf(
+        "navigate up",
+        "more options",
+        "recommended",
+        "all services",
+        "back",
+        "up",
+    )
+    private val weakCallToActionTitles = setOf(
+        "sign in",
+        "sign in to continue",
+        "continue",
+        "continue with google",
+        "continue with email",
+    )
 
     fun deriveScreenName(
         eventClassName: String?,
         selectedApp: SelectedAppRef,
         root: AccessibilityNodeSnapshot? = null,
     ): String {
+        return analyzeScreenName(
+            eventClassName = eventClassName,
+            selectedApp = selectedApp,
+            root = root,
+        ).chosenName
+    }
+
+    fun dedupFingerprint(
+        screenName: String,
+        packageName: String? = null,
+        root: AccessibilityNodeSnapshot? = null,
+    ): String {
+        return buildScreenIdentity(
+            screenName = screenName,
+            packageName = packageName,
+            root = root,
+        ).fingerprint
+    }
+
+    internal fun buildScreenIdentity(
+        screenName: String,
+        packageName: String?,
+        root: AccessibilityNodeSnapshot? = null,
+    ): ScreenIdentity {
+        val normalizedTitle = normalizeIdentityToken(screenName).ifBlank { "unnamed" }
+        val identityHints = root?.let(::collectIdentityHints).orEmpty()
+            .map(::normalizeIdentityToken)
+            .filter { hint -> hint.isNotBlank() && hint != normalizedTitle }
+            .distinct()
+            .take(2)
+        val normalizedPackage = normalizeIdentityToken(packageName).ifBlank { "unknown" }
+        val confidence = when {
+            isWeakDedupTitle(screenName) -> ScreenDedupConfidence.WEAK
+            identityHints.isNotEmpty() -> ScreenDedupConfidence.STRONG
+            packageName.isNullOrBlank() -> ScreenDedupConfidence.WEAK
+            else -> ScreenDedupConfidence.STRONG
+        }
+
+        return ScreenIdentity(
+            fingerprint = buildString {
+                append("v2:pkg:")
+                append(normalizedPackage)
+                append(":title:")
+                append(normalizedTitle)
+                append(":hint:")
+                append(identityHints.ifEmpty { listOf("none") }.joinToString("|"))
+            },
+            confidence = confidence,
+            identityHints = identityHints,
+        )
+    }
+
+    internal fun analyzeScreenName(
+        eventClassName: String?,
+        selectedApp: SelectedAppRef,
+        root: AccessibilityNodeSnapshot? = null,
+    ): ScreenNameDebugInfo {
         val eventName = eventClassName
             ?.takeIf(::isUsefulWindowClassName)
             ?.substringAfterLast('.')
@@ -77,16 +150,26 @@ object ScreenNaming {
             ?.takeIf { it.isNotBlank() }
 
         if (!eventName.isNullOrBlank()) {
-            return eventName
+            return debugInfo(
+                chosenName = eventName,
+                chosenStrategy = "event_class",
+                chosenScore = null,
+                eventClassName = eventClassName,
+                eventClassCandidate = eventName,
+                textCandidates = emptyList(),
+                resourceIdCandidate = null,
+                root = root,
+                packageName = root?.packageName ?: selectedApp.packageName,
+            )
         }
 
-        val textCandidate = root?.let { currentRoot ->
+        val textCandidates = root?.let { currentRoot ->
             runCatching { deriveNameFromVisibleText(currentRoot) }
                 .onFailure { error ->
                     DiagnosticLogger.error("Visible-text screen naming failed; falling back to other naming strategies.", error)
                 }
-                .getOrNull()
-        }
+                .getOrElse { emptyList() }
+        }.orEmpty()
         val resourceCandidate = root?.let { currentRoot ->
             runCatching { deriveNameFromVisibleResourceIds(currentRoot, selectedApp) }
                 .onFailure { error ->
@@ -94,18 +177,39 @@ object ScreenNaming {
                 }
                 .getOrNull()
         }
+        val strongestTextCandidate = textCandidates.maxByOrNull { it.score }
 
         when {
-            textCandidate != null && (
+            strongestTextCandidate != null && (
                 resourceCandidate == null ||
-                    textCandidate.score >= minStrongTextTitleScore ||
-                    textCandidate.score > resourceCandidate.score
+                    strongestTextCandidate.score >= minStrongTextTitleScore ||
+                    strongestTextCandidate.score > resourceCandidate.score
                 ) -> {
-                return textCandidate.title
+                return debugInfo(
+                    chosenName = strongestTextCandidate.title,
+                    chosenStrategy = "visible_text",
+                    chosenScore = strongestTextCandidate.score,
+                    eventClassName = eventClassName,
+                    eventClassCandidate = null,
+                    textCandidates = textCandidates,
+                    resourceIdCandidate = resourceCandidate,
+                    root = root,
+                    packageName = root?.packageName ?: selectedApp.packageName,
+                )
             }
 
             resourceCandidate != null -> {
-                return resourceCandidate.title
+                return debugInfo(
+                    chosenName = resourceCandidate.title,
+                    chosenStrategy = "resource_id",
+                    chosenScore = resourceCandidate.score,
+                    eventClassName = eventClassName,
+                    eventClassCandidate = null,
+                    textCandidates = textCandidates,
+                    resourceIdCandidate = resourceCandidate,
+                    root = root,
+                    packageName = root?.packageName ?: selectedApp.packageName,
+                )
             }
         }
 
@@ -114,10 +218,30 @@ object ScreenNaming {
             .substringAfterLast('$')
             .trim()
         if (launcherName.isNotBlank()) {
-            return launcherName
+            return debugInfo(
+                chosenName = launcherName,
+                chosenStrategy = "launcher_activity",
+                chosenScore = null,
+                eventClassName = eventClassName,
+                eventClassCandidate = null,
+                textCandidates = textCandidates,
+                resourceIdCandidate = resourceCandidate,
+                root = root,
+                packageName = root?.packageName ?: selectedApp.packageName,
+            )
         }
 
-        return selectedApp.appName.ifBlank { "CapturedScreen" }
+        return debugInfo(
+            chosenName = selectedApp.appName.ifBlank { "CapturedScreen" },
+            chosenStrategy = "app_name",
+            chosenScore = null,
+            eventClassName = eventClassName,
+            eventClassCandidate = null,
+            textCandidates = textCandidates,
+            resourceIdCandidate = resourceCandidate,
+            root = root,
+            packageName = root?.packageName ?: selectedApp.packageName,
+        )
     }
 
     fun chooseElementLabel(
@@ -157,12 +281,48 @@ object ScreenNaming {
         }
     }
 
-    fun dedupFingerprint(screenName: String): String {
-        val normalized = screenName
-            .trim()
-            .replace("\\s+".toRegex(), " ")
-            .lowercase(Locale.US)
-        return "v1:name:$normalized"
+    private fun debugInfo(
+        chosenName: String,
+        chosenStrategy: String,
+        chosenScore: Int?,
+        eventClassName: String?,
+        eventClassCandidate: String?,
+        textCandidates: List<TextTitleCandidate>,
+        resourceIdCandidate: ResourceTitleCandidate?,
+        root: AccessibilityNodeSnapshot?,
+        packageName: String?,
+    ): ScreenNameDebugInfo {
+        val identity = buildScreenIdentity(
+            screenName = chosenName,
+            packageName = packageName,
+            root = root,
+        )
+        return ScreenNameDebugInfo(
+            chosenName = chosenName,
+            chosenStrategy = chosenStrategy,
+            chosenScore = chosenScore,
+            chosenTitleIsWeak = isWeakDedupTitle(chosenName),
+            eventClassName = eventClassName,
+            eventClassCandidate = eventClassCandidate,
+            textCandidates = textCandidates
+                .sortedByDescending { it.score }
+                .take(5)
+                .map { candidate ->
+                    ScreenNameCandidate(
+                        title = candidate.title,
+                        score = candidate.score,
+                    )
+                },
+            resourceIdCandidate = resourceIdCandidate?.let { candidate ->
+                ScreenNameCandidate(
+                    title = candidate.title,
+                    score = candidate.score,
+                )
+            },
+            identityHints = identity.identityHints,
+            dedupFingerprint = identity.fingerprint,
+            dedupConfidence = identity.confidence,
+        )
     }
 
     private fun isUsefulWindowClassName(className: String): Boolean {
@@ -201,14 +361,38 @@ object ScreenNaming {
         return candidates.maxByOrNull { it.score }
     }
 
-    private fun deriveNameFromVisibleText(root: AccessibilityNodeSnapshot): TextTitleCandidate? {
-        val candidates = collectVisibleTextCandidates(
+    private fun deriveNameFromVisibleText(root: AccessibilityNodeSnapshot): List<TextTitleCandidate> {
+        return collectVisibleTextCandidates(
             node = root,
             depth = 0,
             insideScrollableAncestor = false,
             insideClickableAncestor = false,
         )
-        return candidates.maxByOrNull { it.score }
+    }
+
+    private fun collectIdentityHints(root: AccessibilityNodeSnapshot): List<String> {
+        val textHints = collectVisibleTextCandidates(
+            node = root,
+            depth = 0,
+            insideScrollableAncestor = false,
+            insideClickableAncestor = false,
+        )
+            .asSequence()
+            .filter { candidate ->
+                candidate.score >= minIdentityHintScore && !isWeakDedupTitle(candidate.title)
+            }
+            .map { candidate -> candidate.title }
+        val resourceHints = collectVisibleResourceIdCandidates(root, emptySet())
+            .asSequence()
+            .filter { candidate -> !isWeakDedupTitle(candidate.title) }
+            .map { candidate -> candidate.title }
+
+        return (textHints + resourceHints)
+            .map { hint -> hint.replace("\\s+".toRegex(), " ").trim() }
+            .filter { hint -> hint.isNotBlank() }
+            .distinct()
+            .take(2)
+            .toList()
     }
 
     private fun collectVisibleResourceIdCandidates(
@@ -292,6 +476,7 @@ object ScreenNaming {
         if (rawTokens.any { token -> token in appTokens }) score += 40
         if (rawTokens.any { token -> token == "title" || token == "toolbar" }) score -= 20
         if (rawTokens.any { token -> token == "search" }) score -= 30
+        if (isWeakDedupTitle(title)) score -= 120
 
         return ResourceTitleCandidate(title = title, score = score)
     }
@@ -350,8 +535,34 @@ object ScreenNaming {
         if (title.contains(':') || title.endsWith('.')) {
             score -= 20
         }
+        if (isWeakDedupTitle(title)) {
+            score -= 260
+        }
 
         return TextTitleCandidate(title = title, score = score)
+    }
+
+    private fun isWeakDedupTitle(title: String): Boolean {
+        val normalized = normalizeTitle(title)
+        return normalized in weakChromeTitles ||
+            normalized in weakCallToActionTitles ||
+            normalized.startsWith("sign in to ")
+    }
+
+    private fun normalizeTitle(value: String): String {
+        return value
+            .trim()
+            .replace("\\s+".toRegex(), " ")
+            .lowercase(Locale.US)
+    }
+
+    private fun normalizeIdentityToken(value: String?): String {
+        return value
+            .orEmpty()
+            .trim()
+            .lowercase(Locale.US)
+            .replace("[^a-z0-9]+".toRegex(), "_")
+            .trim('_')
     }
 
     private fun tokenizeIdentifier(value: String): List<String> {
@@ -387,3 +598,36 @@ object ScreenNaming {
         val score: Int,
     )
 }
+
+internal data class ScreenIdentity(
+    val fingerprint: String,
+    val confidence: ScreenDedupConfidence,
+    val identityHints: List<String>,
+) {
+    val canLinkToExisting: Boolean
+        get() = confidence == ScreenDedupConfidence.STRONG
+}
+
+internal enum class ScreenDedupConfidence {
+    STRONG,
+    WEAK,
+}
+
+internal data class ScreenNameDebugInfo(
+    val chosenName: String,
+    val chosenStrategy: String,
+    val chosenScore: Int?,
+    val chosenTitleIsWeak: Boolean,
+    val eventClassName: String?,
+    val eventClassCandidate: String?,
+    val textCandidates: List<ScreenNameCandidate>,
+    val resourceIdCandidate: ScreenNameCandidate?,
+    val identityHints: List<String>,
+    val dedupFingerprint: String,
+    val dedupConfidence: ScreenDedupConfidence,
+)
+
+internal data class ScreenNameCandidate(
+    val title: String,
+    val score: Int,
+)

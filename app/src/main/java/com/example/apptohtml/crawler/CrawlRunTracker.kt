@@ -18,9 +18,11 @@ class CrawlRunTracker(
         screenId: String,
         snapshot: ScreenSnapshot,
         screenFingerprint: String,
+        indexFingerprint: Boolean = true,
         files: CapturedScreenFiles,
         parentScreenId: String?,
         triggerElement: PressableElement?,
+        route: CrawlRoute,
         depth: Int,
     ) {
         screens += CrawlScreenRecord(
@@ -34,9 +36,12 @@ class CrawlRunTracker(
             parentScreenId = parentScreenId,
             triggerLabel = triggerElement?.label,
             triggerResourceId = triggerElement?.resourceId,
+            route = route,
             depth = depth,
         )
-        screenFingerprintToId.putIfAbsent(screenFingerprint, screenId)
+        if (indexFingerprint) {
+            screenFingerprintToId.putIfAbsent(screenFingerprint, screenId)
+        }
         if (depth == 0) {
             rootScreenId = screenId
         }
@@ -76,6 +81,7 @@ class CrawlRunTracker(
             finishedAt = finishedAt,
             status = status,
             rootScreenId = rootScreenId,
+            maxDepthReached = maxDiscoveredDepth(),
             screens = screens.toList(),
             edges = edges.toList(),
         )
@@ -92,6 +98,8 @@ class CrawlRunTracker(
     fun capturedScreenCount(): Int = screens.size
 
     fun capturedChildScreenCount(): Int = screens.count { it.depth > 0 }
+
+    fun maxDiscoveredDepth(): Int = screens.maxOfOrNull { it.depth } ?: 0
 
     fun skippedElementCount(): Int {
         return edges.count { edge ->

@@ -29,6 +29,7 @@ data class CrawlerUiState(
     val capturedScreenCount: Int? = null,
     val capturedChildScreenCount: Int? = null,
     val skippedElementCount: Int? = null,
+    val maxDepthReached: Int? = null,
     val partialResult: Boolean = false,
     val failureMessage: String? = null,
 ) {
@@ -69,6 +70,7 @@ data class CrawlerUiState(
         capturedScreenCount = null,
         capturedChildScreenCount = null,
         skippedElementCount = null,
+        maxDepthReached = null,
         partialResult = false,
         failureMessage = null,
     )
@@ -95,6 +97,7 @@ data class CrawlerUiState(
         capturedScreenCount = summary.capturedScreenCount,
         capturedChildScreenCount = summary.capturedChildScreenCount,
         skippedElementCount = summary.skippedElementCount,
+        maxDepthReached = summary.maxDepthReached,
         partialResult = false,
         failureMessage = null,
     )
@@ -111,6 +114,7 @@ data class CrawlerUiState(
         capturedScreenCount = summary.capturedScreenCount,
         capturedChildScreenCount = summary.capturedChildScreenCount,
         skippedElementCount = summary.skippedElementCount,
+        maxDepthReached = summary.maxDepthReached,
         partialResult = true,
         failureMessage = message,
     )
@@ -128,6 +132,7 @@ data class CrawlerUiState(
         capturedScreenCount = null,
         capturedChildScreenCount = null,
         skippedElementCount = null,
+        maxDepthReached = null,
         partialResult = false,
     )
 
@@ -148,6 +153,23 @@ data class PressableElement(
     val firstSeenStep: Int = 0,
 )
 
+data class CrawlRouteStep(
+    val childIndexPath: List<Int>,
+    val bounds: String,
+    val resourceId: String?,
+    val className: String?,
+    val label: String,
+    val checkable: Boolean,
+    val checked: Boolean,
+    val firstSeenStep: Int,
+)
+
+data class CrawlRoute(
+    val steps: List<CrawlRouteStep> = emptyList(),
+) {
+    fun append(step: CrawlRouteStep): CrawlRoute = CrawlRoute(steps = steps + step)
+}
+
 data class PressableElementLinkKey(
     val label: String,
     val resourceId: String?,
@@ -167,6 +189,33 @@ internal fun PressableElement.toLinkKey(): PressableElementLinkKey {
         bounds = bounds,
         className = className,
         isListItem = isListItem,
+        childIndexPath = childIndexPath,
+        checkable = checkable,
+        checked = checked,
+        firstSeenStep = firstSeenStep,
+    )
+}
+
+internal fun PressableElement.toRouteStep(): CrawlRouteStep {
+    return CrawlRouteStep(
+        childIndexPath = childIndexPath,
+        bounds = bounds,
+        resourceId = resourceId,
+        className = className,
+        label = label,
+        checkable = checkable,
+        checked = checked,
+        firstSeenStep = firstSeenStep,
+    )
+}
+
+internal fun CrawlRouteStep.toPressableElement(): PressableElement {
+    return PressableElement(
+        label = label,
+        resourceId = resourceId,
+        bounds = bounds,
+        className = className,
+        isListItem = false,
         childIndexPath = childIndexPath,
         checkable = checkable,
         checked = checked,
@@ -240,6 +289,7 @@ data class CrawlScreenRecord(
     val parentScreenId: String?,
     val triggerLabel: String?,
     val triggerResourceId: String?,
+    val route: CrawlRoute = CrawlRoute(),
     val depth: Int,
 )
 
@@ -264,6 +314,7 @@ data class CrawlManifest(
     val finishedAt: Long? = null,
     val status: CrawlRunStatus = CrawlRunStatus.IN_PROGRESS,
     val rootScreenId: String? = null,
+    val maxDepthReached: Int = 0,
     val screens: List<CrawlScreenRecord> = emptyList(),
     val edges: List<CrawlEdgeRecord> = emptyList(),
 )
@@ -276,6 +327,7 @@ data class CrawlRunSummary(
     val capturedScreenCount: Int,
     val capturedChildScreenCount: Int,
     val skippedElementCount: Int,
+    val maxDepthReached: Int,
 )
 
 internal fun CrawlRunStatus.displayName(): String = name.lowercase(Locale.US)

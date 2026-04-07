@@ -6,6 +6,7 @@ data class CrawlSessionDirectory(
     val sessionId: String,
     val directory: File,
     val manifestFile: File,
+    val logFile: File,
 )
 
 object CrawlManifestStore {
@@ -22,6 +23,7 @@ object CrawlManifestStore {
             appendLine("""  "finishedAt": ${manifest.finishedAt ?: "null"},""")
             appendLine("""  "status": "${manifest.status.displayName()}",""")
             appendLine("""  "rootScreenId": ${quotedOrNull(manifest.rootScreenId)},""")
+            appendLine("""  "maxDepthReached": ${manifest.maxDepthReached},""")
             appendLine("""  "screens": [""")
             append(manifest.screens.joinToString(",\n") { screen ->
                 buildString {
@@ -36,6 +38,24 @@ object CrawlManifestStore {
                     appendLine("""      "parentScreenId": ${quotedOrNull(screen.parentScreenId)},""")
                     appendLine("""      "triggerLabel": ${quotedOrNull(screen.triggerLabel)},""")
                     appendLine("""      "triggerResourceId": ${quotedOrNull(screen.triggerResourceId)},""")
+                    appendLine("""      "route": [""")
+                    append(screen.route.steps.joinToString(",\n") { step ->
+                        buildString {
+                            appendLine("        {")
+                            appendLine("""          "childIndexPath": [${step.childIndexPath.joinToString(",")}],""")
+                            appendLine("""          "bounds": "${escape(step.bounds)}",""")
+                            appendLine("""          "resourceId": ${quotedOrNull(step.resourceId)},""")
+                            appendLine("""          "className": ${quotedOrNull(step.className)},""")
+                            appendLine("""          "label": "${escape(step.label)}",""")
+                            appendLine("""          "checkable": ${step.checkable},""")
+                            appendLine("""          "checked": ${step.checked},""")
+                            append("""          "firstSeenStep": ${step.firstSeenStep}""")
+                            appendLine()
+                            append("        }")
+                        }
+                    })
+                    appendLine()
+                    appendLine("      ],")
                     append("""      "depth": ${screen.depth}""")
                     appendLine()
                     append("    }")

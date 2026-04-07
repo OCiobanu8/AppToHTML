@@ -48,7 +48,8 @@ internal class ScrollScanCoordinator(
 
             val nextRoot = captureCurrentRoot() ?: break
             val settledRoot = settleViewport(nextRoot, captureCurrentRoot)
-            val viewportChanged = viewportFingerprint(settledRoot) != viewportFingerprint(currentRoot)
+            val viewportChanged = geometrySensitiveViewportFingerprint(settledRoot) !=
+                geometrySensitiveViewportFingerprint(currentRoot)
             currentRoot = settledRoot
 
             if (!viewportChanged) {
@@ -92,7 +93,10 @@ internal class ScrollScanCoordinator(
 
             val nextRoot = captureCurrentRoot() ?: return currentRoot
             val settledRoot = settleViewport(nextRoot, captureCurrentRoot)
-            if (viewportFingerprint(settledRoot) == viewportFingerprint(currentRoot)) {
+            if (
+                geometrySensitiveViewportFingerprint(settledRoot) ==
+                geometrySensitiveViewportFingerprint(currentRoot)
+            ) {
                 return currentRoot
             }
             currentRoot = settledRoot
@@ -104,6 +108,7 @@ internal class ScrollScanCoordinator(
     suspend fun rewindToEntryScreen(
         initialRoot: AccessibilityNodeSnapshot,
         targetPackageName: String,
+        expectedEntryLogicalFingerprint: String? = null,
         tryBack: () -> Boolean,
         captureCurrentRoot: suspend () -> AccessibilityNodeSnapshot?,
         onProgress: (String) -> Unit = {},
@@ -112,6 +117,16 @@ internal class ScrollScanCoordinator(
         var backAttempts = 0
 
         while (true) {
+            if (expectedEntryLogicalFingerprint != null &&
+                logicalEntryViewportFingerprint(currentRoot) == expectedEntryLogicalFingerprint
+            ) {
+                onProgress("Resetting to the first screen. Matched the captured logical entry screen.")
+                return EntryScreenResetResult(
+                    root = currentRoot,
+                    stopReason = EntryScreenResetStopReason.NO_BACK_AFFORDANCE,
+                )
+            }
+
             if (!EntryScreenBackAffordanceDetector.hasVisibleInAppBackAffordance(currentRoot)) {
                 onProgress("Resetting to the first screen. No visible in-app back button was found.")
                 return EntryScreenResetResult(
@@ -223,27 +238,36 @@ internal class ScrollScanCoordinator(
             .size
     }
 
-    fun viewportFingerprint(root: AccessibilityNodeSnapshot): String {
-        val elements = AccessibilityTreeSnapshotter.collectPressableElements(root)
-            .distinctBy(::mergedElementFingerprint)
-            .map { element ->
-                listOf(
-                    element.label,
-                    element.resourceId.orEmpty(),
-                    element.className.orEmpty(),
-                    element.isListItem.toString(),
-                    element.bounds,
-                ).joinToString("|")
-            }
-            .sorted()
+    fun geometrySensitiveViewportFingerprint(root: AccessibilityNodeSnapshot): String {
+        return buildViewportFingerprint(
+            root = root,
+            includeBounds = true,
+            excludeEntryBackAffordances = false,
+        )
+    }
 
-        return buildString {
-            append(root.className.orEmpty())
-            append("::")
-            append(root.bounds)
-            append("::")
-            append(elements.joinToString("||"))
-        }
+    fun logicalViewportFingerprint(root: AccessibilityNodeSnapshot): String {
+        return buildViewportFingerprint(
+            root = root,
+            includeBounds = false,
+            excludeEntryBackAffordances = false,
+        )
+    }
+
+    fun geometrySensitiveEntryViewportFingerprint(root: AccessibilityNodeSnapshot): String {
+        return buildViewportFingerprint(
+            root = root,
+            includeBounds = true,
+            excludeEntryBackAffordances = true,
+        )
+    }
+
+    fun logicalEntryViewportFingerprint(root: AccessibilityNodeSnapshot): String {
+        return buildViewportFingerprint(
+            root = root,
+            includeBounds = false,
+            excludeEntryBackAffordances = true,
+        )
     }
 
     private fun mergedElementFingerprint(element: PressableElement): String {
@@ -254,6 +278,103 @@ internal class ScrollScanCoordinator(
             element.isListItem.toString(),
             element.checkable.toString(),
         ).joinToString("|")
+    }
+
+    private fun buildViewportFingerprint(
+        root: AccessibilityNodeSnapshot,
+        includeBounds: Boolean,
+        excludeEntryBackAffordances: Boolean,
+    ): String {
+        val elements = AccessibilityTreeSnapshotter.collectPressableElements(root)
+            .distinctBy(::mergedElementFingerprint)
+            .let { elements ->
+                if (excludeEntryBackAffordances) {
+                    elements.filterNot(::looksLikeEntryBackAffordance)
+                } else {
+                    elements
+                }
+            }
+            .map { element ->
+                buildElementFingerprint(
+                    element = element,
+                    includeBounds = includeBounds,
+                )
+            }
+            .sorted()
+
+        return buildString {
+            append(root.className.orEmpty())
+            if (includeBounds) {
+                append("::")
+                append(root.bounds)
+            }
+            append("::")
+            append(elements.joinToString("||"))
+        }
+    }
+
+    private fun buildElementFingerprint(
+        element: PressableElement,
+        includeBounds: Boolean,
+    ): String {
+        return buildList {
+            add(element.label)
+            add(element.resourceId.orEmpty())
+            add(element.className.orEmpty())
+            add(element.isListItem.toString())
+            add(element.checkable.toString())
+            add(element.checked.toString())
+            if (includeBounds) {
+                add(element.bounds)
+            }
+        }.joinToString("|")
+    }
+
+    private fun looksLikeEntryBackAffordance(element: PressableElement): Boolean {
+        val normalizedLabel = normalizeFingerprintToken(element.label)
+        val normalizedResourceId = normalizeFingerprintToken(element.resourceId)
+        val hasBackSignal = normalizedResourceId.contains("back") ||
+            normalizedResourceId.contains("navigate up") ||
+            normalizedResourceId.contains("navigateup") ||
+            normalizedResourceId.contains("up button") ||
+            normalizedResourceId.contains("upbutton") ||
+            normalizedResourceId.contains("nav button") ||
+            normalizedResourceId.contains("navbutton") ||
+            normalizedLabel == "navigate up" ||
+            normalizedLabel == "go back" ||
+            normalizedLabel == "navigate back" ||
+            normalizedLabel == "back" ||
+            normalizedLabel == "up"
+        if (!hasBackSignal) {
+            return false
+        }
+
+        val top = parseFingerprintBounds(element.bounds)?.top ?: return false
+        return top <= 300
+    }
+
+    private fun normalizeFingerprintToken(value: String?): String {
+        return value
+            ?.substringAfterLast('/')
+            ?.lowercase()
+            ?.replace(Regex("[^a-z0-9]+"), " ")
+            ?.trim()
+            .orEmpty()
+    }
+
+    private fun parseFingerprintBounds(bounds: String): FingerprintBounds? {
+        val match = BOUNDS_REGEX.matchEntire(bounds) ?: return null
+        return FingerprintBounds(
+            top = match.groupValues[2].toInt(),
+        )
+    }
+
+    private data class FingerprintBounds(
+        val top: Int,
+    )
+
+    private companion object {
+        val BOUNDS_REGEX = Regex("""\[(\d+),(\d+)]\[(\d+),(\d+)]""")
     }
 }
 

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Copy Latest Crawl"
+  short_description: "Pull the newest crawl folder from Android."
+  default_prompt: "Use $copy-latest-crawl to copy the newest crawl session from the connected device into a local folder such as E:\\Logs."

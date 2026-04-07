@@ -10,6 +10,10 @@ Persist the crawl for desktop inspection only:
 - `crawl-graph.json` as a normalized graph dataset
 - `crawl-graph.html` as a self-contained offline viewer intended to be opened later on a PC from the downloaded crawl folder
 
+## Current Branch Status
+
+This plan now tracks the current `codex/deep-crawl-graph` branch state rather than the original documentation-only kickoff. Checklist status below reflects the current local branch, including work that may not yet be pushed to PR `#1`.
+
 ## Delivery Setup
 
 - Branch: `codex/deep-crawl-graph`
@@ -96,42 +100,55 @@ Persist the crawl for desktop inspection only:
 - Include lightweight offline controls for zoom/pan, filtering skipped/failed edges, and neighbor highlighting.
 - Update graph artifacts incrementally throughout the crawl.
 
+## Known Limitation
+
+The deep crawler still has a known crawl-completeness limitation on split-pane or large-screen Settings-style layouts. On these layouts, entry restoration can falsely accept the wrong live UI state as the root entry screen, replay then starts from the wrong surface, queued branches fail replay validation or scroll-step recovery, and the crawl can end with `status=completed` after the frontier is incorrectly drained.
+
+This behavior was observed in the `com.android.settings` crawl investigated on April 7, 2026. See [crawler-settings-early-stop-root-cause-2026-04-07.md](documentation/crawler-settings-early-stop-root-cause-2026-04-07.md) for the detailed analysis and evidence.
+
 ## Public Interfaces / Types
 
-- `PressableElement`: add `editable: Boolean`
-- `CrawlBlacklist`: add `skipEditable: Boolean`
-- `CrawlEdgeStatus`: add `LINKED_EXISTING`, `SKIPPED_EXTERNAL_PACKAGE`
-- `CrawlerPhase`: add a paused-for-decision phase
-- `CrawlerUiState`: add:
-  - `maxDepthReached`
-  - `graphJsonPath`
-  - `graphHtmlPath`
-  - `pauseReason`
-  - `canContinueAfterWarning`
-- `CrawlerSession`: add explicit resume/stop APIs for warning checkpoints
+### Implemented
+
+- `CrawlRouteStep`
+- `CrawlRoute`
+- `CrawlEdgeStatus.LINKED_EXISTING`
+- persisted `screenFingerprint`
+- `maxDepthReached`
+- coordinator-based traversal and path replay support
+
+### Not Yet Implemented
+
+- `CrawlEdgeStatus.SKIPPED_EXTERNAL_PACKAGE`
+- `PressableElement.editable`
+- `CrawlBlacklist.skipEditable`
+- paused-for-decision crawler phase
+- warning dialog resume/stop APIs
+- `graphJsonPath`
+- `graphHtmlPath`
 
 ## Development Tasks
 
 ### Branch And Planning
 
-- [ ] Create branch `codex/deep-crawl-graph`
-- [ ] Add `documentation/deep-crawl-graph-plan.md`
-- [ ] Open a draft PR titled `Add deep crawl graph exploration and desktop graph export`
-- [ ] Paste this checklist into the PR body
+- [x] Create branch `codex/deep-crawl-graph`
+- [x] Add `documentation/deep-crawl-graph-plan.md`
+- [x] Open a draft PR titled `Add deep crawl graph exploration and desktop graph export`
+- [x] Paste this checklist into the PR body
 
 ### Traversal Core
 
-- [ ] Refactor traversal orchestration out of `AppToHtmlAccessibilityService` into a dedicated deep-crawl coordinator
-- [ ] Add route metadata needed to replay navigation from the root screen to any discovered screen
-- [ ] Replace the one-layer traversal loop with breadth-first frontier expansion
-- [ ] End crawls on frontier exhaustion instead of layer exhaustion
+- [x] Refactor traversal orchestration out of `AppToHtmlAccessibilityService` into a dedicated deep-crawl coordinator
+- [x] Add route metadata needed to replay navigation from the root screen to any discovered screen
+- [x] Replace the one-layer traversal loop with breadth-first frontier expansion
+- [x] End crawls on frontier exhaustion instead of layer exhaustion
 
 ### Graph Identity
 
-- [ ] Add per-run screen fingerprint deduplication
-- [ ] Link edges to existing screens when a known screen is revisited
+- [x] Add per-run screen fingerprint deduplication
+- [x] Link edges to existing screens when a known screen is revisited
 - [ ] Add edge statuses for `LINKED_EXISTING` and `SKIPPED_EXTERNAL_PACKAGE`
-- [ ] Keep graph relationships authoritative in `edges[]`
+- [x] Keep graph relationships authoritative in `edges[]`
 
 ### Safety Rules
 
@@ -174,8 +191,8 @@ Persist the crawl for desktop inspection only:
 
 - [ ] Update crawler documentation to replace one-layer wording
 - [ ] Document desktop graph export usage
-- [ ] Add tests for deep traversal chains
-- [ ] Add tests for cycles and deduplication
+- [x] Add tests for deep traversal chains
+- [x] Add tests for cycles and deduplication
 - [ ] Add tests for external-package skips
 - [ ] Add tests for editable/checkable blacklist handling
 - [ ] Add tests for pause/resume checkpoints
@@ -185,18 +202,16 @@ Persist the crawl for desktop inspection only:
 
 - Deep chain `A -> B -> C -> D` crawls until frontier exhaustion and reports the correct max depth.
 - Cycle `A -> B -> A` links back to the existing screen and does not loop forever.
-- Two different triggers landing on the same screen reuse one screen record.
-- External-package transition records `SKIPPED_EXTERNAL_PACKAGE`.
-- Editable and checkable targets are skipped.
-- Time checkpoint pauses the crawl, saves artifacts, and exposes continue/stop actions.
-- Choosing `Continue` resumes and can trigger another warning later.
-- Choosing `Stop and save` ends cleanly without marking the run as failed.
-- Manifest and graph exports stay synchronized during partial progress.
-- `crawl-graph.html` works offline from the downloaded crawl folder.
+- Two different triggers landing on the same screen reuse one screen record and preserve graph edges.
+- Replay path resolution reports full, partial, and missing-path outcomes.
+- Manifest snapshots persist route metadata, `screenFingerprint`, and `maxDepthReached`.
+- Crawl logs include frontier mutations and linked-existing events.
+- External-package transition coverage remains open until `SKIPPED_EXTERNAL_PACKAGE` is implemented.
+- Editable and warning-threshold coverage remains open until those features land.
 
 ## Assumptions
 
-- “As deep as possible” means exhausting all safe, non-blacklisted, in-app unmapped edges.
+- "As deep as possible" means exhausting all safe, non-blacklisted, in-app unmapped edges.
 - Desktop inspection means opening the exported graph locally on a PC browser.
 - Breadth-first traversal is the first implementation because it keeps graph growth predictable and easier to inspect visually.
 - The draft PR should remain the working checklist for implementation progress.

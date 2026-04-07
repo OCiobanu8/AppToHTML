@@ -60,20 +60,25 @@ object AppLaunchHelper {
     }
 
     private fun buildLaunchIntent(context: Context, selectedApp: SelectedAppRef): Intent? {
-        val explicitIntent = Intent(Intent.ACTION_MAIN).apply {
-            addCategory(Intent.CATEGORY_LAUNCHER)
-            component = ComponentName(
+        val explicitIntent = Intent.makeRestartActivityTask(
+            ComponentName(
                 selectedApp.packageName,
                 normalizeActivityName(selectedApp.packageName, selectedApp.launcherActivity),
             )
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+        ).apply {
+            addCategory(Intent.CATEGORY_LAUNCHER)
+            addFlags(Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
         }
         if (explicitIntent.resolveActivity(context.packageManager) != null) {
             return explicitIntent
         }
 
         return context.packageManager.getLaunchIntentForPackage(selectedApp.packageName)?.apply {
-            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED)
+            addFlags(
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_CLEAR_TASK or
+                    Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
+            )
         }
     }
 

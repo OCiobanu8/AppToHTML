@@ -170,7 +170,7 @@ class CrawlerTraversalTest {
     @Test
     fun dedupFingerprint_normalizes_case_and_whitespace() {
         assertEquals(
-            "v1:name:google screen",
+            ScreenNaming.dedupFingerprint("Google Screen"),
             ScreenNaming.dedupFingerprint("  Google   Screen  ")
         )
         assertEquals(
@@ -200,6 +200,7 @@ class CrawlerTraversalTest {
                 sessionId = "crawl_test",
                 directory = File(baseDir, "crawl_test").apply { mkdirs() },
                 manifestFile = File(baseDir, "crawl_test/crawl-index.json"),
+                logFile = File(baseDir, "crawl_test/crawl.log"),
             )
             val tracker = CrawlRunTracker(
                 sessionId = session.sessionId,
@@ -213,10 +214,15 @@ class CrawlerTraversalTest {
             tracker.addScreen(
                 screenId = "screen_000",
                 snapshot = rootSnapshot,
-                screenFingerprint = ScreenNaming.dedupFingerprint(rootSnapshot.screenName),
+                screenFingerprint = ScreenNaming.dedupFingerprint(
+                    screenName = rootSnapshot.screenName,
+                    packageName = rootSnapshot.packageName,
+                    root = rootSnapshot.mergedRoot,
+                ),
                 files = rootFiles,
                 parentScreenId = null,
                 triggerElement = null,
+                route = CrawlRoute(),
                 depth = 0,
             )
 
@@ -227,10 +233,15 @@ class CrawlerTraversalTest {
             tracker.addScreen(
                 screenId = "screen_001",
                 snapshot = firstChildSnapshot,
-                screenFingerprint = ScreenNaming.dedupFingerprint(firstChildSnapshot.screenName),
+                screenFingerprint = ScreenNaming.dedupFingerprint(
+                    screenName = firstChildSnapshot.screenName,
+                    packageName = firstChildSnapshot.packageName,
+                    root = firstChildSnapshot.mergedRoot,
+                ),
                 files = firstChildFiles,
                 parentScreenId = "screen_000",
                 triggerElement = firstTrigger,
+                route = CrawlRoute(listOf(firstTrigger.toRouteStep())),
                 depth = 1,
             )
             tracker.addEdge(
@@ -242,9 +253,13 @@ class CrawlerTraversalTest {
             )
 
             val secondTrigger = testElement(label = "Open Again", resourceId = "com.example:id/open_again")
-            val secondChildSnapshot = testSnapshot("  google   screen ", "Secondary Action")
+            val secondChildSnapshot = testSnapshot("  google   screen ", "Primary Action")
             val existingScreenId = tracker.findScreenIdByFingerprint(
-                ScreenNaming.dedupFingerprint(secondChildSnapshot.screenName)
+                ScreenNaming.dedupFingerprint(
+                    screenName = secondChildSnapshot.screenName,
+                    packageName = secondChildSnapshot.packageName,
+                    root = secondChildSnapshot.mergedRoot,
+                )
             )
 
             assertEquals("screen_001", existingScreenId)
@@ -263,9 +278,18 @@ class CrawlerTraversalTest {
             assertEquals(2, manifest.edges.size)
             assertEquals("screen_001", manifest.edges.last().childScreenId)
             assertEquals(CrawlEdgeStatus.LINKED_EXISTING, manifest.edges.last().status)
+            assertEquals(1, manifest.maxDepthReached)
             assertEquals(
-                "v1:name:google screen",
+                ScreenNaming.dedupFingerprint(
+                    screenName = "Google Screen",
+                    packageName = "com.example.target",
+                    root = firstChildSnapshot.mergedRoot,
+                ),
                 manifest.screens.single { it.screenId == "screen_001" }.screenFingerprint
+            )
+            assertEquals(
+                listOf(firstTrigger.toRouteStep()),
+                manifest.screens.single { it.screenId == "screen_001" }.route.steps
             )
         } finally {
             baseDir.deleteRecursively()
@@ -280,6 +304,7 @@ class CrawlerTraversalTest {
                 sessionId = "crawl_test",
                 directory = File(baseDir, "crawl_test").apply { mkdirs() },
                 manifestFile = File(baseDir, "crawl_test/crawl-index.json"),
+                logFile = File(baseDir, "crawl_test/crawl.log"),
             )
             val tracker = CrawlRunTracker(
                 sessionId = session.sessionId,
@@ -293,10 +318,15 @@ class CrawlerTraversalTest {
             tracker.addScreen(
                 screenId = "screen_000",
                 snapshot = rootSnapshot,
-                screenFingerprint = ScreenNaming.dedupFingerprint(rootSnapshot.screenName),
+                screenFingerprint = ScreenNaming.dedupFingerprint(
+                    screenName = rootSnapshot.screenName,
+                    packageName = rootSnapshot.packageName,
+                    root = rootSnapshot.mergedRoot,
+                ),
                 files = rootFiles,
                 parentScreenId = null,
                 triggerElement = null,
+                route = CrawlRoute(),
                 depth = 0,
             )
 
@@ -307,10 +337,15 @@ class CrawlerTraversalTest {
             tracker.addScreen(
                 screenId = "screen_001",
                 snapshot = childSnapshot,
-                screenFingerprint = ScreenNaming.dedupFingerprint(childSnapshot.screenName),
+                screenFingerprint = ScreenNaming.dedupFingerprint(
+                    screenName = childSnapshot.screenName,
+                    packageName = childSnapshot.packageName,
+                    root = childSnapshot.mergedRoot,
+                ),
                 files = childFiles,
                 parentScreenId = "screen_000",
                 triggerElement = trigger,
+                route = CrawlRoute(listOf(trigger.toRouteStep())),
                 depth = 1,
             )
             tracker.addEdge(
@@ -351,6 +386,8 @@ class CrawlerTraversalTest {
             assertTrue(manifestJson.contains("captured"))
             assertTrue(manifestJson.contains("mergedXmlPath"))
             assertTrue(manifestJson.contains("screenFingerprint"))
+            assertTrue(manifestJson.contains("maxDepthReached"))
+            assertTrue(manifestJson.contains(""""route": ["""))
             assertTrue(CrawlManifestStore.toJson(tracker.buildManifest(CrawlRunStatus.COMPLETED)).contains(""""screens": ["""))
         } finally {
             baseDir.deleteRecursively()

@@ -1233,6 +1233,7 @@ class CrawlerExportTest {
                 capturedScreenCount = 2,
                 capturedChildScreenCount = 1,
                 skippedElementCount = 4,
+                maxDepthReached = 1,
             )
         )
         val aborted = traversing.withAborted(
@@ -1244,6 +1245,7 @@ class CrawlerExportTest {
                 capturedScreenCount = 1,
                 capturedChildScreenCount = 0,
                 skippedElementCount = 2,
+                maxDepthReached = 0,
             ),
             message = "Partial save",
         )
@@ -1257,8 +1259,10 @@ class CrawlerExportTest {
         assertEquals("Home Screen", captured.screenName)
         assertEquals(3, captured.scrollStepCount)
         assertEquals(2, captured.capturedScreenCount)
+        assertEquals(1, captured.maxDepthReached)
         assertEquals(CrawlerPhase.ABORTED, aborted.phase)
         assertTrue(aborted.partialResult)
+        assertEquals(0, aborted.maxDepthReached)
         assertEquals(CrawlerPhase.FAILED, failed.phase)
         assertEquals("Boom", failed.failureMessage)
     }
