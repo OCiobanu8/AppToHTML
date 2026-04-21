@@ -62,6 +62,8 @@ class DeepCrawlCoordinatorTest {
             assertTrue(manifestJson.contains(""""label": "Open B""""))
             assertTrue(manifestJson.contains(""""label": "Open C""""))
             assertTrue(manifestJson.contains(""""label": "Open D""""))
+            assertTrue(File(summary.manifestFile.parentFile, "crawl-graph.json").exists())
+            assertTrue(File(summary.manifestFile.parentFile, "crawl-graph.html").exists())
         } finally {
             tempDir.deleteRecursively()
         }
@@ -403,6 +405,179 @@ class DeepCrawlCoordinatorTest {
     }
 
     @Test
+    fun externalPackageDecision_skips_edge_when_user_selects_skip() = runBlocking {
+        val tempDir = Files.createTempDirectory("deep-crawl-external-skip").toFile()
+        val externalPackageName = "com.google.android.googlequicksearchbox"
+        try {
+            val host = object : FakeHost(
+                entryScreenId = "A",
+                screens = mapOf(
+                    "A" to fakeScreen(
+                        id = "A",
+                        screenName = "Screen A",
+                        elements = listOf(fakeElement("Open Google", 0)),
+                        transitions = mapOf("Open Google" to "G"),
+                    ),
+                    "G" to fakeScreen(
+                        id = "G",
+                        screenName = "Google",
+                        packageName = externalPackageName,
+                        elements = emptyList(),
+                        transitions = emptyMap(),
+                    ),
+                ),
+            ) {
+                val pauseReasons = mutableListOf<PauseReason>()
+                val externalContexts = mutableListOf<ExternalPackageDecisionContext>()
+
+                override suspend fun awaitPauseDecision(
+                    reason: PauseReason,
+                    snapshot: PauseProgressSnapshot,
+                    externalPackageContext: ExternalPackageDecisionContext?,
+                ): PauseDecision {
+                    pauseReasons += reason
+                    externalPackageContext?.let { externalContexts += it }
+                    return PauseDecision.SKIP_EDGE
+                }
+            }
+
+            val outcome = coordinator(host, tempDir).crawl(
+                initialRoot = host.captureCurrentRootSnapshot("com.example.target")!!,
+                eventClassName = "ScreenA",
+            )
+
+            val summary = (outcome as DeepCrawlCoordinator.DeepCrawlOutcome.Completed).summary
+            val manifestJson = summary.manifestFile.readText()
+
+            assertEquals(listOf(PauseReason.EXTERNAL_PACKAGE_BOUNDARY), host.pauseReasons)
+            assertEquals(1, summary.capturedScreenCount)
+            assertEquals(1, summary.skippedElementCount)
+            assertEquals(externalPackageName, host.externalContexts.single().nextPackageName)
+            assertTrue(manifestJson.contains(""""status": "skipped_external_package""""))
+            assertTrue(manifestJson.contains(""""label": "Open Google""""))
+            assertFalse(manifestJson.contains(""""screenName": "Google""""))
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun externalPackageDecision_continues_and_captures_cross_package_child_when_user_selects_continue() = runBlocking {
+        val tempDir = Files.createTempDirectory("deep-crawl-external-continue").toFile()
+        val externalPackageName = "com.google.android.googlequicksearchbox"
+        try {
+            val host = object : FakeHost(
+                entryScreenId = "A",
+                screens = mapOf(
+                    "A" to fakeScreen(
+                        id = "A",
+                        screenName = "Screen A",
+                        elements = listOf(fakeElement("Open Google", 0)),
+                        transitions = mapOf("Open Google" to "G"),
+                    ),
+                    "G" to fakeScreen(
+                        id = "G",
+                        screenName = "Google",
+                        packageName = externalPackageName,
+                        elements = emptyList(),
+                        transitions = emptyMap(),
+                    ),
+                ),
+            ) {
+                val pauseReasons = mutableListOf<PauseReason>()
+                val externalContexts = mutableListOf<ExternalPackageDecisionContext>()
+
+                override suspend fun awaitPauseDecision(
+                    reason: PauseReason,
+                    snapshot: PauseProgressSnapshot,
+                    externalPackageContext: ExternalPackageDecisionContext?,
+                ): PauseDecision {
+                    pauseReasons += reason
+                    externalPackageContext?.let { externalContexts += it }
+                    return PauseDecision.CONTINUE
+                }
+            }
+
+            val outcome = coordinator(host, tempDir).crawl(
+                initialRoot = host.captureCurrentRootSnapshot("com.example.target")!!,
+                eventClassName = "ScreenA",
+            )
+
+            val summary = (outcome as DeepCrawlCoordinator.DeepCrawlOutcome.Completed).summary
+            val manifestJson = summary.manifestFile.readText()
+
+            assertEquals(listOf(PauseReason.EXTERNAL_PACKAGE_BOUNDARY), host.pauseReasons)
+            assertEquals(2, summary.capturedScreenCount)
+            assertEquals(externalPackageName, host.externalContexts.single().nextPackageName)
+            assertTrue(manifestJson.contains(""""screenName": "Google""""))
+            assertTrue(manifestJson.contains(""""packageName": "$externalPackageName""""))
+            assertTrue(manifestJson.contains(""""expectedPackageName": "$externalPackageName""""))
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun externalPackageDecision_replays_through_recorded_package_context() = runBlocking {
+        val tempDir = Files.createTempDirectory("deep-crawl-external-replay").toFile()
+        val externalPackageName = "com.google.android.googlequicksearchbox"
+        try {
+            val host = object : FakeHost(
+                entryScreenId = "A",
+                screens = mapOf(
+                    "A" to fakeScreen(
+                        id = "A",
+                        screenName = "Screen A",
+                        elements = listOf(fakeElement("Open Google", 0)),
+                        transitions = mapOf("Open Google" to "G"),
+                    ),
+                    "G" to fakeScreen(
+                        id = "G",
+                        screenName = "Google",
+                        packageName = externalPackageName,
+                        elements = listOf(fakeElement("Open Results", 0)),
+                        transitions = mapOf("Open Results" to "H"),
+                    ),
+                    "H" to fakeScreen(
+                        id = "H",
+                        screenName = "Results",
+                        packageName = externalPackageName,
+                        elements = emptyList(),
+                        transitions = emptyMap(),
+                    ),
+                ),
+            ) {
+                val pauseReasons = mutableListOf<PauseReason>()
+
+                override suspend fun awaitPauseDecision(
+                    reason: PauseReason,
+                    snapshot: PauseProgressSnapshot,
+                    externalPackageContext: ExternalPackageDecisionContext?,
+                ): PauseDecision {
+                    pauseReasons += reason
+                    return PauseDecision.CONTINUE
+                }
+            }
+
+            val outcome = coordinator(host, tempDir).crawl(
+                initialRoot = host.captureCurrentRootSnapshot("com.example.target")!!,
+                eventClassName = "ScreenA",
+            )
+
+            val summary = (outcome as DeepCrawlCoordinator.DeepCrawlOutcome.Completed).summary
+            val manifestJson = summary.manifestFile.readText()
+
+            assertTrue(host.captureExpectedPackages.any { it == externalPackageName })
+            assertEquals(3, summary.capturedScreenCount)
+            assertTrue(manifestJson.contains(""""screenName": "Results""""))
+            assertTrue(manifestJson.contains(""""expectedPackageName": "$externalPackageName""""))
+            assertTrue(manifestJson.contains(""""packageName": "$externalPackageName""""))
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
     fun bfsTraversal_captures_distinct_children_when_generic_title_is_weak() = runBlocking {
         val tempDir = Files.createTempDirectory("deep-crawl-weak-title").toFile()
         try {
@@ -548,10 +723,304 @@ class DeepCrawlCoordinatorTest {
         }
     }
 
+    @Test
+    fun pauseCheckpoint_fires_on_elapsed_time_and_continues_after_user_approval() = runBlocking {
+        val tempDir = Files.createTempDirectory("deep-crawl-pause-time").toFile()
+        var timeCallCount = 0
+        try {
+            val host = object : FakeHost(
+                entryScreenId = "A",
+                screens = mapOf(
+                    "A" to fakeScreen(
+                        id = "A",
+                        screenName = "Screen A",
+                        elements = listOf(fakeElement("Open B", 0)),
+                        transitions = mapOf("Open B" to "B"),
+                    ),
+                    "B" to fakeScreen(
+                        id = "B",
+                        screenName = "Screen B",
+                        elements = emptyList(),
+                        transitions = emptyMap(),
+                    ),
+                ),
+            ) {
+                val pauseReasons = mutableListOf<PauseReason>()
+                val pauseSnapshots = mutableListOf<PauseProgressSnapshot>()
+
+                override suspend fun awaitPauseDecision(
+                    reason: PauseReason,
+                    snapshot: PauseProgressSnapshot,
+                    externalPackageContext: ExternalPackageDecisionContext?,
+                ): PauseDecision {
+                    pauseReasons += reason
+                    pauseSnapshots += snapshot
+                    return PauseDecision.CONTINUE
+                }
+            }
+
+            val outcome = coordinator(
+                host = host,
+                tempDir = tempDir,
+                pauseConfig = PauseCheckpointConfig(
+                    initialTimeThresholdMs = 1_000L,
+                    subsequentTimeThresholdMs = 5_000L,
+                    initialFailedEdgeThreshold = 99,
+                    subsequentFailedEdgeThreshold = 99,
+                ),
+                timeProvider = {
+                    if (timeCallCount++ == 0) 0L else 1_000L
+                },
+            ).crawl(
+                initialRoot = host.captureCurrentRootSnapshot("com.example.target")!!,
+                eventClassName = "ScreenA",
+            )
+
+            val summary = (outcome as DeepCrawlCoordinator.DeepCrawlOutcome.Completed).summary
+
+            assertEquals(listOf(PauseReason.ELAPSED_TIME_EXCEEDED), host.pauseReasons)
+            assertEquals(1, host.pauseSnapshots.single().capturedScreenCount)
+            assertEquals(0, host.pauseSnapshots.single().capturedChildScreenCount)
+            assertEquals(0, host.pauseSnapshots.single().failedEdgeCount)
+            assertEquals(2, summary.capturedScreenCount)
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun pauseCheckpoint_fires_on_failed_edge_count_and_continues_after_user_approval() = runBlocking {
+        val tempDir = Files.createTempDirectory("deep-crawl-pause-failed-edge").toFile()
+        try {
+            val host = object : FakeHost(
+                entryScreenId = "A",
+                screens = mapOf(
+                    "A" to fakeScreen(
+                        id = "A",
+                        screenName = "Screen A",
+                        elements = listOf(
+                            fakeElement("Broken", 0),
+                            fakeElement("Open B", 1),
+                        ),
+                        transitions = mapOf("Open B" to "B"),
+                    ),
+                    "B" to fakeScreen(
+                        id = "B",
+                        screenName = "Screen B",
+                        elements = emptyList(),
+                        transitions = emptyMap(),
+                    ),
+                ),
+            ) {
+                val events = mutableListOf<String>()
+                val pauseReasons = mutableListOf<PauseReason>()
+                val pauseSnapshots = mutableListOf<PauseProgressSnapshot>()
+
+                override fun click(element: PressableElement): Boolean {
+                    events += "click:${element.label}"
+                    if (element.label == "Broken") {
+                        return false
+                    }
+                    return super.click(element)
+                }
+
+                override suspend fun awaitPauseDecision(
+                    reason: PauseReason,
+                    snapshot: PauseProgressSnapshot,
+                    externalPackageContext: ExternalPackageDecisionContext?,
+                ): PauseDecision {
+                    events += "pause:${reason.name}"
+                    pauseReasons += reason
+                    pauseSnapshots += snapshot
+                    return PauseDecision.CONTINUE
+                }
+            }
+
+            val outcome = coordinator(
+                host = host,
+                tempDir = tempDir,
+                pauseConfig = PauseCheckpointConfig(
+                    initialTimeThresholdMs = 60_000L,
+                    subsequentTimeThresholdMs = 60_000L,
+                    initialFailedEdgeThreshold = 1,
+                    subsequentFailedEdgeThreshold = 10,
+                ),
+            ).crawl(
+                initialRoot = host.captureCurrentRootSnapshot("com.example.target")!!,
+                eventClassName = "ScreenA",
+            )
+
+            val summary = (outcome as DeepCrawlCoordinator.DeepCrawlOutcome.Completed).summary
+            val manifestJson = summary.manifestFile.readText()
+
+            assertEquals(listOf(PauseReason.FAILED_EDGE_COUNT_EXCEEDED), host.pauseReasons)
+            assertEquals(1, host.pauseSnapshots.single().failedEdgeCount)
+            assertTrue(host.events.indexOf("click:Broken") < host.events.indexOf("pause:FAILED_EDGE_COUNT_EXCEEDED"))
+            assertTrue(host.events.indexOf("pause:FAILED_EDGE_COUNT_EXCEEDED") < host.events.indexOf("click:Open B"))
+            assertEquals(2, summary.capturedScreenCount)
+            assertTrue(manifestJson.contains(""""label": "Broken""""))
+            assertTrue(manifestJson.contains(""""status": "failed""""))
+            assertTrue(manifestJson.contains(""""screenName": "Screen B""""))
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun pauseCheckpoint_rolls_forward_only_the_triggered_budget() = runBlocking {
+        val tempDir = Files.createTempDirectory("deep-crawl-pause-roll-forward").toFile()
+        var currentTimeMs = 1_000L
+        var timeCallCount = 0
+        try {
+            val host = object : FakeHost(
+                entryScreenId = "A",
+                screens = mapOf(
+                    "A" to fakeScreen(
+                        id = "A",
+                        screenName = "Screen A",
+                        elements = listOf(
+                            fakeElement("Broken", 0),
+                            fakeElement("Open B", 1),
+                        ),
+                        transitions = mapOf("Open B" to "B"),
+                    ),
+                    "B" to fakeScreen(
+                        id = "B",
+                        screenName = "Screen B",
+                        elements = emptyList(),
+                        transitions = emptyMap(),
+                    ),
+                ),
+            ) {
+                val events = mutableListOf<String>()
+                val pauseReasons = mutableListOf<PauseReason>()
+
+                override fun click(element: PressableElement): Boolean {
+                    events += "click:${element.label}"
+                    if (element.label == "Broken") {
+                        return false
+                    }
+                    return super.click(element)
+                }
+
+                override suspend fun awaitPauseDecision(
+                    reason: PauseReason,
+                    snapshot: PauseProgressSnapshot,
+                    externalPackageContext: ExternalPackageDecisionContext?,
+                ): PauseDecision {
+                    events += "pause:${reason.name}"
+                    pauseReasons += reason
+                    if (reason == PauseReason.ELAPSED_TIME_EXCEEDED) {
+                        currentTimeMs = 1_499L
+                    }
+                    return PauseDecision.CONTINUE
+                }
+            }
+
+            val outcome = coordinator(
+                host = host,
+                tempDir = tempDir,
+                pauseConfig = PauseCheckpointConfig(
+                    initialTimeThresholdMs = 1_000L,
+                    subsequentTimeThresholdMs = 500L,
+                    initialFailedEdgeThreshold = 1,
+                    subsequentFailedEdgeThreshold = 10,
+                ),
+                timeProvider = {
+                    if (timeCallCount++ == 0) 0L else currentTimeMs
+                },
+            ).crawl(
+                initialRoot = host.captureCurrentRootSnapshot("com.example.target")!!,
+                eventClassName = "ScreenA",
+            )
+
+            val summary = (outcome as DeepCrawlCoordinator.DeepCrawlOutcome.Completed).summary
+
+            assertEquals(
+                listOf(
+                    PauseReason.ELAPSED_TIME_EXCEEDED,
+                    PauseReason.FAILED_EDGE_COUNT_EXCEEDED,
+                ),
+                host.pauseReasons,
+            )
+            assertTrue(host.events.indexOf("pause:ELAPSED_TIME_EXCEEDED") < host.events.indexOf("click:Broken"))
+            assertTrue(host.events.indexOf("click:Broken") < host.events.indexOf("pause:FAILED_EDGE_COUNT_EXCEEDED"))
+            assertTrue(host.events.indexOf("pause:FAILED_EDGE_COUNT_EXCEEDED") < host.events.indexOf("click:Open B"))
+            assertEquals(2, summary.capturedScreenCount)
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun pauseCheckpoint_stops_and_saves_partial_when_user_chooses_stop() = runBlocking {
+        val tempDir = Files.createTempDirectory("deep-crawl-pause-stop").toFile()
+        var timeCallCount = 0
+        try {
+            val host = object : FakeHost(
+                entryScreenId = "A",
+                screens = mapOf(
+                    "A" to fakeScreen(
+                        id = "A",
+                        screenName = "Screen A",
+                        elements = listOf(fakeElement("Open B", 0)),
+                        transitions = mapOf("Open B" to "B"),
+                    ),
+                    "B" to fakeScreen(
+                        id = "B",
+                        screenName = "Screen B",
+                        elements = emptyList(),
+                        transitions = emptyMap(),
+                    ),
+                ),
+            ) {
+                val pauseReasons = mutableListOf<PauseReason>()
+
+                override suspend fun awaitPauseDecision(
+                    reason: PauseReason,
+                    snapshot: PauseProgressSnapshot,
+                    externalPackageContext: ExternalPackageDecisionContext?,
+                ): PauseDecision {
+                    pauseReasons += reason
+                    return PauseDecision.STOP
+                }
+            }
+
+            val outcome = coordinator(
+                host = host,
+                tempDir = tempDir,
+                pauseConfig = PauseCheckpointConfig(
+                    initialTimeThresholdMs = 1_000L,
+                    subsequentTimeThresholdMs = 5_000L,
+                    initialFailedEdgeThreshold = 99,
+                    subsequentFailedEdgeThreshold = 99,
+                ),
+                timeProvider = {
+                    if (timeCallCount++ == 0) 0L else 1_000L
+                },
+            ).crawl(
+                initialRoot = host.captureCurrentRootSnapshot("com.example.target")!!,
+                eventClassName = "ScreenA",
+            )
+
+            val partial = outcome as DeepCrawlCoordinator.DeepCrawlOutcome.PartialAbort
+            val manifestJson = partial.summary.manifestFile.readText()
+
+            assertEquals(listOf(PauseReason.ELAPSED_TIME_EXCEEDED), host.pauseReasons)
+            assertEquals(1, partial.summary.capturedScreenCount)
+            assertTrue(partial.message.contains("elapsed-time checkpoint"))
+            assertTrue(manifestJson.contains(""""status": "partial_abort""""))
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
     private fun coordinator(
         host: FakeHost,
         tempDir: File,
         blacklist: CrawlBlacklist = CrawlBlacklist(skipCheckable = false),
+        pauseConfig: PauseCheckpointConfig = PauseCheckpointConfig(),
+        timeProvider: () -> Long = { System.currentTimeMillis() },
     ): DeepCrawlCoordinator {
         return DeepCrawlCoordinator(
             selectedApp = selectedApp(),
@@ -564,11 +1033,15 @@ class DeepCrawlCoordinatorTest {
                     directory = sessionDir,
                     manifestFile = File(sessionDir, "crawl-index.json"),
                     logFile = File(sessionDir, "crawl.log"),
+                    graphJsonFile = File(sessionDir, "crawl-graph.json"),
+                    graphHtmlFile = File(sessionDir, "crawl-graph.html"),
                 )
             },
+            pauseConfig = pauseConfig,
             scanScreenOverride = { _, initialRoot, _, _ ->
                 host.snapshotForRoot(initialRoot)
             },
+            timeProvider = timeProvider,
         )
     }
 
@@ -634,11 +1107,14 @@ class DeepCrawlCoordinatorTest {
         private val backStack = mutableListOf(initialScreenId)
         private val captureCountsByScreenId = mutableMapOf<String, Int>()
         private var returnedToEntryScreen = false
+        val captureExpectedPackages = mutableListOf<String?>()
         var relaunchCount = 0
             private set
 
         override suspend fun captureCurrentRootSnapshot(expectedPackageName: String?): AccessibilityNodeSnapshot? {
-            if (expectedPackageName != null && expectedPackageName != "com.example.target") {
+            captureExpectedPackages += expectedPackageName
+            val currentPackageName = screens.getValue(currentScreenId).packageName
+            if (expectedPackageName != null && expectedPackageName != currentPackageName) {
                 return null
             }
             val captureCount = captureCountsByScreenId.getOrDefault(currentScreenId, 0)
@@ -682,6 +1158,12 @@ class DeepCrawlCoordinatorTest {
             backStack += entryScreenId
             return null
         }
+
+        override suspend fun awaitPauseDecision(
+            reason: PauseReason,
+            snapshot: PauseProgressSnapshot,
+            externalPackageContext: ExternalPackageDecisionContext?,
+        ): PauseDecision = PauseDecision.CONTINUE
 
         override fun publishProgress(message: String) = Unit
 

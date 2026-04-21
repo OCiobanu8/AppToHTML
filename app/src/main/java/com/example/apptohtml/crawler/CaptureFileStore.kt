@@ -39,6 +39,8 @@ object CaptureFileStore {
             directory = sessionDir,
             manifestFile = File(sessionDir, "crawl-index.json"),
             logFile = File(sessionDir, "crawl.log"),
+            graphJsonFile = File(sessionDir, "crawl-graph.json"),
+            graphHtmlFile = File(sessionDir, "crawl-graph.html"),
         )
     }
 
@@ -86,6 +88,14 @@ object CaptureFileStore {
     ): File {
         CrawlManifestStore.write(manifest, session.manifestFile)
         return session.manifestFile
+    }
+
+    fun saveGraph(
+        session: CrawlSessionDirectory,
+        graph: CrawlGraph,
+    ) {
+        CrawlGraphJsonWriter.write(graph, session.graphJsonFile)
+        session.graphHtmlFile.writeText(CrawlGraphHtmlRenderer.render(graph), Charsets.UTF_8)
     }
 
     fun save(

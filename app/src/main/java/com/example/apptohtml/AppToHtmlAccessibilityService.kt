@@ -21,7 +21,11 @@ import com.example.apptohtml.crawler.CrawlerPhase
 import com.example.apptohtml.crawler.CrawlerSession
 import com.example.apptohtml.crawler.DeepCrawlCoordinator
 import com.example.apptohtml.crawler.EntryScreenResetStopReason
+import com.example.apptohtml.crawler.ExternalPackageDecisionContext
 import com.example.apptohtml.crawler.PathReplayResolver
+import com.example.apptohtml.crawler.PauseDecision
+import com.example.apptohtml.crawler.PauseProgressSnapshot
+import com.example.apptohtml.crawler.PauseReason
 import com.example.apptohtml.crawler.PressableElementLinkKey
 import com.example.apptohtml.crawler.PressableElement
 import com.example.apptohtml.crawler.ScreenNaming
@@ -181,6 +185,18 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
                             selectedApp = selectedApp,
                             lastObservedPackage = null,
                         ).errorMessage
+                    }
+
+                    override suspend fun awaitPauseDecision(
+                        reason: PauseReason,
+                        snapshot: PauseProgressSnapshot,
+                        externalPackageContext: ExternalPackageDecisionContext?,
+                    ): PauseDecision {
+                        return CrawlerSession.pauseForDecision(
+                            reason = reason,
+                            snapshot = snapshot,
+                            externalPackageContext = externalPackageContext,
+                        )
                     }
 
                     override fun publishProgress(message: String) {
@@ -780,6 +796,7 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
     }
 
     private fun buildSummary(
+        session: CrawlSessionDirectory,
         tracker: CrawlRunTracker,
         rootSnapshot: ScreenSnapshot,
         rootFiles: CapturedScreenFiles,
@@ -789,6 +806,8 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
             rootScreenName = rootSnapshot.screenName,
             rootFiles = rootFiles,
             manifestFile = manifestFile,
+            graphJsonPath = session.graphJsonFile,
+            graphHtmlPath = session.graphHtmlFile,
             rootScrollStepCount = rootSnapshot.scrollStepCount,
             capturedScreenCount = tracker.capturedScreenCount(),
             capturedChildScreenCount = tracker.capturedChildScreenCount(),
@@ -830,6 +849,7 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
         )
         throw PartialCrawlAbortException(
             summary = buildSummary(
+                session = session,
                 tracker = tracker,
                 rootSnapshot = rootSnapshot,
                 rootFiles = rootFiles,

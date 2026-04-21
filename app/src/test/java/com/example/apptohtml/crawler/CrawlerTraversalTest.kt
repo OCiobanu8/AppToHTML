@@ -243,6 +243,8 @@ class CrawlerTraversalTest {
                 directory = File(baseDir, "crawl_test").apply { mkdirs() },
                 manifestFile = File(baseDir, "crawl_test/crawl-index.json"),
                 logFile = File(baseDir, "crawl_test/crawl.log"),
+                graphJsonFile = File(baseDir, "crawl_test/crawl-graph.json"),
+                graphHtmlFile = File(baseDir, "crawl_test/crawl-graph.html"),
             )
             val tracker = CrawlRunTracker(
                 sessionId = session.sessionId,
@@ -347,6 +349,8 @@ class CrawlerTraversalTest {
                 directory = File(baseDir, "crawl_test").apply { mkdirs() },
                 manifestFile = File(baseDir, "crawl_test/crawl-index.json"),
                 logFile = File(baseDir, "crawl_test/crawl.log"),
+                graphJsonFile = File(baseDir, "crawl_test/crawl-graph.json"),
+                graphHtmlFile = File(baseDir, "crawl_test/crawl-graph.html"),
             )
             val tracker = CrawlRunTracker(
                 sessionId = session.sessionId,
@@ -403,9 +407,14 @@ class CrawlerTraversalTest {
                 resolvedChildLinks = mapOf(trigger.toLinkKey() to childFiles.htmlFile.name),
             )
 
+            val manifest = tracker.buildManifest(CrawlRunStatus.COMPLETED, finishedAt = 456L)
             val manifestFile = CaptureFileStore.saveManifest(
                 session = session,
-                manifest = tracker.buildManifest(CrawlRunStatus.COMPLETED, finishedAt = 456L),
+                manifest = manifest,
+            )
+            CaptureFileStore.saveGraph(
+                session = session,
+                graph = CrawlGraphBuilder.build(manifest),
             )
 
             assertTrue(rootFiles.htmlFile.exists())
@@ -415,6 +424,8 @@ class CrawlerTraversalTest {
             assertTrue(childFiles.xmlFile.exists())
             assertTrue(childFiles.mergedXmlFile?.exists() == true)
             assertTrue(manifestFile.exists())
+            assertTrue(session.graphJsonFile.exists())
+            assertTrue(session.graphHtmlFile.exists())
             assertEquals("000_root_home_screen.html", rootFiles.htmlFile.name)
             assertEquals("001_child_details_screen.html", childFiles.htmlFile.name)
             assertEquals("000_root_home_screen_merged_accessibility.xml", rootFiles.mergedXmlFile?.name)
@@ -430,6 +441,8 @@ class CrawlerTraversalTest {
             assertTrue(manifestJson.contains("screenFingerprint"))
             assertTrue(manifestJson.contains("maxDepthReached"))
             assertTrue(manifestJson.contains(""""route": ["""))
+            assertTrue(session.graphJsonFile.readText().contains(""""screenId": "screen_001""""))
+            assertTrue(session.graphHtmlFile.readText().contains("crawl-graph-data"))
             assertTrue(CrawlManifestStore.toJson(tracker.buildManifest(CrawlRunStatus.COMPLETED)).contains(""""screens": ["""))
         } finally {
             baseDir.deleteRecursively()

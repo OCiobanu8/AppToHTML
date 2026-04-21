@@ -10,6 +10,7 @@ enum class CrawlerPhase {
     WAITING_FOR_TARGET_SCREEN,
     SCANNING_TARGET_SCREEN,
     TRAVERSING_CHILD_SCREENS,
+    PAUSED_FOR_DECISION,
     CAPTURED,
     ABORTED,
     FAILED,
@@ -20,11 +21,22 @@ data class CrawlerUiState(
     val selectedApp: SelectedAppRef? = null,
     val requestId: Long? = null,
     val statusMessage: String = "No capture started yet.",
+    val pauseDecisionId: Long? = null,
+    val pauseReason: PauseReason? = null,
+    val pauseElapsedTimeMs: Long? = null,
+    val pauseFailedEdgeCount: Int? = null,
+    val pausedCapturedScreenCount: Int? = null,
+    val pausedCapturedChildScreenCount: Int? = null,
+    val pauseCurrentPackageName: String? = null,
+    val pauseNextPackageName: String? = null,
+    val pauseTriggerLabel: String? = null,
     val screenName: String? = null,
     val htmlPath: String? = null,
     val xmlPath: String? = null,
     val mergedXmlPath: String? = null,
     val crawlIndexPath: String? = null,
+    val graphJsonPath: String? = null,
+    val graphHtmlPath: String? = null,
     val scrollStepCount: Int? = null,
     val capturedScreenCount: Int? = null,
     val capturedChildScreenCount: Int? = null,
@@ -50,10 +62,22 @@ data class CrawlerUiState(
     fun withWaiting(message: String): CrawlerUiState = copy(
         phase = CrawlerPhase.WAITING_FOR_TARGET_SCREEN,
         statusMessage = message,
+        pauseDecisionId = null,
+        pauseReason = null,
+        pauseElapsedTimeMs = null,
+        pauseFailedEdgeCount = null,
+        pausedCapturedScreenCount = null,
+        pausedCapturedChildScreenCount = null,
+        pauseCurrentPackageName = null,
+        pauseNextPackageName = null,
+        pauseTriggerLabel = null,
         screenName = null,
         htmlPath = null,
         xmlPath = null,
         mergedXmlPath = null,
+        crawlIndexPath = null,
+        graphJsonPath = null,
+        graphHtmlPath = null,
         scrollStepCount = null,
         failureMessage = null,
     )
@@ -61,11 +85,22 @@ data class CrawlerUiState(
     fun withScanning(message: String): CrawlerUiState = copy(
         phase = CrawlerPhase.SCANNING_TARGET_SCREEN,
         statusMessage = message,
+        pauseDecisionId = null,
+        pauseReason = null,
+        pauseElapsedTimeMs = null,
+        pauseFailedEdgeCount = null,
+        pausedCapturedScreenCount = null,
+        pausedCapturedChildScreenCount = null,
+        pauseCurrentPackageName = null,
+        pauseNextPackageName = null,
+        pauseTriggerLabel = null,
         screenName = null,
         htmlPath = null,
         xmlPath = null,
         mergedXmlPath = null,
         crawlIndexPath = null,
+        graphJsonPath = null,
+        graphHtmlPath = null,
         scrollStepCount = null,
         capturedScreenCount = null,
         capturedChildScreenCount = null,
@@ -78,6 +113,50 @@ data class CrawlerUiState(
     fun withTraversingChildren(message: String): CrawlerUiState = copy(
         phase = CrawlerPhase.TRAVERSING_CHILD_SCREENS,
         statusMessage = message,
+        pauseDecisionId = null,
+        pauseReason = null,
+        pauseElapsedTimeMs = null,
+        pauseFailedEdgeCount = null,
+        pausedCapturedScreenCount = null,
+        pausedCapturedChildScreenCount = null,
+        pauseCurrentPackageName = null,
+        pauseNextPackageName = null,
+        pauseTriggerLabel = null,
+        failureMessage = null,
+    )
+
+    fun withPausedForDecision(
+        decisionId: Long,
+        reason: PauseReason,
+        snapshot: PauseProgressSnapshot,
+        externalPackageContext: ExternalPackageDecisionContext? = null,
+    ): CrawlerUiState = copy(
+        phase = CrawlerPhase.PAUSED_FOR_DECISION,
+        statusMessage = pauseMessage(reason),
+        pauseDecisionId = decisionId,
+        pauseReason = reason,
+        pauseElapsedTimeMs = snapshot.elapsedTimeMs,
+        pauseFailedEdgeCount = snapshot.failedEdgeCount,
+        pausedCapturedScreenCount = snapshot.capturedScreenCount,
+        pausedCapturedChildScreenCount = snapshot.capturedChildScreenCount,
+        pauseCurrentPackageName = externalPackageContext?.currentPackageName,
+        pauseNextPackageName = externalPackageContext?.nextPackageName,
+        pauseTriggerLabel = externalPackageContext?.triggerLabel,
+        failureMessage = null,
+    )
+
+    fun withResumedFromDecision(): CrawlerUiState = copy(
+        phase = CrawlerPhase.TRAVERSING_CHILD_SCREENS,
+        statusMessage = "Resuming deep crawl after pause.",
+        pauseDecisionId = null,
+        pauseReason = null,
+        pauseElapsedTimeMs = null,
+        pauseFailedEdgeCount = null,
+        pausedCapturedScreenCount = null,
+        pausedCapturedChildScreenCount = null,
+        pauseCurrentPackageName = null,
+        pauseNextPackageName = null,
+        pauseTriggerLabel = null,
         failureMessage = null,
     )
 
@@ -88,11 +167,22 @@ data class CrawlerUiState(
         } else {
             "Captured the first visible screen."
         },
+        pauseDecisionId = null,
+        pauseReason = null,
+        pauseElapsedTimeMs = null,
+        pauseFailedEdgeCount = null,
+        pausedCapturedScreenCount = null,
+        pausedCapturedChildScreenCount = null,
+        pauseCurrentPackageName = null,
+        pauseNextPackageName = null,
+        pauseTriggerLabel = null,
         screenName = summary.rootScreenName,
         htmlPath = summary.rootFiles.htmlFile.absolutePath,
         xmlPath = summary.rootFiles.xmlFile.absolutePath,
         mergedXmlPath = summary.rootFiles.mergedXmlFile?.absolutePath,
         crawlIndexPath = summary.manifestFile.absolutePath,
+        graphJsonPath = summary.graphJsonPath.absolutePath,
+        graphHtmlPath = summary.graphHtmlPath.absolutePath,
         scrollStepCount = summary.rootScrollStepCount,
         capturedScreenCount = summary.capturedScreenCount,
         capturedChildScreenCount = summary.capturedChildScreenCount,
@@ -105,11 +195,22 @@ data class CrawlerUiState(
     fun withAborted(summary: CrawlRunSummary, message: String): CrawlerUiState = copy(
         phase = CrawlerPhase.ABORTED,
         statusMessage = message,
+        pauseDecisionId = null,
+        pauseReason = null,
+        pauseElapsedTimeMs = null,
+        pauseFailedEdgeCount = null,
+        pausedCapturedScreenCount = null,
+        pausedCapturedChildScreenCount = null,
+        pauseCurrentPackageName = null,
+        pauseNextPackageName = null,
+        pauseTriggerLabel = null,
         screenName = summary.rootScreenName,
         htmlPath = summary.rootFiles.htmlFile.absolutePath,
         xmlPath = summary.rootFiles.xmlFile.absolutePath,
         mergedXmlPath = summary.rootFiles.mergedXmlFile?.absolutePath,
         crawlIndexPath = summary.manifestFile.absolutePath,
+        graphJsonPath = summary.graphJsonPath.absolutePath,
+        graphHtmlPath = summary.graphHtmlPath.absolutePath,
         scrollStepCount = summary.rootScrollStepCount,
         capturedScreenCount = summary.capturedScreenCount,
         capturedChildScreenCount = summary.capturedChildScreenCount,
@@ -122,12 +223,23 @@ data class CrawlerUiState(
     fun withFailure(message: String): CrawlerUiState = copy(
         phase = CrawlerPhase.FAILED,
         statusMessage = message,
+        pauseDecisionId = null,
+        pauseReason = null,
+        pauseElapsedTimeMs = null,
+        pauseFailedEdgeCount = null,
+        pausedCapturedScreenCount = null,
+        pausedCapturedChildScreenCount = null,
+        pauseCurrentPackageName = null,
+        pauseNextPackageName = null,
+        pauseTriggerLabel = null,
         failureMessage = message,
         screenName = null,
         htmlPath = null,
         xmlPath = null,
         mergedXmlPath = null,
         crawlIndexPath = null,
+        graphJsonPath = null,
+        graphHtmlPath = null,
         scrollStepCount = null,
         capturedScreenCount = null,
         capturedChildScreenCount = null,
@@ -138,6 +250,19 @@ data class CrawlerUiState(
 
     companion object {
         fun idle(): CrawlerUiState = CrawlerUiState()
+    }
+
+    private fun pauseMessage(reason: PauseReason): String {
+        return when (reason) {
+            PauseReason.ELAPSED_TIME_EXCEEDED ->
+                "Deep crawl paused after reaching the elapsed-time checkpoint."
+
+            PauseReason.FAILED_EDGE_COUNT_EXCEEDED ->
+                "Deep crawl paused after reaching the failed-edge checkpoint."
+
+            PauseReason.EXTERNAL_PACKAGE_BOUNDARY ->
+                "Deep crawl paused before continuing into another package."
+        }
     }
 }
 
@@ -164,6 +289,7 @@ data class CrawlRouteStep(
     val checked: Boolean,
     val editable: Boolean,
     val firstSeenStep: Int,
+    val expectedPackageName: String? = null,
 )
 
 data class CrawlRoute(
@@ -200,7 +326,7 @@ internal fun PressableElement.toLinkKey(): PressableElementLinkKey {
     )
 }
 
-internal fun PressableElement.toRouteStep(): CrawlRouteStep {
+internal fun PressableElement.toRouteStep(expectedPackageName: String? = null): CrawlRouteStep {
     return CrawlRouteStep(
         childIndexPath = childIndexPath,
         bounds = bounds,
@@ -211,6 +337,7 @@ internal fun PressableElement.toRouteStep(): CrawlRouteStep {
         checked = checked,
         editable = editable,
         firstSeenStep = firstSeenStep,
+        expectedPackageName = expectedPackageName,
     )
 }
 
@@ -282,12 +409,14 @@ enum class CrawlEdgeStatus {
     LINKED_EXISTING,
     SKIPPED_BLACKLIST,
     SKIPPED_NO_NAVIGATION,
+    SKIPPED_EXTERNAL_PACKAGE,
     FAILED,
 }
 
 data class CrawlScreenRecord(
     val screenId: String,
     val screenName: String,
+    val packageName: String,
     val screenFingerprint: String,
     val htmlPath: String,
     val xmlPath: String,
@@ -330,6 +459,8 @@ data class CrawlRunSummary(
     val rootScreenName: String,
     val rootFiles: CapturedScreenFiles,
     val manifestFile: File,
+    val graphJsonPath: File,
+    val graphHtmlPath: File,
     val rootScrollStepCount: Int,
     val capturedScreenCount: Int,
     val capturedChildScreenCount: Int,

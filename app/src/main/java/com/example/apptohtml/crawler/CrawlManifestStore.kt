@@ -7,6 +7,8 @@ data class CrawlSessionDirectory(
     val directory: File,
     val manifestFile: File,
     val logFile: File,
+    val graphJsonFile: File,
+    val graphHtmlFile: File,
 )
 
 object CrawlManifestStore {
@@ -30,6 +32,7 @@ object CrawlManifestStore {
                     appendLine("    {")
                     appendLine("""      "screenId": "${escape(screen.screenId)}",""")
                     appendLine("""      "screenName": "${escape(screen.screenName)}",""")
+                    appendLine("""      "packageName": "${escape(screen.packageName)}",""")
                     appendLine("""      "screenFingerprint": "${escape(screen.screenFingerprint)}",""")
                     appendLine("""      "htmlPath": "${escape(screen.htmlPath)}",""")
                     appendLine("""      "xmlPath": "${escape(screen.xmlPath)}",""")
@@ -50,7 +53,8 @@ object CrawlManifestStore {
                             appendLine("""          "checkable": ${step.checkable},""")
                             appendLine("""          "checked": ${step.checked},""")
                             appendLine("""          "editable": ${step.editable},""")
-                            append("""          "firstSeenStep": ${step.firstSeenStep}""")
+                            appendLine("""          "firstSeenStep": ${step.firstSeenStep},""")
+                            append("""          "expectedPackageName": ${quotedOrNull(step.expectedPackageName)}""")
                             appendLine()
                             append("        }")
                         }

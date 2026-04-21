@@ -144,7 +144,20 @@ Add or extend tests under `app/src/test/java/com/example/apptohtml/crawler/`:
 
 ## Block 2 - Pause/Resume + Package Boundary Decisions (workstreams B + D)
 
+Status as of 2026-04-21:
+
+- Completed: Phase 3.1
+- Completed: Phase 3.2
+- Completed: Phase 3.3
+- Completed: Phase 3.4
+- Completed: Phase 3.5
+- Completed: Phase 3.6
+- Completed: all automated success criteria for Block 2
+- Completed: the manual verification checks below
+
 ### Phase 3.1 - Configuration and decision models
+
+Status: Completed on 2026-04-21
 
 #### New files
 
@@ -195,6 +208,8 @@ Add or extend tests under `app/src/test/java/com/example/apptohtml/crawler/`:
 
 ### Phase 3.2 - Coordinator checkpoint wiring
 
+Status: Completed on 2026-04-21
+
 #### Changes
 
 1. **`DeepCrawlCoordinator.kt`**
@@ -220,6 +235,8 @@ Add or extend tests under `app/src/test/java/com/example/apptohtml/crawler/`:
    ```
 
 ### Phase 3.3 - Package-aware cross-boundary continuation
+
+Status: Completed on 2026-04-21
 
 #### Changes
 
@@ -247,6 +264,8 @@ Add or extend tests under `app/src/test/java/com/example/apptohtml/crawler/`:
    - Update any route/screen expectations to include `expectedPackageName` and `packageName`.
 
 ### Phase 3.4 - Session state and decision-token protocol
+
+Status: Completed on 2026-04-21
 
 This is the main design hardening in this revision. Reusing `requestId` alone is not enough because a single crawl can pause multiple times. The active pause must therefore be identified by a distinct token.
 
@@ -297,6 +316,8 @@ This is the main design hardening in this revision. Reusing `requestId` alone is
 
 ### Phase 3.5 - UI dialog
 
+Status: Completed on 2026-04-21
+
 #### Changes
 
 1. **`MainActivity.kt`**
@@ -321,6 +342,8 @@ This is the main design hardening in this revision. Reusing `requestId` alone is
 
 ### Phase 3.6 - Tests for PR 3
 
+Status: Completed on 2026-04-21
+
 1. **`DeepCrawlCoordinatorTest.kt`**
    - `pauseCheckpoint_fires_on_elapsed_time_and_continues_after_user_approval`
    - `pauseCheckpoint_fires_on_failed_edge_count_and_continues_after_user_approval`
@@ -343,22 +366,34 @@ This is the main design hardening in this revision. Reusing `requestId` alone is
 
 #### Automated
 
-- `./gradlew test --tests "com.example.apptohtml.crawler.PauseCheckpointTrackerTest"` passes.
-- `./gradlew test --tests "com.example.apptohtml.crawler.DeepCrawlCoordinatorTest"` passes with the checkpoint and package-boundary cases.
-- `./gradlew test --tests "com.example.apptohtml.crawler.CrawlerSessionTest"` passes with decision-token coverage.
-- `./gradlew test` passes.
+- [x] `./gradlew test --tests "com.example.apptohtml.crawler.PauseCheckpointTrackerTest"` passes.
+- [x] `./gradlew test --tests "com.example.apptohtml.crawler.DeepCrawlCoordinatorTest"` passes with the checkpoint and package-boundary cases.
+- [x] `./gradlew test --tests "com.example.apptohtml.crawler.CrawlerSessionTest"` passes with decision-token coverage.
+- [x] `./gradlew test` passes.
 
 #### Manual
 
-- Run a deep crawl with a temporary low checkpoint threshold and confirm the app returns to AppToHTML only after the latest `crawl-index.json` has been updated.
-- Confirm `Continue` resumes from the pause and `Stop and save` produces a partial-abort summary.
-- Run a crawl against an app that opens an external package and confirm `Skip edge` records `skipped_external_package`, while `Continue outside package` captures the external child and allows replay through that package on later frontier restores.
+- [x] Run a deep crawl with a temporary low checkpoint threshold and confirm the app returns to AppToHTML only after the latest `crawl-index.json` has been updated.
+- [x] Confirm `Continue` resumes from the pause and `Stop and save` produces a partial-abort summary.
+- [x] Run a crawl against an app that opens an external package and confirm `Skip edge` records `skipped_external_package`, while `Continue outside package` captures the external child and allows replay through that package on later frontier restores.
 
 ---
 
 ## Block 3 - Desktop Graph Export (workstream E)
 
+Status as of 2026-04-21:
+
+- Completed: Phase 4.1
+- Completed: Phase 4.2
+- Completed: Phase 4.3
+- Completed: Phase 4.4
+- Completed: Phase 4.5
+- Completed: all automated success criteria for Block 3
+- Completed: the manual verification checks below
+
 ### Phase 4.1 - Graph data model and JSON serializer
+
+Status: Completed on 2026-04-21
 
 #### New files
 
@@ -403,6 +438,8 @@ This is the main design hardening in this revision. Reusing `requestId` alone is
 
 ### Phase 4.2 - Offline HTML viewer renderer
 
+Status: Completed on 2026-04-21
+
 #### New file
 
 1. **`CrawlGraphHtmlRenderer.kt`**
@@ -421,6 +458,8 @@ This is the main design hardening in this revision. Reusing `requestId` alone is
 
 ### Phase 4.3 - Incremental emission
 
+Status: Completed on 2026-04-21
+
 #### Changes
 
 1. **`CrawlManifestStore.kt` / `CrawlSessionDirectory`**
@@ -438,6 +477,8 @@ This is the main design hardening in this revision. Reusing `requestId` alone is
 
 ### Phase 4.4 - Surface graph paths in the summary and UI
 
+Status: Completed on 2026-04-21
+
 #### Changes
 
 1. **`CrawlerModels.kt`**
@@ -450,6 +491,8 @@ This is the main design hardening in this revision. Reusing `requestId` alone is
    - Keep `maxDepthReached` visible in the final summary.
 
 ### Phase 4.5 - Tests for PR 4
+
+Status: Completed on 2026-04-21
 
 1. **`CrawlGraphBuilderTest.kt`** (new)
    - `build_preserves_node_order_by_screen_record_index`
@@ -470,17 +513,17 @@ This is the main design hardening in this revision. Reusing `requestId` alone is
 
 #### Automated
 
-- `./gradlew test --tests "com.example.apptohtml.crawler.CrawlGraphBuilderTest"` passes.
-- `./gradlew test --tests "com.example.apptohtml.crawler.CrawlGraphJsonWriterTest"` passes.
-- `./gradlew test --tests "com.example.apptohtml.crawler.CrawlGraphHtmlRendererTest"` passes.
-- `./gradlew test --tests "com.example.apptohtml.crawler.DeepCrawlCoordinatorTest"` passes with graph assertions.
-- `./gradlew test` passes.
+- [x] `./gradlew test --tests "com.example.apptohtml.crawler.CrawlGraphBuilderTest"` passes.
+- [x] `./gradlew test --tests "com.example.apptohtml.crawler.CrawlGraphJsonWriterTest"` passes.
+- [x] `./gradlew test --tests "com.example.apptohtml.crawler.CrawlGraphHtmlRendererTest"` passes.
+- [x] `./gradlew test --tests "com.example.apptohtml.crawler.DeepCrawlCoordinatorTest"` passes with graph assertions.
+- [x] `./gradlew test` passes.
 
 #### Manual
 
-- Run a crawl, copy the session directory to a desktop, open `crawl-graph.html` with networking disabled, and confirm the graph renders and remains fully interactive offline.
-- Confirm node links open the sibling HTML artifacts from the same folder.
-- Confirm filtering and hover highlighting behave deterministically across repeated opens.
+- [x] Run a crawl, copy the session directory to a desktop, open `crawl-graph.html` with networking disabled, and confirm the graph renders and remains fully interactive offline.
+- [x] Confirm node links open the sibling HTML artifacts from the same folder.
+- [x] Confirm filtering and hover highlighting behave deterministically across repeated opens.
 
 ---
 

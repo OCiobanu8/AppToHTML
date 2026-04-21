@@ -116,14 +116,8 @@ This behavior was observed in the `com.android.settings` crawl investigated on A
 - persisted `screenFingerprint`
 - `maxDepthReached`
 - coordinator-based traversal and path replay support
-
-### Not Yet Implemented
-
-- `CrawlEdgeStatus.SKIPPED_EXTERNAL_PACKAGE`
 - `PressableElement.editable`
 - `CrawlBlacklist.skipEditable`
-- paused-for-decision crawler phase
-- warning dialog resume/stop APIs
 - `graphJsonPath`
 - `graphHtmlPath`
 
@@ -147,7 +141,7 @@ This behavior was observed in the `com.android.settings` crawl investigated on A
 
 - [x] Add per-run screen fingerprint deduplication
 - [x] Link edges to existing screens when a known screen is revisited
-- [ ] Add edge statuses for `LINKED_EXISTING` and `SKIPPED_EXTERNAL_PACKAGE`
+- [x] Add edge statuses for `LINKED_EXISTING` and `SKIPPED_EXTERNAL_PACKAGE`
 - [x] Keep graph relationships authoritative in `edges[]`
 
 ### Safety Rules
@@ -156,36 +150,36 @@ This behavior was observed in the `com.android.settings` crawl investigated on A
 - [x] Add `editable` capture to accessibility snapshots and `PressableElement`
 - [x] Add `skipEditable` support to blacklist config and evaluation
 - [x] Preserve `skipCheckable = true`
-- [ ] Treat leaving the target package as a hard skip outcome
+- [x] Treat leaving the target package as a hard skip outcome
 - [ ] Re-verify screen fingerprints before expanding previously discovered screens
 
 ### Pause/Resume Flow
 
-- [ ] Add soft safety checkpoints for elapsed time
-- [ ] Add soft safety checkpoints for repeated edge failures
-- [ ] Add paused-for-decision state to crawler session models
-- [ ] Persist progress before showing a warning
-- [ ] Return AppToHTML to the foreground when a warning is triggered
-- [ ] Add `Continue` and `Stop and save` session actions
-- [ ] Roll warning thresholds forward after each user-approved continue
+- [x] Add soft safety checkpoints for elapsed time
+- [x] Add soft safety checkpoints for repeated edge failures
+- [x] Add paused-for-decision state to crawler session models
+- [x] Persist progress before showing a warning
+- [x] Return AppToHTML to the foreground when a warning is triggered
+- [x] Add `Continue` and `Stop and save` session actions
+- [x] Roll warning thresholds forward after each user-approved continue
 
 ### UI
 
 - [x] Rename one-layer crawl UI copy to deep crawl
 - [x] Update explainer text to match the new crawl contract
-- [ ] Add warning `AlertDialog` for paused safety checkpoints
-- [ ] Show current progress and pause reason in the dialog
-- [ ] Surface graph export paths and max depth in the final crawl summary
+- [x] Add warning `AlertDialog` for paused safety checkpoints
+- [x] Show current progress and pause reason in the dialog
+- [x] Surface graph export paths and max depth in the final crawl summary
 
 ### Export
 
-- [ ] Add `crawl-graph.json` export format
-- [ ] Add self-contained offline `crawl-graph.html`
-- [ ] Render deterministic SVG graph layout by depth and discovery order
-- [ ] Add node metadata and local artifact references
-- [ ] Style edges by crawl status
-- [ ] Add offline controls for zoom/pan, filtering, and neighbor highlighting
-- [ ] Update manifest and graph exports incrementally during crawl progress
+- [x] Add `crawl-graph.json` export format
+- [x] Add self-contained offline `crawl-graph.html`
+- [x] Render deterministic SVG graph layout by depth and discovery order
+- [x] Add node metadata and local artifact references
+- [x] Style edges by crawl status
+- [x] Add offline controls for zoom/pan, filtering, and neighbor highlighting
+- [x] Update manifest and graph exports incrementally during crawl progress
 
 ### Documentation And Tests
 
@@ -193,10 +187,10 @@ This behavior was observed in the `com.android.settings` crawl investigated on A
 - [ ] Document desktop graph export usage
 - [x] Add tests for deep traversal chains
 - [x] Add tests for cycles and deduplication
-- [ ] Add tests for external-package skips
+- [x] Add tests for external-package skips
 - [x] Add tests for editable/checkable blacklist handling
-- [ ] Add tests for pause/resume checkpoints
-- [ ] Add tests for incremental graph export and offline viewer generation
+- [x] Add tests for pause/resume checkpoints
+- [x] Add tests for incremental graph export and offline viewer generation
 
 ## Test Plan
 
@@ -206,8 +200,8 @@ This behavior was observed in the `com.android.settings` crawl investigated on A
 - Replay path resolution reports full, partial, and missing-path outcomes.
 - Manifest snapshots persist route metadata, `screenFingerprint`, and `maxDepthReached`.
 - Crawl logs include frontier mutations and linked-existing events.
-- External-package transition coverage remains open until `SKIPPED_EXTERNAL_PACKAGE` is implemented.
-- Editable and warning-threshold coverage remains open until those features land.
+- External-package transition coverage is implemented and covered by the current branch tests.
+- Editable and warning-threshold coverage is implemented and covered by the current branch tests.
 
 ## Assumptions
 

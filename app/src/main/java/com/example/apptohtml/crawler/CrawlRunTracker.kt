@@ -28,6 +28,7 @@ class CrawlRunTracker(
         screens += CrawlScreenRecord(
             screenId = screenId,
             screenName = snapshot.screenName,
+            packageName = snapshot.packageName,
             screenFingerprint = screenFingerprint,
             htmlPath = files.htmlFile.absolutePath,
             xmlPath = files.xmlFile.absolutePath,
@@ -104,7 +105,8 @@ class CrawlRunTracker(
     fun skippedElementCount(): Int {
         return edges.count { edge ->
             edge.status == CrawlEdgeStatus.SKIPPED_BLACKLIST ||
-                edge.status == CrawlEdgeStatus.SKIPPED_NO_NAVIGATION
+                edge.status == CrawlEdgeStatus.SKIPPED_NO_NAVIGATION ||
+                edge.status == CrawlEdgeStatus.SKIPPED_EXTERNAL_PACKAGE
         }
     }
 }

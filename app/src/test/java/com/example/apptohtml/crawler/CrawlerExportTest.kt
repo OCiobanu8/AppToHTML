@@ -1229,6 +1229,8 @@ class CrawlerExportTest {
                 rootScreenName = "Home Screen",
                 rootFiles = files,
                 manifestFile = File("build/crawl-index.json"),
+                graphJsonPath = File("build/crawl-graph.json"),
+                graphHtmlPath = File("build/crawl-graph.html"),
                 rootScrollStepCount = 3,
                 capturedScreenCount = 2,
                 capturedChildScreenCount = 1,
@@ -1241,6 +1243,8 @@ class CrawlerExportTest {
                 rootScreenName = "Home Screen",
                 rootFiles = files,
                 manifestFile = File("build/crawl-index.json"),
+                graphJsonPath = File("build/crawl-graph.json"),
+                graphHtmlPath = File("build/crawl-graph.html"),
                 rootScrollStepCount = 3,
                 capturedScreenCount = 1,
                 capturedChildScreenCount = 0,
@@ -1260,9 +1264,13 @@ class CrawlerExportTest {
         assertEquals(3, captured.scrollStepCount)
         assertEquals(2, captured.capturedScreenCount)
         assertEquals(1, captured.maxDepthReached)
+        assertEquals(File("build/crawl-graph.json").absolutePath, captured.graphJsonPath)
+        assertEquals(File("build/crawl-graph.html").absolutePath, captured.graphHtmlPath)
         assertEquals(CrawlerPhase.ABORTED, aborted.phase)
         assertTrue(aborted.partialResult)
         assertEquals(0, aborted.maxDepthReached)
+        assertEquals(File("build/crawl-graph.json").absolutePath, aborted.graphJsonPath)
+        assertEquals(File("build/crawl-graph.html").absolutePath, aborted.graphHtmlPath)
         assertEquals(CrawlerPhase.FAILED, failed.phase)
         assertEquals("Boom", failed.failureMessage)
     }
