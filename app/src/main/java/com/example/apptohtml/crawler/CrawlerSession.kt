@@ -50,7 +50,7 @@ object CrawlerSession {
             selectedApp = selectedApp,
             alreadyRunning = alreadyRunning,
         )
-        DiagnosticLogger.log("Starting first-screen capture for ${selectedApp.packageName}; requestId=$requestId")
+        DiagnosticLogger.log("Starting deep crawl for ${selectedApp.packageName}; requestId=$requestId")
 
         val launchResult = AppLaunchHelper.launchSelectedApp(
             context = context,

@@ -177,5 +177,6 @@
     "radio",
     "toggle"
   ],
-  "skipCheckable": true
+  "skipCheckable": true,
+  "skipEditable": true
 }

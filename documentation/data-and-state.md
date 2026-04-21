@@ -36,6 +36,7 @@ The only persisted user-facing state today is the selected app reference.
 - output file paths
 - failure message
 - scroll step count
+- captured, skipped, and depth counters
 
 This state is process-local and intentionally not persisted.
 
@@ -56,11 +57,17 @@ The accessibility service keeps short-lived runtime facts such as:
 
 ### XML output
 
-- One synthetic XML file per captured screen.
+- One XML export per captured screen plus an optional merged accessibility XML export.
 - Includes:
   - merged elements
   - scroll-step count
   - per-step node tree snapshots
+  - safety-relevant flags such as `checkable` and `editable`
+
+### Crawl manifest
+
+- `crawl-index.json` tracks screens, edges, route metadata, dedup fingerprints, and aggregate counters.
+- Route steps now preserve the `editable` flag so replay identity stays aligned with captured safety state.
 
 ### Storage location
 
@@ -84,5 +91,6 @@ scroll behavior and accessibility output vary by app.
   product need.
 - Keep runtime crawler state in dedicated domain models so UI changes do not
   reshape core logic.
+- Keep blacklist-backed safety flags explicit in persisted models so risky element handling is auditable.
 - Use diagnostics to explain live-device behavior before adding more crawler
   heuristics.

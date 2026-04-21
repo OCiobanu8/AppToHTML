@@ -108,6 +108,57 @@ class DeepCrawlCoordinatorTest {
     }
 
     @Test
+    fun bfsTraversal_skips_editable_elements_when_skipEditable_true() = runBlocking {
+        val tempDir = Files.createTempDirectory("deep-crawl-editable").toFile()
+        try {
+            val host = FakeHost(
+                entryScreenId = "A",
+                screens = mapOf(
+                    "A" to fakeScreen(
+                        id = "A",
+                        screenName = "Screen A",
+                        elements = listOf(
+                            fakeElement("Edit name", 0, editable = true),
+                            fakeElement("Open B", 1),
+                        ),
+                        transitions = mapOf("Open B" to "B"),
+                    ),
+                    "B" to fakeScreen(
+                        id = "B",
+                        screenName = "Screen B",
+                        elements = emptyList(),
+                        transitions = emptyMap(),
+                    ),
+                ),
+            )
+
+            val outcome = coordinator(
+                host = host,
+                tempDir = tempDir,
+                blacklist = CrawlBlacklist(
+                    skipCheckable = false,
+                    skipEditable = true,
+                ),
+            ).crawl(
+                initialRoot = host.captureCurrentRootSnapshot("com.example.target")!!,
+                eventClassName = "ScreenA",
+            )
+
+            val summary = (outcome as DeepCrawlCoordinator.DeepCrawlOutcome.Completed).summary
+            val manifestJson = summary.manifestFile.readText()
+
+            assertEquals(2, summary.capturedScreenCount)
+            assertEquals(1, summary.skippedElementCount)
+            assertTrue(manifestJson.contains("blacklist-editable"))
+            assertTrue(manifestJson.contains(""""label": "Edit name""""))
+            assertTrue(manifestJson.contains(""""label": "Open B""""))
+            assertTrue(!manifestJson.contains(""""screenName": "Edit name""""))
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
     fun bfsTraversal_allows_cross_package_child_screens() = runBlocking {
         val tempDir = Files.createTempDirectory("deep-crawl-cross-package").toFile()
         try {
@@ -500,11 +551,12 @@ class DeepCrawlCoordinatorTest {
     private fun coordinator(
         host: FakeHost,
         tempDir: File,
+        blacklist: CrawlBlacklist = CrawlBlacklist(skipCheckable = false),
     ): DeepCrawlCoordinator {
         return DeepCrawlCoordinator(
             selectedApp = selectedApp(),
             host = host,
-            loadBlacklist = { CrawlBlacklist(skipCheckable = false) },
+            loadBlacklist = { blacklist },
             createSession = {
                 val sessionDir = File(tempDir, "session-$it").apply { mkdirs() }
                 CrawlSessionDirectory(
@@ -545,14 +597,19 @@ class DeepCrawlCoordinatorTest {
         )
     }
 
-    private fun fakeElement(label: String, index: Int): PressableElement {
+    private fun fakeElement(
+        label: String,
+        index: Int,
+        editable: Boolean = false,
+    ): PressableElement {
         return PressableElement(
             label = label,
             resourceId = "com.example.target:id/${label.lowercase().replace(' ', '_')}",
             bounds = "[0,${index * 100}][200,${index * 100 + 80}]",
-            className = "android.widget.Button",
+            className = if (editable) "android.widget.EditText" else "android.widget.Button",
             isListItem = false,
             childIndexPath = listOf(index),
+            editable = editable,
             firstSeenStep = 0,
         )
     }
@@ -678,6 +735,7 @@ class DeepCrawlCoordinatorTest {
                             clickable = true,
                             supportsClickAction = true,
                             scrollable = false,
+                            editable = element.editable,
                             enabled = true,
                             visibleToUser = true,
                             bounds = shiftedBounds.shiftedBounds(element.bounds),

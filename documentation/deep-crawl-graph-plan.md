@@ -153,9 +153,9 @@ This behavior was observed in the `com.android.settings` crawl investigated on A
 ### Safety Rules
 
 - [ ] Expand blacklist tokens across the agreed risky action categories
-- [ ] Add `editable` capture to accessibility snapshots and `PressableElement`
-- [ ] Add `skipEditable` support to blacklist config and evaluation
-- [ ] Preserve `skipCheckable = true`
+- [x] Add `editable` capture to accessibility snapshots and `PressableElement`
+- [x] Add `skipEditable` support to blacklist config and evaluation
+- [x] Preserve `skipCheckable = true`
 - [ ] Treat leaving the target package as a hard skip outcome
 - [ ] Re-verify screen fingerprints before expanding previously discovered screens
 
@@ -171,8 +171,8 @@ This behavior was observed in the `com.android.settings` crawl investigated on A
 
 ### UI
 
-- [ ] Rename one-layer crawl UI copy to deep crawl
-- [ ] Update explainer text to match the new crawl contract
+- [x] Rename one-layer crawl UI copy to deep crawl
+- [x] Update explainer text to match the new crawl contract
 - [ ] Add warning `AlertDialog` for paused safety checkpoints
 - [ ] Show current progress and pause reason in the dialog
 - [ ] Surface graph export paths and max depth in the final crawl summary
@@ -189,12 +189,12 @@ This behavior was observed in the `com.android.settings` crawl investigated on A
 
 ### Documentation And Tests
 
-- [ ] Update crawler documentation to replace one-layer wording
+- [x] Update crawler documentation to replace one-layer wording
 - [ ] Document desktop graph export usage
 - [x] Add tests for deep traversal chains
 - [x] Add tests for cycles and deduplication
 - [ ] Add tests for external-package skips
-- [ ] Add tests for editable/checkable blacklist handling
+- [x] Add tests for editable/checkable blacklist handling
 - [ ] Add tests for pause/resume checkpoints
 - [ ] Add tests for incremental graph export and offline viewer generation
 

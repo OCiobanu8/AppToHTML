@@ -150,6 +150,7 @@ data class PressableElement(
     val childIndexPath: List<Int> = emptyList(),
     val checkable: Boolean = false,
     val checked: Boolean = false,
+    val editable: Boolean = false,
     val firstSeenStep: Int = 0,
 )
 
@@ -161,6 +162,7 @@ data class CrawlRouteStep(
     val label: String,
     val checkable: Boolean,
     val checked: Boolean,
+    val editable: Boolean,
     val firstSeenStep: Int,
 )
 
@@ -179,6 +181,7 @@ data class PressableElementLinkKey(
     val childIndexPath: List<Int>,
     val checkable: Boolean,
     val checked: Boolean,
+    val editable: Boolean,
     val firstSeenStep: Int,
 )
 
@@ -192,6 +195,7 @@ internal fun PressableElement.toLinkKey(): PressableElementLinkKey {
         childIndexPath = childIndexPath,
         checkable = checkable,
         checked = checked,
+        editable = editable,
         firstSeenStep = firstSeenStep,
     )
 }
@@ -205,6 +209,7 @@ internal fun PressableElement.toRouteStep(): CrawlRouteStep {
         label = label,
         checkable = checkable,
         checked = checked,
+        editable = editable,
         firstSeenStep = firstSeenStep,
     )
 }
@@ -219,6 +224,7 @@ internal fun CrawlRouteStep.toPressableElement(): PressableElement {
         childIndexPath = childIndexPath,
         checkable = checkable,
         checked = checked,
+        editable = editable,
         firstSeenStep = firstSeenStep,
     )
 }
@@ -251,6 +257,7 @@ data class AccessibilityNodeSnapshot(
     val scrollable: Boolean,
     val checkable: Boolean = false,
     val checked: Boolean = false,
+    val editable: Boolean = false,
     val enabled: Boolean,
     val visibleToUser: Boolean,
     val bounds: String,

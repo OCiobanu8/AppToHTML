@@ -9,6 +9,7 @@ data class CrawlBlacklist(
     val resourceIdTokens: Set<String> = emptySet(),
     val classNameTokens: Set<String> = emptySet(),
     val skipCheckable: Boolean = true,
+    val skipEditable: Boolean = true,
 ) {
     fun skipReason(element: PressableElement): String? {
         val normalizedLabel = normalize(element.label)
@@ -28,6 +29,10 @@ data class CrawlBlacklist(
 
         if (skipCheckable && element.checkable) {
             return "blacklist-checkable"
+        }
+
+        if (skipEditable && element.editable) {
+            return "blacklist-editable"
         }
 
         return null
@@ -62,6 +67,7 @@ object CrawlBlacklistLoader {
             resourceIdTokens = readStringSet(json, "resourceIdTokens"),
             classNameTokens = readStringSet(json, "classNameTokens"),
             skipCheckable = readBoolean(json, "skipCheckable", true),
+            skipEditable = readBoolean(json, "skipEditable", true),
         )
     }
 

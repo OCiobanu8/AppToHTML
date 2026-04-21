@@ -156,6 +156,7 @@ internal object SyntheticAccessibilityTreeBuilder {
             scrollable = existing.scrollable || incoming.scrollable,
             checkable = existing.checkable || incoming.checkable,
             checked = existing.checked || incoming.checked,
+            editable = existing.editable || incoming.editable,
             enabled = existing.enabled || incoming.enabled,
             visibleToUser = existing.visibleToUser || incoming.visibleToUser,
             children = mergedChildren.values.toList(),

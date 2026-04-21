@@ -60,6 +60,7 @@ object AccessibilityTreeSnapshotter {
             scrollable = node.isScrollable,
             checkable = node.isCheckable,
             checked = checkedState(node),
+            editable = node.isEditable,
             enabled = node.isEnabled,
             visibleToUser = node.isVisibleToUser,
             bounds = bounds.toShortString(),
@@ -99,6 +100,7 @@ object AccessibilityTreeSnapshotter {
                     childIndexPath = node.childIndexPath,
                     checkable = node.checkable,
                     checked = node.checked,
+                    editable = node.editable,
                 )
             )
         } else {

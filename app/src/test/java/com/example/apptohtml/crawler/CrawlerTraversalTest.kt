@@ -9,14 +9,15 @@ import java.nio.file.Files
 
 class CrawlerTraversalTest {
     @Test
-    fun blacklist_parser_marks_label_resource_class_and_checkable_matches() {
+    fun blacklist_parser_marks_editable_matches() {
         val blacklist = CrawlBlacklistLoader.parse(
             """
             {
               "labelTokens": ["search"],
               "resourceIdTokens": ["install"],
               "classNameTokens": ["switch"],
-              "skipCheckable": true
+              "skipCheckable": true,
+              "skipEditable": true
             }
             """.trimIndent()
         )
@@ -68,10 +69,21 @@ class CrawlerTraversalTest {
                 )
             )
         )
+        assertEquals(
+            "blacklist-editable",
+            blacklist.skipReason(
+                testElement(
+                    label = "Display name",
+                    resourceId = "com.example:id/display_name",
+                    className = "android.widget.EditText",
+                    editable = true,
+                )
+            )
+        )
     }
 
     @Test
-    fun default_blacklist_blocks_representative_risky_actions_from_each_category() {
+    fun default_blacklist_blocks_editable_elements() {
         val blacklist = loadDefaultBlacklist()
 
         assertEquals(
@@ -114,6 +126,20 @@ class CrawlerTraversalTest {
             "blacklist-checkable",
             blacklist.skipReason(testElement(checkable = true))
         )
+        assertEquals(
+            "blacklist-editable",
+            blacklist.skipReason(
+                testElement(
+                    className = "android.widget.EditText",
+                    editable = true,
+                )
+            )
+        )
+    }
+
+    @Test
+    fun crawl_blacklist_json_declares_skip_editable_true() {
+        assertTrue(loadDefaultBlacklist().skipEditable)
     }
 
     @Test
@@ -189,6 +215,22 @@ class CrawlerTraversalTest {
         assertTrue(
             ScreenNaming.dedupFingerprint(firstSnapshot.screenName) !=
                 ScreenNaming.dedupFingerprint(secondSnapshot.screenName)
+        )
+    }
+
+    @Test
+    fun merged_snapshot_preserves_editable_elements_in_models_and_xml() {
+        val snapshot = testSnapshot(
+            screenName = "Profile",
+            label = "Display name",
+            editable = true,
+        )
+
+        assertTrue(snapshot.elements.single().editable)
+        assertTrue(snapshot.xmlDump.contains("""editable="true""""))
+        assertEquals(
+            true,
+            snapshot.elements.single().toRouteStep().editable
         )
     }
 
@@ -394,7 +436,11 @@ class CrawlerTraversalTest {
         }
     }
 
-    private fun testSnapshot(screenName: String, label: String): ScreenSnapshot {
+    private fun testSnapshot(
+        screenName: String,
+        label: String,
+        editable: Boolean = false,
+    ): ScreenSnapshot {
         val root = AccessibilityNodeSnapshot(
             className = "android.widget.FrameLayout",
             packageName = "com.example.target",
@@ -417,6 +463,7 @@ class CrawlerTraversalTest {
                     clickable = true,
                     supportsClickAction = true,
                     scrollable = false,
+                    editable = editable,
                     enabled = true,
                     visibleToUser = true,
                     bounds = "[0,0][100,50]",
@@ -452,6 +499,7 @@ class CrawlerTraversalTest {
         resourceId: String? = "com.example:id/safe_target",
         className: String = "android.widget.Button",
         checkable: Boolean = false,
+        editable: Boolean = false,
     ): PressableElement {
         return PressableElement(
             label = label,
@@ -460,6 +508,7 @@ class CrawlerTraversalTest {
             className = className,
             isListItem = false,
             checkable = checkable,
+            editable = editable,
         )
     }
 }

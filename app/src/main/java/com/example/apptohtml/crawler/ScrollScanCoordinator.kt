@@ -277,6 +277,7 @@ internal class ScrollScanCoordinator(
             element.className.orEmpty(),
             element.isListItem.toString(),
             element.checkable.toString(),
+            element.editable.toString(),
         ).joinToString("|")
     }
 
@@ -324,6 +325,7 @@ internal class ScrollScanCoordinator(
             add(element.isListItem.toString())
             add(element.checkable.toString())
             add(element.checked.toString())
+            add(element.editable.toString())
             if (includeBounds) {
                 add(element.bounds)
             }
@@ -566,6 +568,7 @@ internal class ScrollScanAccumulator(
             isListItem = element.isListItem,
             checkable = element.checkable,
             checked = element.checked,
+            editable = element.editable,
         )
     }
 
@@ -576,5 +579,6 @@ internal class ScrollScanAccumulator(
         val isListItem: Boolean,
         val checkable: Boolean,
         val checked: Boolean,
+        val editable: Boolean,
     )
 }

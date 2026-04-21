@@ -174,7 +174,7 @@ private fun AppToHtmlScreen(
             enabled = canStartCapture,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("Start One-Layer Crawl")
+            Text("Start Deep Crawl")
         }
         Text(crawlerState.statusMessage)
         if (!canStartCapture) {
@@ -189,7 +189,7 @@ private fun AppToHtmlScreen(
             )
         } else {
             Text(
-                text = "The crawler brings the target app to the foreground, backs out until no visible in-app back button remains, maps the root screen, opens safe child targets one layer deep, and saves a crawl index plus per-screen HTML and XML output.",
+                text = "The crawler brings the target app to the foreground, resets to the entry screen, explores safe targets breadth-first, records captured, linked, and skipped outcomes, and saves a crawl index plus per-screen HTML and XML output for the upcoming graph viewer.",
                 style = MaterialTheme.typography.bodySmall,
             )
         }

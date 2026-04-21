@@ -49,6 +49,7 @@ object CrawlManifestStore {
                             appendLine("""          "label": "${escape(step.label)}",""")
                             appendLine("""          "checkable": ${step.checkable},""")
                             appendLine("""          "checked": ${step.checked},""")
+                            appendLine("""          "editable": ${step.editable},""")
                             append("""          "firstSeenStep": ${step.firstSeenStep}""")
                             appendLine()
                             append("        }")
