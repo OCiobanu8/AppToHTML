@@ -7,6 +7,7 @@ class CrawlRunTracker(
 ) {
     private val screens = mutableListOf<CrawlScreenRecord>()
     private val edges = mutableListOf<CrawlEdgeRecord>()
+    private val screenFingerprintToId = linkedMapOf<String, String>()
     private var rootScreenId: String? = null
     private var nextScreenSequence = 0
     private var nextEdgeSequence = 0
@@ -16,14 +17,19 @@ class CrawlRunTracker(
     fun addScreen(
         screenId: String,
         snapshot: ScreenSnapshot,
+        screenFingerprint: String,
+        indexFingerprint: Boolean = true,
         files: CapturedScreenFiles,
         parentScreenId: String?,
         triggerElement: PressableElement?,
+        route: CrawlRoute,
         depth: Int,
     ) {
         screens += CrawlScreenRecord(
             screenId = screenId,
             screenName = snapshot.screenName,
+            packageName = snapshot.packageName,
+            screenFingerprint = screenFingerprint,
             htmlPath = files.htmlFile.absolutePath,
             xmlPath = files.xmlFile.absolutePath,
             mergedXmlPath = files.mergedXmlFile?.absolutePath,
@@ -31,8 +37,12 @@ class CrawlRunTracker(
             parentScreenId = parentScreenId,
             triggerLabel = triggerElement?.label,
             triggerResourceId = triggerElement?.resourceId,
+            route = route,
             depth = depth,
         )
+        if (indexFingerprint) {
+            screenFingerprintToId.putIfAbsent(screenFingerprint, screenId)
+        }
         if (depth == 0) {
             rootScreenId = screenId
         }
@@ -72,19 +82,31 @@ class CrawlRunTracker(
             finishedAt = finishedAt,
             status = status,
             rootScreenId = rootScreenId,
+            maxDepthReached = maxDiscoveredDepth(),
             screens = screens.toList(),
             edges = edges.toList(),
         )
+    }
+
+    fun findScreenIdByFingerprint(screenFingerprint: String): String? {
+        return screenFingerprintToId[screenFingerprint]
+    }
+
+    fun findScreen(screenId: String): CrawlScreenRecord? {
+        return screens.firstOrNull { screen -> screen.screenId == screenId }
     }
 
     fun capturedScreenCount(): Int = screens.size
 
     fun capturedChildScreenCount(): Int = screens.count { it.depth > 0 }
 
+    fun maxDiscoveredDepth(): Int = screens.maxOfOrNull { it.depth } ?: 0
+
     fun skippedElementCount(): Int {
         return edges.count { edge ->
             edge.status == CrawlEdgeStatus.SKIPPED_BLACKLIST ||
-                edge.status == CrawlEdgeStatus.SKIPPED_NO_NAVIGATION
+                edge.status == CrawlEdgeStatus.SKIPPED_NO_NAVIGATION ||
+                edge.status == CrawlEdgeStatus.SKIPPED_EXTERNAL_PACKAGE
         }
     }
 }

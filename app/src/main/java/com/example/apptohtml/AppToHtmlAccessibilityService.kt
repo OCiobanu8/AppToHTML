@@ -12,15 +12,23 @@ import com.example.apptohtml.crawler.CaptureFileStore
 import com.example.apptohtml.crawler.CapturedScreenFiles
 import com.example.apptohtml.crawler.CrawlBlacklistLoader
 import com.example.apptohtml.crawler.CrawlEdgeStatus
+import com.example.apptohtml.crawler.CrawlLogger
 import com.example.apptohtml.crawler.CrawlRunStatus
 import com.example.apptohtml.crawler.CrawlRunSummary
 import com.example.apptohtml.crawler.CrawlRunTracker
 import com.example.apptohtml.crawler.CrawlSessionDirectory
 import com.example.apptohtml.crawler.CrawlerPhase
 import com.example.apptohtml.crawler.CrawlerSession
+import com.example.apptohtml.crawler.DeepCrawlCoordinator
 import com.example.apptohtml.crawler.EntryScreenResetStopReason
+import com.example.apptohtml.crawler.ExternalPackageDecisionContext
+import com.example.apptohtml.crawler.PathReplayResolver
+import com.example.apptohtml.crawler.PauseDecision
+import com.example.apptohtml.crawler.PauseProgressSnapshot
+import com.example.apptohtml.crawler.PauseReason
 import com.example.apptohtml.crawler.PressableElementLinkKey
 import com.example.apptohtml.crawler.PressableElement
+import com.example.apptohtml.crawler.ScreenNaming
 import com.example.apptohtml.crawler.ScreenSnapshot
 import com.example.apptohtml.crawler.ScrollScanCoordinator
 import com.example.apptohtml.crawler.TraversalPlanner
@@ -41,7 +49,10 @@ import kotlin.math.abs
 class AppToHtmlAccessibilityService : AccessibilityService() {
     private val scrollScanCoordinator = ScrollScanCoordinator()
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val waitingCaptureGenerationGate = WaitingCaptureGenerationGate()
     private var captureJob: Job? = null
+    @Volatile
+    private var activeCrawlLogger: CrawlLogger? = null
 
     companion object {
         private const val captureDebounceMillis = 350L
@@ -83,11 +94,12 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
         }
 
         val eventClassName = safeEvent.className?.toString()
-        captureJob?.cancel()
+        val scheduledGeneration = waitingCaptureGenerationGate.scheduleNextAttempt()
         captureJob = serviceScope.launch {
             delay(captureDebounceMillis)
             attemptCapture(
                 requestId = requestId,
+                scheduledGeneration = scheduledGeneration,
                 targetPackageName = selectedApp.packageName,
                 eventClassName = eventClassName,
             )
@@ -106,9 +118,14 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
 
     private suspend fun attemptCapture(
         requestId: Long,
+        scheduledGeneration: Long,
         targetPackageName: String,
         eventClassName: String?,
     ) {
+        if (!waitingCaptureGenerationGate.isCurrent(scheduledGeneration)) {
+            return
+        }
+
         val current = CrawlerSession.currentState()
         val selectedApp = current.selectedApp ?: return
         if (current.requestId != requestId || current.phase != CrawlerPhase.WAITING_FOR_TARGET_SCREEN) {
@@ -122,276 +139,118 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
                 return
             }
 
-            val crawlStartedAt = System.currentTimeMillis()
-            val blacklist = CrawlBlacklistLoader.load(this)
-            val session = CaptureFileStore.createSession(this, targetPackageName, crawlStartedAt)
-            val tracker = CrawlRunTracker(
-                sessionId = session.sessionId,
-                packageName = targetPackageName,
-                startedAt = crawlStartedAt,
-            )
-
-            CrawlerSession.beginScanning(
-                requestId = requestId,
-                message = "Resetting to the first screen.",
-            )
-
-            val entryResetResult = normalizeRootToEntryScreen(
-                targetPackageName = targetPackageName,
-                initialRoot = AccessibilityTreeSnapshotter.captureRootSnapshot(root),
-                requestId = requestId,
-            )
-            if (entryResetResult.stopReason != EntryScreenResetStopReason.NO_BACK_AFFORDANCE) {
-                throw IllegalStateException(entryScreenResetFailureMessage(entryResetResult.stopReason))
+            if (!waitingCaptureGenerationGate.isCurrent(scheduledGeneration)) {
+                return
             }
-            val entryRoot = entryResetResult.root
 
-            val liveEntryRoot = ensureTargetAppForegroundForRootScan(
-                selectedApp = selectedApp,
-                targetPackageName = targetPackageName,
-                requestId = requestId,
-            )
-
-            val rootSnapshot = scanCurrentScreen(
-                selectedApp = selectedApp,
-                eventClassName = liveEntryRoot.className ?: entryRoot.className ?: eventClassName,
-                initialRoot = liveEntryRoot,
-                capturePackageName = targetPackageName,
-                requestId = requestId,
-                progressPrefix = "Mapping the root screen.",
-            )
-
-            val rootSequence = tracker.nextScreenSequenceNumber()
-            val rootScreenId = screenIdFor(rootSequence)
-            val rootFiles = CaptureFileStore.saveScreen(
-                session = session,
-                snapshot = rootSnapshot,
-                sequenceNumber = rootSequence,
-                screenPrefix = "root",
-            )
-            val resolvedRootLinks = mutableMapOf<PressableElementLinkKey, String>()
-            tracker.addScreen(
-                screenId = rootScreenId,
-                snapshot = rootSnapshot,
-                files = rootFiles,
-                parentScreenId = null,
-                triggerElement = null,
-                depth = 0,
-            )
-
-            val rootTopSnapshot = rootSnapshot.stepSnapshots.firstOrNull()?.root
-                ?: throw IllegalStateException("Root capture did not preserve a top-of-screen snapshot.")
-            val rootTopFingerprint = scrollScanCoordinator.fingerprint(rootTopSnapshot)
-
-            val traversalPlan = TraversalPlanner.planRootTraversal(rootSnapshot, blacklist)
-            traversalPlan.skippedElements.forEach { skipped ->
-                tracker.addEdge(
-                    parentScreenId = rootScreenId,
-                    element = skipped.element,
-                    status = CrawlEdgeStatus.SKIPPED_BLACKLIST,
-                    message = skipped.reason,
-                )
-            }
-            CaptureFileStore.saveManifest(session, tracker.buildManifest(CrawlRunStatus.IN_PROGRESS))
-
-            if (traversalPlan.eligibleElements.isNotEmpty()) {
-                CrawlerSession.beginTraversingChildren(
+            if (
+                !CrawlerSession.claimScanning(
                     requestId = requestId,
-                    message = "Mapped the root screen. Visiting ${traversalPlan.eligibleElements.size} child target(s).",
+                    message = "Resetting to the first screen.",
                 )
+            ) {
+                return
             }
 
-            traversalPlan.eligibleElements.forEachIndexed { index, element ->
-                try {
-                    CrawlerSession.updateProgress(
-                        requestId = requestId,
-                        message = "Visiting child target ${index + 1} of ${traversalPlan.eligibleElements.size}: ${element.label}",
-                    )
+            val initialRoot = AccessibilityTreeSnapshotter.captureRootSnapshot(root)
+            val coordinator = DeepCrawlCoordinator(
+                selectedApp = selectedApp,
+                host = object : DeepCrawlCoordinator.Host {
+                    override suspend fun captureCurrentRootSnapshot(expectedPackageName: String?): AccessibilityNodeSnapshot? {
+                        return this@AppToHtmlAccessibilityService.captureCurrentRootSnapshot(expectedPackageName)
+                    }
 
-                    val topRoot = restoreRootToTop(
-                        selectedApp = selectedApp,
-                        targetPackageName = targetPackageName,
-                        requestId = requestId,
-                    ) ?: failCurrentEdge(
-                        element = element,
-                        message = "Could not restore the root screen before opening '${element.label}'.",
-                    )
+                    override fun scrollForward(childIndexPath: List<Int>): Boolean {
+                        val liveRoot = rootInActiveWindow ?: return false
+                        return performScroll(liveRoot, childIndexPath, AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+                    }
 
-                    if (scrollScanCoordinator.fingerprint(topRoot) != rootTopFingerprint) {
-                        failCurrentEdge(
-                            element = element,
-                            message = "The root screen no longer matches the original screen before opening '${element.label}'.",
+                    override fun scrollBackward(childIndexPath: List<Int>): Boolean {
+                        val liveRoot = rootInActiveWindow ?: return false
+                        return performScroll(liveRoot, childIndexPath, AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)
+                    }
+
+                    override fun click(element: PressableElement): Boolean {
+                        val liveRoot = rootInActiveWindow ?: return false
+                        return performClick(liveRoot, element)
+                    }
+
+                    override fun performGlobalBack(): Boolean {
+                        return performGlobalAction(GLOBAL_ACTION_BACK)
+                    }
+
+                    override suspend fun relaunchTargetApp(selectedApp: SelectedAppRef): String? {
+                        return AppLaunchHelper.launchSelectedApp(
+                            context = this@AppToHtmlAccessibilityService,
+                            selectedApp = selectedApp,
+                            lastObservedPackage = null,
+                        ).errorMessage
+                    }
+
+                    override suspend fun awaitPauseDecision(
+                        reason: PauseReason,
+                        snapshot: PauseProgressSnapshot,
+                        externalPackageContext: ExternalPackageDecisionContext?,
+                    ): PauseDecision {
+                        return CrawlerSession.pauseForDecision(
+                            reason = reason,
+                            snapshot = snapshot,
+                            externalPackageContext = externalPackageContext,
                         )
                     }
 
-                    val targetStepRoot = scrollScanCoordinator.moveToStep(
-                        selectedApp = selectedApp,
-                        initialRoot = topRoot,
-                        targetStepIndex = element.firstSeenStep,
-                        tryScrollForward = { path ->
-                            val liveRoot = rootInActiveWindow ?: return@moveToStep false
-                            performScroll(liveRoot, path, AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
-                        },
-                        captureCurrentRoot = {
-                            captureCurrentRootSnapshot(targetPackageName)
-                        },
-                        onProgress = { message ->
-                            CrawlerSession.updateProgress(requestId, message)
-                        },
-                    ) ?: failCurrentEdge(
-                        element = element,
-                        message = "Could not scroll back to '${element.label}' on the root screen.",
-                    )
-
-                    val beforeClickFingerprint = scrollScanCoordinator.fingerprint(targetStepRoot)
-                    val liveRoot = rootInActiveWindow ?: failCurrentEdge(
-                        element = element,
-                        message = "Lost the live root before clicking '${element.label}'.",
-                    )
-
-                    if (!performClick(liveRoot, element)) {
-                        failCurrentEdge(
-                            element = element,
-                            message = "Could not click '${element.label}' after returning to its screen position.",
-                        )
+                    override fun publishProgress(message: String) {
+                        CrawlerSession.updateProgress(requestId, message)
                     }
 
-                    val childInitialRoot = captureCurrentRootSnapshot(expectedPackageName = null) ?: failCurrentEdge(
-                        element = element,
-                        message = "The target app was lost immediately after clicking '${element.label}'.",
-                    )
-                    val childPackageName = childInitialRoot.packageName ?: targetPackageName
-                    val afterClickFingerprint = scrollScanCoordinator.fingerprint(childInitialRoot)
-                    if (afterClickFingerprint == beforeClickFingerprint || afterClickFingerprint == rootTopFingerprint) {
-                        tracker.addEdge(
-                            parentScreenId = rootScreenId,
-                            element = element,
-                            status = CrawlEdgeStatus.SKIPPED_NO_NAVIGATION,
-                            message = "No distinct child screen detected.",
-                        )
-                        CaptureFileStore.saveManifest(session, tracker.buildManifest(CrawlRunStatus.IN_PROGRESS))
-                        return@forEachIndexed
+                    override fun setActiveCrawlLogger(logger: CrawlLogger?) {
+                        activeCrawlLogger = logger
                     }
+                },
+                loadBlacklist = {
+                    CrawlBlacklistLoader.load(this@AppToHtmlAccessibilityService)
+                },
+                createSession = { startedAt ->
+                    CaptureFileStore.createSession(
+                        context = this@AppToHtmlAccessibilityService,
+                        packageName = targetPackageName,
+                        startedAt = startedAt,
+                    )
+                },
+                scrollScanCoordinator = scrollScanCoordinator,
+            )
 
-                    CrawlerSession.updateProgress(
+            when (
+                val result = coordinator.crawl(
+                    initialRoot = initialRoot,
+                    eventClassName = eventClassName,
+                )
+            ) {
+                is DeepCrawlCoordinator.DeepCrawlOutcome.Completed -> {
+                    CrawlerSession.completeCapture(
                         requestId = requestId,
-                        message = "Mapping child screen opened by '${element.label}'.",
+                        summary = result.summary,
                     )
+                }
 
-                    val childSnapshot = scanCurrentScreen(
-                        selectedApp = selectedApp,
-                        eventClassName = childInitialRoot.className,
-                        initialRoot = childInitialRoot,
-                        capturePackageName = childPackageName,
+                is DeepCrawlCoordinator.DeepCrawlOutcome.PartialAbort -> {
+                    CrawlerSession.abortCapture(
                         requestId = requestId,
-                        progressPrefix = "Mapping child screen '${element.label}'.",
-                    )
-
-                    val childSequence = tracker.nextScreenSequenceNumber()
-                    val childScreenId = screenIdFor(childSequence)
-                    val childFiles = CaptureFileStore.saveScreen(
-                        session = session,
-                        snapshot = childSnapshot,
-                        sequenceNumber = childSequence,
-                        screenPrefix = "child",
-                    )
-                    tracker.addScreen(
-                        screenId = childScreenId,
-                        snapshot = childSnapshot,
-                        files = childFiles,
-                        parentScreenId = rootScreenId,
-                        triggerElement = element,
-                        depth = 1,
-                    )
-                    tracker.addEdge(
-                        parentScreenId = rootScreenId,
-                        childScreenId = childScreenId,
-                        element = element,
-                        status = CrawlEdgeStatus.CAPTURED,
-                        message = "Captured child screen '${childSnapshot.screenName}'.",
-                    )
-                    resolvedRootLinks[element.toLinkKey()] = childFiles.htmlFile.name
-                    CaptureFileStore.rewriteScreenHtml(
-                        files = rootFiles,
-                        snapshot = rootSnapshot,
-                        resolvedChildLinks = resolvedRootLinks,
-                    )
-                    CaptureFileStore.saveManifest(session, tracker.buildManifest(CrawlRunStatus.IN_PROGRESS))
-
-                    val returnedRoot = navigateBackToRoot(
-                        selectedApp = selectedApp,
-                        targetPackageName = targetPackageName,
-                        expectedRootFingerprint = rootTopFingerprint,
-                        requestId = requestId,
-                    ) ?: failCurrentEdge(
-                        element = element,
-                        message = "Captured '${childSnapshot.screenName}', but could not return to the original root screen afterward.",
-                    )
-
-                    if (scrollScanCoordinator.fingerprint(returnedRoot) != rootTopFingerprint) {
-                        failCurrentEdge(
-                            element = element,
-                            message = "Returned from '${childSnapshot.screenName}', but the root screen no longer matches the original map.",
-                        )
-                    }
-                } catch (edgeFailure: RecoverableChildTraversalException) {
-                    val recoveredToRoot = recoverToRootAfterEdgeFailure(
-                        selectedApp = selectedApp,
-                        targetPackageName = targetPackageName,
-                        expectedRootFingerprint = rootTopFingerprint,
-                        requestId = requestId,
-                    )
-                    if (!recoveredToRoot) {
-                        abortPartialCapture(
-                            tracker = tracker,
-                            rootScreenId = rootScreenId,
-                            session = session,
-                            rootSnapshot = rootSnapshot,
-                            rootFiles = rootFiles,
-                            message = edgeFailure.message.orEmpty(),
-                            failedElement = edgeFailure.element,
-                        )
-                    }
-
-                    tracker.addEdge(
-                        parentScreenId = rootScreenId,
-                        element = edgeFailure.element,
-                        status = CrawlEdgeStatus.FAILED,
-                        message = edgeFailure.message,
-                    )
-                    CaptureFileStore.saveManifest(session, tracker.buildManifest(CrawlRunStatus.IN_PROGRESS))
-                    CrawlerSession.updateProgress(
-                        requestId = requestId,
-                        message = "Recovered to the root screen after '${edgeFailure.element.label}' failed. Continuing with the next target.",
+                        summary = result.summary,
+                        message = result.message,
                     )
                 }
             }
-
-            val manifestFile = CaptureFileStore.saveManifest(
-                session,
-                tracker.buildManifest(CrawlRunStatus.COMPLETED),
-            )
-            CrawlerSession.completeCapture(
-                requestId = requestId,
-                summary = buildSummary(
-                    tracker = tracker,
-                    rootSnapshot = rootSnapshot,
-                    rootFiles = rootFiles,
-                    manifestFile = manifestFile,
-                ),
-            )
-        } catch (partialAbort: PartialCrawlAbortException) {
-            CrawlerSession.abortCapture(
-                requestId = requestId,
-                summary = partialAbort.summary,
-                message = partialAbort.message.orEmpty(),
-            )
         } catch (cancellation: CancellationException) {
             DiagnosticLogger.log(
-                "Capture coroutine canceled for requestId=$requestId; treating as expected reschedule/shutdown."
+                "Capture coroutine canceled for requestId=$requestId; treating as expected shutdown/control flow."
             )
             throw cancellation
         } catch (error: Throwable) {
+            DiagnosticLogger.error(
+                "Failed to crawl the target app for requestId=$requestId package=$targetPackageName.",
+                error,
+            )
             CrawlerSession.failRequest(
                 requestId = requestId,
                 message = "Failed to crawl the target app: ${error.message ?: "unknown error"}.",
@@ -516,7 +375,7 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
     private suspend fun navigateBackToRoot(
         selectedApp: SelectedAppRef,
         targetPackageName: String,
-        expectedRootFingerprint: String,
+        expectedRootLogicalFingerprint: String,
         requestId: Long,
     ): AccessibilityNodeSnapshot? {
         repeat(maxBackNavigationAttempts) { attempt ->
@@ -534,7 +393,7 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
                 requestId = requestId,
             ) ?: return@repeat
 
-            if (scrollScanCoordinator.fingerprint(rewoundRoot) == expectedRootFingerprint) {
+            if (scrollScanCoordinator.logicalViewportFingerprint(rewoundRoot) == expectedRootLogicalFingerprint) {
                 return rewoundRoot
             }
         }
@@ -545,7 +404,7 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
     private suspend fun recoverToRootAfterEdgeFailure(
         selectedApp: SelectedAppRef,
         targetPackageName: String,
-        expectedRootFingerprint: String,
+        expectedRootLogicalFingerprint: String,
         requestId: Long,
     ): Boolean {
         val currentRoot = captureCurrentRootSnapshot(expectedPackageName = null)
@@ -555,7 +414,10 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
                 targetPackageName = targetPackageName,
                 requestId = requestId,
             )
-            if (rewoundRoot != null && scrollScanCoordinator.fingerprint(rewoundRoot) == expectedRootFingerprint) {
+            if (
+                rewoundRoot != null &&
+                scrollScanCoordinator.logicalViewportFingerprint(rewoundRoot) == expectedRootLogicalFingerprint
+            ) {
                 return true
             }
         }
@@ -563,11 +425,11 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
         val returnedRoot = navigateBackToRoot(
             selectedApp = selectedApp,
             targetPackageName = targetPackageName,
-            expectedRootFingerprint = expectedRootFingerprint,
+            expectedRootLogicalFingerprint = expectedRootLogicalFingerprint,
             requestId = requestId,
         )
         return returnedRoot != null &&
-            scrollScanCoordinator.fingerprint(returnedRoot) == expectedRootFingerprint
+            scrollScanCoordinator.logicalViewportFingerprint(returnedRoot) == expectedRootLogicalFingerprint
     }
 
     private suspend fun captureCurrentRootSnapshot(expectedPackageName: String?): AccessibilityNodeSnapshot? {
@@ -587,17 +449,33 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
         childIndexPath: List<Int>,
         action: Int,
     ): Boolean {
-        val pathNodes = resolvePathNodes(root, childIndexPath)
+        val pathResolution = resolvePathNodes(root, childIndexPath)
+        logPathDivergenceIfNeeded(action, pathResolution)
+        val pathNodes = pathResolution.usableNodes()
+        activeCrawlLogger?.info(
+            "live_action_start type=${actionName(action)} intendedChildIndexPath=$childIndexPath " +
+                "resolvedNodeCount=${pathNodes.size} resolvedPathDepth=${pathResolution.resolvedDepth} " +
+                "pathResolutionStatus=${pathResolution.status.name.lowercase()} candidateSource=path"
+        )
         if (attemptActionOnCandidates(pathNodes.asReversed(), action, "path")) {
             return true
         }
 
         val fallbackCandidates = collectScrollableCandidates(root)
             .filterNot { candidate -> pathNodes.any { it === candidate } }
+        activeCrawlLogger?.info(
+            "live_action_fallback type=${actionName(action)} intendedChildIndexPath=$childIndexPath " +
+                "fallbackCandidateCount=${fallbackCandidates.size}"
+        )
         if (attemptActionOnCandidates(fallbackCandidates, action, "fallback")) {
             return true
         }
 
+        activeCrawlLogger?.warn(
+            "live_action_failed type=${actionName(action)} intendedChildIndexPath=$childIndexPath " +
+                "resolvedNodeCount=${pathNodes.size} fallbackCandidateCount=${fallbackCandidates.size} " +
+                "pathResolutionStatus=${pathResolution.status.name.lowercase()}"
+        )
         DiagnosticLogger.log(
             "Scroll action ${actionName(action)} failed for path=$childIndexPath; no candidate accepted the gesture."
         )
@@ -608,18 +486,36 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
         root: AccessibilityNodeInfo,
         element: PressableElement,
     ): Boolean {
-        val pathNodes = resolvePathNodes(root, element.childIndexPath)
+        val pathResolution = resolvePathNodes(root, element.childIndexPath)
+        logPathDivergenceIfNeeded(AccessibilityNodeInfo.ACTION_CLICK, pathResolution)
+        val pathNodes = pathResolution.usableNodes()
             .filter { node -> node.isVisibleToUser && node.isEnabled }
+        activeCrawlLogger?.info(
+            "live_action_start type=ACTION_CLICK intendedChildIndexPath=${element.childIndexPath} " +
+                "resolvedNodeCount=${pathNodes.size} resolvedPathDepth=${pathResolution.resolvedDepth} " +
+                "pathResolutionStatus=${pathResolution.status.name.lowercase()} candidateSource=path " +
+                "label=${quoteForLog(element.label)} resourceId=${quoteForLog(element.resourceId.orEmpty())} " +
+                "className=${quoteForLog(element.className.orEmpty())} bounds=${quoteForLog(element.bounds)}"
+        )
         if (attemptActionOnCandidates(pathNodes.asReversed(), AccessibilityNodeInfo.ACTION_CLICK, "path")) {
             return true
         }
 
         val fallbackCandidates = collectClickableCandidates(root, element)
             .filterNot { candidate -> pathNodes.any { it === candidate } }
+        activeCrawlLogger?.info(
+            "live_action_fallback type=ACTION_CLICK intendedChildIndexPath=${element.childIndexPath} " +
+                "fallbackCandidateCount=${fallbackCandidates.size} label=${quoteForLog(element.label)}"
+        )
         if (attemptActionOnCandidates(fallbackCandidates, AccessibilityNodeInfo.ACTION_CLICK, "fallback")) {
             return true
         }
 
+        activeCrawlLogger?.warn(
+            "live_action_failed type=ACTION_CLICK intendedChildIndexPath=${element.childIndexPath} " +
+                "resolvedNodeCount=${pathNodes.size} fallbackCandidateCount=${fallbackCandidates.size} " +
+                "pathResolutionStatus=${pathResolution.status.name.lowercase()} label=${quoteForLog(element.label)}"
+        )
         DiagnosticLogger.log(
             "Click action failed for '${element.label}' with path=${element.childIndexPath}; no candidate accepted the gesture."
         )
@@ -629,15 +525,33 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
     private fun resolvePathNodes(
         root: AccessibilityNodeInfo,
         childIndexPath: List<Int>,
-    ): List<AccessibilityNodeInfo> {
-        val nodes = mutableListOf<AccessibilityNodeInfo>()
-        var current: AccessibilityNodeInfo? = root
-        nodes += root
-        childIndexPath.forEach { childIndex ->
-            current = current?.getChild(childIndex) ?: return nodes
-            nodes += current!!
+    ): PathReplayResolver.Resolution<AccessibilityNodeInfo> {
+        return PathReplayResolver.resolve(
+            root = root,
+            childIndexPath = childIndexPath,
+            childCount = { node -> node.childCount },
+            childAt = { node, index -> node.getChild(index) },
+        )
+    }
+
+    private fun logPathDivergenceIfNeeded(
+        action: Int,
+        resolution: PathReplayResolver.Resolution<AccessibilityNodeInfo>,
+    ) {
+        if (resolution.status == PathReplayResolver.ResolutionStatus.FULL) {
+            return
         }
-        return nodes
+
+        activeCrawlLogger?.warn(
+            "live_action_path_diverged type=${actionName(action)} intendedChildIndexPath=${resolution.intendedPath} " +
+                "resolvedDepth=${resolution.resolvedDepth} failingChildIndex=${resolution.failingChildIndex} " +
+                "availableChildCount=${resolution.availableChildCount} status=${resolution.status.name.lowercase()}"
+        )
+        DiagnosticLogger.log(
+            "Accessibility path replay diverged for ${actionName(action)} path=${resolution.intendedPath} " +
+                "resolvedDepth=${resolution.resolvedDepth} failingChildIndex=${resolution.failingChildIndex} " +
+                "availableChildCount=${resolution.availableChildCount}."
+        )
     }
 
     private fun attemptActionOnCandidates(
@@ -649,6 +563,10 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
             val actionIds = preferredActionIds(candidate, requestedAction)
             actionIds.forEach { actionId ->
                 val success = candidate.performAction(actionId)
+                activeCrawlLogger?.info(
+                    "live_action_attempt requestedAction=${actionName(requestedAction)} source=$source " +
+                        "candidate=${quoteForLog(describeNode(candidate))} actionId=${actionName(actionId)} success=$success"
+                )
                 DiagnosticLogger.log(
                     "Tried ${actionName(actionId)} on ${describeNode(candidate)} from $source candidate; success=$success"
                 )
@@ -869,11 +787,16 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
         }
     }
 
+    private fun quoteForLog(value: String): String {
+        return "\"${value.replace("\"", "\\\"")}\""
+    }
+
     private fun screenIdFor(sequenceNumber: Int): String {
         return "screen_%03d".format(sequenceNumber)
     }
 
     private fun buildSummary(
+        session: CrawlSessionDirectory,
         tracker: CrawlRunTracker,
         rootSnapshot: ScreenSnapshot,
         rootFiles: CapturedScreenFiles,
@@ -883,10 +806,13 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
             rootScreenName = rootSnapshot.screenName,
             rootFiles = rootFiles,
             manifestFile = manifestFile,
+            graphJsonPath = session.graphJsonFile,
+            graphHtmlPath = session.graphHtmlFile,
             rootScrollStepCount = rootSnapshot.scrollStepCount,
             capturedScreenCount = tracker.capturedScreenCount(),
             capturedChildScreenCount = tracker.capturedChildScreenCount(),
             skippedElementCount = tracker.skippedElementCount(),
+            maxDepthReached = tracker.maxDiscoveredDepth(),
         )
     }
 
@@ -923,6 +849,7 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
         )
         throw PartialCrawlAbortException(
             summary = buildSummary(
+                session = session,
                 tracker = tracker,
                 rootSnapshot = rootSnapshot,
                 rootFiles = rootFiles,

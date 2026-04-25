@@ -9,14 +9,15 @@ import java.nio.file.Files
 
 class CrawlerTraversalTest {
     @Test
-    fun blacklist_parser_marks_label_resource_class_and_checkable_matches() {
+    fun blacklist_parser_marks_editable_matches() {
         val blacklist = CrawlBlacklistLoader.parse(
             """
             {
               "labelTokens": ["search"],
               "resourceIdTokens": ["install"],
               "classNameTokens": ["switch"],
-              "skipCheckable": true
+              "skipCheckable": true,
+              "skipEditable": true
             }
             """.trimIndent()
         )
@@ -68,10 +69,21 @@ class CrawlerTraversalTest {
                 )
             )
         )
+        assertEquals(
+            "blacklist-editable",
+            blacklist.skipReason(
+                testElement(
+                    label = "Display name",
+                    resourceId = "com.example:id/display_name",
+                    className = "android.widget.EditText",
+                    editable = true,
+                )
+            )
+        )
     }
 
     @Test
-    fun default_blacklist_blocks_representative_risky_actions_from_each_category() {
+    fun default_blacklist_blocks_editable_elements() {
         val blacklist = loadDefaultBlacklist()
 
         assertEquals(
@@ -114,6 +126,20 @@ class CrawlerTraversalTest {
             "blacklist-checkable",
             blacklist.skipReason(testElement(checkable = true))
         )
+        assertEquals(
+            "blacklist-editable",
+            blacklist.skipReason(
+                testElement(
+                    className = "android.widget.EditText",
+                    editable = true,
+                )
+            )
+        )
+    }
+
+    @Test
+    fun crawl_blacklist_json_declares_skip_editable_true() {
+        assertTrue(loadDefaultBlacklist().skipEditable)
     }
 
     @Test
@@ -168,6 +194,153 @@ class CrawlerTraversalTest {
     }
 
     @Test
+    fun dedupFingerprint_normalizes_case_and_whitespace() {
+        assertEquals(
+            ScreenNaming.dedupFingerprint("Google Screen"),
+            ScreenNaming.dedupFingerprint("  Google   Screen  ")
+        )
+        assertEquals(
+            ScreenNaming.dedupFingerprint("Google Screen"),
+            ScreenNaming.dedupFingerprint("google   screen")
+        )
+    }
+
+    @Test
+    fun dedupFingerprint_distinguishes_different_screen_names_even_when_structure_matches() {
+        val firstSnapshot = testSnapshot("Google Screen", "Open")
+        val secondSnapshot = testSnapshot("Search Results", "Open")
+
+        assertEquals(firstSnapshot.xmlDump, secondSnapshot.xmlDump)
+        assertEquals(firstSnapshot.elements, secondSnapshot.elements)
+        assertTrue(
+            ScreenNaming.dedupFingerprint(firstSnapshot.screenName) !=
+                ScreenNaming.dedupFingerprint(secondSnapshot.screenName)
+        )
+    }
+
+    @Test
+    fun merged_snapshot_preserves_editable_elements_in_models_and_xml() {
+        val snapshot = testSnapshot(
+            screenName = "Profile",
+            label = "Display name",
+            editable = true,
+        )
+
+        assertTrue(snapshot.elements.single().editable)
+        assertTrue(snapshot.xmlDump.contains("""editable="true""""))
+        assertEquals(
+            true,
+            snapshot.elements.single().toRouteStep().editable
+        )
+    }
+
+    @Test
+    fun crawlRunTracker_links_existing_screen_when_second_capture_has_same_screen_name() {
+        val baseDir = Files.createTempDirectory("crawl-dedup-test").toFile()
+        try {
+            val session = CrawlSessionDirectory(
+                sessionId = "crawl_test",
+                directory = File(baseDir, "crawl_test").apply { mkdirs() },
+                manifestFile = File(baseDir, "crawl_test/crawl-index.json"),
+                logFile = File(baseDir, "crawl_test/crawl.log"),
+                graphJsonFile = File(baseDir, "crawl_test/crawl-graph.json"),
+                graphHtmlFile = File(baseDir, "crawl_test/crawl-graph.html"),
+            )
+            val tracker = CrawlRunTracker(
+                sessionId = session.sessionId,
+                packageName = "com.example.target",
+                startedAt = 123L,
+            )
+
+            val rootSequence = tracker.nextScreenSequenceNumber()
+            val rootSnapshot = testSnapshot("Home Screen", "Open First")
+            val rootFiles = CaptureFileStore.saveScreen(session, rootSnapshot, rootSequence, "root")
+            tracker.addScreen(
+                screenId = "screen_000",
+                snapshot = rootSnapshot,
+                screenFingerprint = ScreenNaming.dedupFingerprint(
+                    screenName = rootSnapshot.screenName,
+                    packageName = rootSnapshot.packageName,
+                    root = rootSnapshot.mergedRoot,
+                ),
+                files = rootFiles,
+                parentScreenId = null,
+                triggerElement = null,
+                route = CrawlRoute(),
+                depth = 0,
+            )
+
+            val firstTrigger = rootSnapshot.elements.first()
+            val firstChildSequence = tracker.nextScreenSequenceNumber()
+            val firstChildSnapshot = testSnapshot("Google Screen", "Primary Action")
+            val firstChildFiles = CaptureFileStore.saveScreen(session, firstChildSnapshot, firstChildSequence, "child")
+            tracker.addScreen(
+                screenId = "screen_001",
+                snapshot = firstChildSnapshot,
+                screenFingerprint = ScreenNaming.dedupFingerprint(
+                    screenName = firstChildSnapshot.screenName,
+                    packageName = firstChildSnapshot.packageName,
+                    root = firstChildSnapshot.mergedRoot,
+                ),
+                files = firstChildFiles,
+                parentScreenId = "screen_000",
+                triggerElement = firstTrigger,
+                route = CrawlRoute(listOf(firstTrigger.toRouteStep())),
+                depth = 1,
+            )
+            tracker.addEdge(
+                parentScreenId = "screen_000",
+                childScreenId = "screen_001",
+                element = firstTrigger,
+                status = CrawlEdgeStatus.CAPTURED,
+                message = "Captured first child screen.",
+            )
+
+            val secondTrigger = testElement(label = "Open Again", resourceId = "com.example:id/open_again")
+            val secondChildSnapshot = testSnapshot("  google   screen ", "Primary Action")
+            val existingScreenId = tracker.findScreenIdByFingerprint(
+                ScreenNaming.dedupFingerprint(
+                    screenName = secondChildSnapshot.screenName,
+                    packageName = secondChildSnapshot.packageName,
+                    root = secondChildSnapshot.mergedRoot,
+                )
+            )
+
+            assertEquals("screen_001", existingScreenId)
+
+            tracker.addEdge(
+                parentScreenId = "screen_000",
+                childScreenId = existingScreenId,
+                element = secondTrigger,
+                status = CrawlEdgeStatus.LINKED_EXISTING,
+                message = "Linked to existing screen.",
+            )
+
+            val manifest = tracker.buildManifest(CrawlRunStatus.COMPLETED, finishedAt = 456L)
+
+            assertEquals(2, manifest.screens.size)
+            assertEquals(2, manifest.edges.size)
+            assertEquals("screen_001", manifest.edges.last().childScreenId)
+            assertEquals(CrawlEdgeStatus.LINKED_EXISTING, manifest.edges.last().status)
+            assertEquals(1, manifest.maxDepthReached)
+            assertEquals(
+                ScreenNaming.dedupFingerprint(
+                    screenName = "Google Screen",
+                    packageName = "com.example.target",
+                    root = firstChildSnapshot.mergedRoot,
+                ),
+                manifest.screens.single { it.screenId == "screen_001" }.screenFingerprint
+            )
+            assertEquals(
+                listOf(firstTrigger.toRouteStep()),
+                manifest.screens.single { it.screenId == "screen_001" }.route.steps
+            )
+        } finally {
+            baseDir.deleteRecursively()
+        }
+    }
+
+    @Test
     fun captureStore_persists_multiple_screens_and_manifest_in_one_session_directory() {
         val baseDir = Files.createTempDirectory("crawl-session-test").toFile()
         try {
@@ -175,6 +348,9 @@ class CrawlerTraversalTest {
                 sessionId = "crawl_test",
                 directory = File(baseDir, "crawl_test").apply { mkdirs() },
                 manifestFile = File(baseDir, "crawl_test/crawl-index.json"),
+                logFile = File(baseDir, "crawl_test/crawl.log"),
+                graphJsonFile = File(baseDir, "crawl_test/crawl-graph.json"),
+                graphHtmlFile = File(baseDir, "crawl_test/crawl-graph.html"),
             )
             val tracker = CrawlRunTracker(
                 sessionId = session.sessionId,
@@ -188,9 +364,15 @@ class CrawlerTraversalTest {
             tracker.addScreen(
                 screenId = "screen_000",
                 snapshot = rootSnapshot,
+                screenFingerprint = ScreenNaming.dedupFingerprint(
+                    screenName = rootSnapshot.screenName,
+                    packageName = rootSnapshot.packageName,
+                    root = rootSnapshot.mergedRoot,
+                ),
                 files = rootFiles,
                 parentScreenId = null,
                 triggerElement = null,
+                route = CrawlRoute(),
                 depth = 0,
             )
 
@@ -201,9 +383,15 @@ class CrawlerTraversalTest {
             tracker.addScreen(
                 screenId = "screen_001",
                 snapshot = childSnapshot,
+                screenFingerprint = ScreenNaming.dedupFingerprint(
+                    screenName = childSnapshot.screenName,
+                    packageName = childSnapshot.packageName,
+                    root = childSnapshot.mergedRoot,
+                ),
                 files = childFiles,
                 parentScreenId = "screen_000",
                 triggerElement = trigger,
+                route = CrawlRoute(listOf(trigger.toRouteStep())),
                 depth = 1,
             )
             tracker.addEdge(
@@ -219,9 +407,14 @@ class CrawlerTraversalTest {
                 resolvedChildLinks = mapOf(trigger.toLinkKey() to childFiles.htmlFile.name),
             )
 
+            val manifest = tracker.buildManifest(CrawlRunStatus.COMPLETED, finishedAt = 456L)
             val manifestFile = CaptureFileStore.saveManifest(
                 session = session,
-                manifest = tracker.buildManifest(CrawlRunStatus.COMPLETED, finishedAt = 456L),
+                manifest = manifest,
+            )
+            CaptureFileStore.saveGraph(
+                session = session,
+                graph = CrawlGraphBuilder.build(manifest),
             )
 
             assertTrue(rootFiles.htmlFile.exists())
@@ -231,6 +424,8 @@ class CrawlerTraversalTest {
             assertTrue(childFiles.xmlFile.exists())
             assertTrue(childFiles.mergedXmlFile?.exists() == true)
             assertTrue(manifestFile.exists())
+            assertTrue(session.graphJsonFile.exists())
+            assertTrue(session.graphHtmlFile.exists())
             assertEquals("000_root_home_screen.html", rootFiles.htmlFile.name)
             assertEquals("001_child_details_screen.html", childFiles.htmlFile.name)
             assertEquals("000_root_home_screen_merged_accessibility.xml", rootFiles.mergedXmlFile?.name)
@@ -243,13 +438,22 @@ class CrawlerTraversalTest {
             assertTrue(manifestJson.contains("screen_001"))
             assertTrue(manifestJson.contains("captured"))
             assertTrue(manifestJson.contains("mergedXmlPath"))
+            assertTrue(manifestJson.contains("screenFingerprint"))
+            assertTrue(manifestJson.contains("maxDepthReached"))
+            assertTrue(manifestJson.contains(""""route": ["""))
+            assertTrue(session.graphJsonFile.readText().contains(""""screenId": "screen_001""""))
+            assertTrue(session.graphHtmlFile.readText().contains("crawl-graph-data"))
             assertTrue(CrawlManifestStore.toJson(tracker.buildManifest(CrawlRunStatus.COMPLETED)).contains(""""screens": ["""))
         } finally {
             baseDir.deleteRecursively()
         }
     }
 
-    private fun testSnapshot(screenName: String, label: String): ScreenSnapshot {
+    private fun testSnapshot(
+        screenName: String,
+        label: String,
+        editable: Boolean = false,
+    ): ScreenSnapshot {
         val root = AccessibilityNodeSnapshot(
             className = "android.widget.FrameLayout",
             packageName = "com.example.target",
@@ -272,6 +476,7 @@ class CrawlerTraversalTest {
                     clickable = true,
                     supportsClickAction = true,
                     scrollable = false,
+                    editable = editable,
                     enabled = true,
                     visibleToUser = true,
                     bounds = "[0,0][100,50]",
@@ -307,6 +512,7 @@ class CrawlerTraversalTest {
         resourceId: String? = "com.example:id/safe_target",
         className: String = "android.widget.Button",
         checkable: Boolean = false,
+        editable: Boolean = false,
     ): PressableElement {
         return PressableElement(
             label = label,
@@ -315,6 +521,7 @@ class CrawlerTraversalTest {
             className = className,
             isListItem = false,
             checkable = checkable,
+            editable = editable,
         )
     }
 }

@@ -11,7 +11,7 @@ data class SkippedTraversalElement(
 )
 
 object TraversalPlanner {
-    fun planRootTraversal(
+    fun planTraversal(
         snapshot: ScreenSnapshot,
         blacklist: CrawlBlacklist,
     ): TraversalPlan {
@@ -35,6 +35,11 @@ object TraversalPlanner {
             skippedElements = skipped,
         )
     }
+
+    fun planRootTraversal(
+        snapshot: ScreenSnapshot,
+        blacklist: CrawlBlacklist,
+    ): TraversalPlan = planTraversal(snapshot, blacklist)
 
     internal fun orderedElements(elements: List<PressableElement>): List<PressableElement> {
         return elements.sortedWith(

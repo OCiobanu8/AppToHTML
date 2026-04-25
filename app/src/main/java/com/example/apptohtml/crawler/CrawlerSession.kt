@@ -3,6 +3,7 @@ package com.example.apptohtml.crawler
 import android.content.Context
 import com.example.apptohtml.diagnostics.DiagnosticLogger
 import com.example.apptohtml.model.SelectedAppRef
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -20,6 +21,9 @@ object CrawlerSession {
     private val _uiState = MutableStateFlow(CrawlerUiState.idle())
     private var timeoutJob: Job? = null
     private var appContext: Context? = null
+    private var pendingPauseDecision: CompletableDeferred<PauseDecision>? = null
+    private var pendingPauseDecisionId: Long? = null
+    private var nextPauseDecisionId: Long = 1L
 
     @Volatile
     private var lastObservedPackage: String? = null
@@ -50,7 +54,7 @@ object CrawlerSession {
             selectedApp = selectedApp,
             alreadyRunning = alreadyRunning,
         )
-        DiagnosticLogger.log("Starting first-screen capture for ${selectedApp.packageName}; requestId=$requestId")
+        DiagnosticLogger.log("Starting deep crawl for ${selectedApp.packageName}; requestId=$requestId")
 
         val launchResult = AppLaunchHelper.launchSelectedApp(
             context = context,
@@ -85,20 +89,18 @@ object CrawlerSession {
     }
 
     @Synchronized
-    fun beginScanning(requestId: Long, message: String) {
+    fun claimScanning(requestId: Long, message: String): Boolean {
         val current = _uiState.value
         if (
             current.requestId != requestId ||
-            (
-                current.phase != CrawlerPhase.WAITING_FOR_TARGET_SCREEN &&
-                    current.phase != CrawlerPhase.SCANNING_TARGET_SCREEN
-                )
+            current.phase != CrawlerPhase.WAITING_FOR_TARGET_SCREEN
         ) {
-            return
+            return false
         }
 
         _uiState.value = current.withScanning(message)
         timeoutJob?.cancel()
+        return true
     }
 
     @Synchronized
@@ -137,6 +139,82 @@ object CrawlerSession {
 
         timeoutJob?.cancel()
         _uiState.value = current.withTraversingChildren(message)
+    }
+
+    suspend fun pauseForDecision(
+        reason: PauseReason,
+        snapshot: PauseProgressSnapshot,
+        externalPackageContext: ExternalPackageDecisionContext? = null,
+    ): PauseDecision {
+        val deferred = synchronized(this) {
+            val current = _uiState.value
+            val requestId = current.requestId
+            if (
+                requestId == null ||
+                (
+                    current.phase != CrawlerPhase.SCANNING_TARGET_SCREEN &&
+                        current.phase != CrawlerPhase.TRAVERSING_CHILD_SCREENS
+                    )
+            ) {
+                return PauseDecision.STOP
+            }
+            check(pendingPauseDecision == null) {
+                "A pause decision is already pending for requestId=$requestId."
+            }
+
+            timeoutJob?.cancel()
+            val decision = CompletableDeferred<PauseDecision>()
+            val decisionId = nextPauseDecisionId++
+            pendingPauseDecision = decision
+            pendingPauseDecisionId = decisionId
+            _uiState.value = current.withPausedForDecision(
+                decisionId = decisionId,
+                reason = reason,
+                snapshot = snapshot,
+                externalPackageContext = externalPackageContext,
+            )
+            logSafely(
+                "Paused deep crawl for requestId=$requestId decisionId=$decisionId reason=${reason.name.lowercase()}."
+            )
+            decision
+        }
+
+        returnToApp()
+        return deferred.await()
+    }
+
+    @Synchronized
+    fun resumeCrawl(requestId: Long, decisionId: Long) {
+        resolvePauseDecision(
+            requestId = requestId,
+            decisionId = decisionId,
+            decision = PauseDecision.CONTINUE,
+            resumedState = { current -> current.withResumedFromDecision() },
+        )
+    }
+
+    @Synchronized
+    fun skipExternalEdge(requestId: Long, decisionId: Long) {
+        resolvePauseDecision(
+            requestId = requestId,
+            decisionId = decisionId,
+            decision = PauseDecision.SKIP_EDGE,
+            resumedState = { current -> current.withResumedFromDecision() },
+        )
+    }
+
+    @Synchronized
+    fun stopAndSave(requestId: Long, decisionId: Long) {
+        resolvePauseDecision(
+            requestId = requestId,
+            decisionId = decisionId,
+            decision = PauseDecision.STOP,
+            resumedState = { current ->
+                current.withResumedFromDecision().copy(
+                    statusMessage = "Stopping deep crawl and saving current progress.",
+                )
+            },
+        )
     }
 
     @Synchronized
@@ -201,12 +279,47 @@ object CrawlerSession {
         returnToApp()
     }
 
+    private fun resolvePauseDecision(
+        requestId: Long,
+        decisionId: Long,
+        decision: PauseDecision,
+        resumedState: (CrawlerUiState) -> CrawlerUiState,
+    ) {
+        val current = _uiState.value
+        val deferred = pendingPauseDecision
+        if (
+            current.requestId != requestId ||
+            current.phase != CrawlerPhase.PAUSED_FOR_DECISION ||
+            deferred == null ||
+            pendingPauseDecisionId != decisionId
+        ) {
+            logSafely(
+                "Ignoring stale pause decision for requestId=$requestId decisionId=$decisionId."
+            )
+            return
+        }
+
+        pendingPauseDecision = null
+        pendingPauseDecisionId = null
+        _uiState.value = resumedState(current)
+        deferred.complete(decision)
+        logSafely(
+            "Resolved deep crawl pause for requestId=$requestId decisionId=$decisionId with ${decision.name.lowercase()}."
+        )
+    }
+
     private fun returnToApp() {
         val context = appContext ?: return
         runCatching {
             AppToHtmlNavigator.returnToApp(context)
         }.onFailure { error ->
             DiagnosticLogger.error("Failed to bring AppToHTML back to the foreground.", error)
+        }
+    }
+
+    private fun logSafely(message: String) {
+        runCatching {
+            DiagnosticLogger.log(message)
         }
     }
 }

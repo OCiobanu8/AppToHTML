@@ -2,17 +2,17 @@
 
 ## Goal
 
-The crawler captures the first screen of a selected app and exports a merged
-representation of that screen as HTML and XML. For scrollable screens, it first
-rewinds to the top, then crawls downward until the viewport stops changing or a
-safety cap is reached.
+The crawler launches a selected app, restores the entry screen, and performs a
+safe deep crawl across reachable in-app targets. Each captured screen is
+exported as HTML and XML, and the crawl manifest records captured, linked, and
+skipped traversal outcomes.
 
 ## Main components
 
 ### `CrawlerSession`
 
 - Holds shared UI state for the current capture request.
-- Tracks launch, waiting, scanning, success, and failure phases.
+- Tracks launch, waiting, scanning, traversal, success, and failure phases.
 - Exposes `StateFlow` so the Compose UI can react to progress.
 
 ### `AppToHtmlAccessibilityService`
@@ -26,6 +26,7 @@ safety cap is reached.
 
 - Converts `AccessibilityNodeInfo` into serializable snapshots.
 - Extracts pressable elements from the tree.
+- Preserves safety-relevant element flags such as `checkable` and `editable`.
 - Detects list-like containers and scrollable candidates.
 
 ### `ScrollScanCoordinator`
@@ -49,12 +50,12 @@ safety cap is reached.
 1. UI triggers `CrawlerSession.startCapture`.
 2. App launch helper launches the selected app.
 3. Accessibility service waits for the target package to be active.
-4. The initial accessibility tree is captured and settled.
-5. The scan rewinds to the top of the current scrollable surface.
-6. Step `0` is merged into the screen map.
-7. The crawler scrolls downward and captures each changed viewport.
-8. HTML and XML are written to app storage.
-9. AppToHTML is brought back to the foreground.
+4. The deep crawl coordinator restores the entry screen and captures the root screen.
+5. Scroll scanning rewinds to the top of the current surface and merges unique elements.
+6. Safe elements are ordered deterministically and filtered through the blacklist.
+7. Eligible targets are replayed breadth-first until the frontier is exhausted.
+8. Screen artifacts and the crawl manifest are refreshed in app storage as progress is made.
+9. AppToHTML is brought back to the foreground when the crawl completes or aborts.
 
 ## Merge strategy
 
@@ -64,6 +65,8 @@ Pressable elements are deduplicated by:
 - resource ID
 - class name
 - list-item flag
+- `checkable`
+- `editable`
 
 This keeps the merged screen focused on unique controls rather than viewport
 positions.
@@ -71,11 +74,11 @@ positions.
 ## Known tradeoffs
 
 - Repeated list rows with identical metadata collapse into one merged element.
-- The crawler currently maps only the first screen, not a full app graph.
+- Cross-package boundary handling and pause/resume checkpoints still live in later deep-crawl blocks.
 - Scroll behavior depends on what the target app exposes through accessibility.
 
 ## Good next extensions
 
 - Track repeated list rows as grouped collections instead of collapsing them.
-- Follow selected pressable elements into secondary screens.
+- Add explicit pause/resume checkpoints and package-boundary decisions.
 - Persist richer crawl sessions for later replay or diffing.

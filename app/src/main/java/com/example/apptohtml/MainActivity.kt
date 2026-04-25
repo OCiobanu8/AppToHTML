@@ -34,6 +34,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.example.apptohtml.crawler.CrawlerPhase
 import com.example.apptohtml.crawler.CrawlerSession
+import com.example.apptohtml.crawler.PauseReason
 import com.example.apptohtml.model.SelectedAppRef
 import com.example.apptohtml.storage.SelectedAppRepository
 import com.example.apptohtml.ui.theme.AppToHTMLTheme
@@ -174,7 +175,7 @@ private fun AppToHtmlScreen(
             enabled = canStartCapture,
             modifier = Modifier.fillMaxWidth(),
         ) {
-            Text("Start One-Layer Crawl")
+            Text("Start Deep Crawl")
         }
         Text(crawlerState.statusMessage)
         if (!canStartCapture) {
@@ -189,12 +190,39 @@ private fun AppToHtmlScreen(
             )
         } else {
             Text(
-                text = "The crawler brings the target app to the foreground, backs out until no visible in-app back button remains, maps the root screen, opens safe child targets one layer deep, and saves a crawl index plus per-screen HTML and XML output.",
+                text = "The crawler brings the target app to the foreground, resets to the entry screen, explores safe targets breadth-first, records captured, linked, and skipped outcomes, and saves a crawl index plus per-screen HTML and XML output for the upcoming graph viewer.",
                 style = MaterialTheme.typography.bodySmall,
             )
         }
 
         when (crawlerState.phase) {
+            CrawlerPhase.PAUSED_FOR_DECISION -> {
+                Text("Deep crawl paused: ${crawlerState.pauseReason?.let(::pauseReasonText) ?: "Waiting for a decision."}")
+                crawlerState.pauseElapsedTimeMs?.let { elapsedTimeMs ->
+                    Text("Elapsed time: ${formatPauseElapsedTime(elapsedTimeMs)}")
+                }
+                crawlerState.pauseFailedEdgeCount?.let { count ->
+                    Text("Failed edges: $count")
+                }
+                crawlerState.pausedCapturedScreenCount?.let { count ->
+                    Text("Captured screens so far: $count")
+                }
+                crawlerState.pausedCapturedChildScreenCount?.let { count ->
+                    Text("Captured child screens so far: $count")
+                }
+                if (crawlerState.pauseReason == PauseReason.EXTERNAL_PACKAGE_BOUNDARY) {
+                    crawlerState.pauseCurrentPackageName?.let { packageName ->
+                        Text("Current package: $packageName")
+                    }
+                    crawlerState.pauseNextPackageName?.let { packageName ->
+                        Text("Next package: $packageName")
+                    }
+                    crawlerState.pauseTriggerLabel?.let { label ->
+                        Text("Trigger label: $label")
+                    }
+                }
+            }
+
             CrawlerPhase.CAPTURED -> {
                 Text("Root screen: ${crawlerState.screenName}")
                 crawlerState.scrollStepCount?.let { stepCount ->
@@ -209,12 +237,21 @@ private fun AppToHtmlScreen(
                 crawlerState.skippedElementCount?.let { count ->
                     Text("Skipped targets: $count")
                 }
+                crawlerState.maxDepthReached?.let { depth ->
+                    Text("Max depth reached: $depth")
+                }
                 Text("Saved root HTML: ${crawlerState.htmlPath}")
                 Text("Saved root XML: ${crawlerState.xmlPath}")
                 crawlerState.mergedXmlPath?.let { path ->
                     Text("Saved merged accessibility XML: $path")
                 }
                 Text("Saved crawl index: ${crawlerState.crawlIndexPath}")
+                crawlerState.graphJsonPath?.let { path ->
+                    Text("Saved graph JSON: $path")
+                }
+                crawlerState.graphHtmlPath?.let { path ->
+                    Text("Saved graph viewer: $path")
+                }
             }
 
             CrawlerPhase.ABORTED -> {
@@ -228,12 +265,21 @@ private fun AppToHtmlScreen(
                 crawlerState.skippedElementCount?.let { count ->
                     Text("Skipped targets: $count")
                 }
+                crawlerState.maxDepthReached?.let { depth ->
+                    Text("Max depth reached before abort: $depth")
+                }
                 Text("Saved root HTML: ${crawlerState.htmlPath}")
                 Text("Saved root XML: ${crawlerState.xmlPath}")
                 crawlerState.mergedXmlPath?.let { path ->
                     Text("Saved merged accessibility XML: $path")
                 }
                 Text("Saved crawl index: ${crawlerState.crawlIndexPath}")
+                crawlerState.graphJsonPath?.let { path ->
+                    Text("Saved graph JSON: $path")
+                }
+                crawlerState.graphHtmlPath?.let { path ->
+                    Text("Saved graph viewer: $path")
+                }
             }
 
             CrawlerPhase.FAILED -> {
@@ -281,5 +327,119 @@ private fun AppToHtmlScreen(
                 },
             )
         }
+
+        if (crawlerState.phase == CrawlerPhase.PAUSED_FOR_DECISION) {
+            PauseDecisionDialog(crawlerState = crawlerState)
+        }
+    }
+}
+
+@Composable
+private fun PauseDecisionDialog(crawlerState: com.example.apptohtml.crawler.CrawlerUiState) {
+    val requestId = crawlerState.requestId ?: return
+    val decisionId = crawlerState.pauseDecisionId ?: return
+    val isExternalPackagePause = crawlerState.pauseReason == PauseReason.EXTERNAL_PACKAGE_BOUNDARY
+
+    AlertDialog(
+        onDismissRequest = {},
+        title = { Text("Deep Crawl Paused") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(pauseReasonText(crawlerState.pauseReason))
+                crawlerState.pauseElapsedTimeMs?.let { elapsedTimeMs ->
+                    Text("Elapsed time: ${formatPauseElapsedTime(elapsedTimeMs)}")
+                }
+                crawlerState.pauseFailedEdgeCount?.let { count ->
+                    Text("Failed edges: $count")
+                }
+                crawlerState.pausedCapturedScreenCount?.let { count ->
+                    Text("Captured screens so far: $count")
+                }
+                crawlerState.pausedCapturedChildScreenCount?.let { count ->
+                    Text("Captured child screens so far: $count")
+                }
+                if (isExternalPackagePause) {
+                    crawlerState.pauseCurrentPackageName?.let { packageName ->
+                        Text("Current package: $packageName")
+                    }
+                    crawlerState.pauseNextPackageName?.let { packageName ->
+                        Text("Next package: $packageName")
+                    }
+                    crawlerState.pauseTriggerLabel?.let { label ->
+                        Text("Trigger label: $label")
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    CrawlerSession.resumeCrawl(
+                        requestId = requestId,
+                        decisionId = decisionId,
+                    )
+                }
+            ) {
+                Text(
+                    if (isExternalPackagePause) {
+                        "Continue outside package"
+                    } else {
+                        "Continue"
+                    }
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(
+                onClick = {
+                    if (isExternalPackagePause) {
+                        CrawlerSession.skipExternalEdge(
+                            requestId = requestId,
+                            decisionId = decisionId,
+                        )
+                    } else {
+                        CrawlerSession.stopAndSave(
+                            requestId = requestId,
+                            decisionId = decisionId,
+                        )
+                    }
+                }
+            ) {
+                Text(
+                    if (isExternalPackagePause) {
+                        "Skip edge"
+                    } else {
+                        "Stop and save"
+                    }
+                )
+            }
+        },
+    )
+}
+
+private fun pauseReasonText(reason: PauseReason?): String {
+    return when (reason) {
+        PauseReason.ELAPSED_TIME_EXCEEDED ->
+            "The crawl reached its elapsed-time checkpoint and is waiting for your decision."
+
+        PauseReason.FAILED_EDGE_COUNT_EXCEEDED ->
+            "The crawl reached its failed-edge checkpoint and is waiting for your decision."
+
+        PauseReason.EXTERNAL_PACKAGE_BOUNDARY ->
+            "The crawl is about to continue into another package and needs your approval."
+
+        null -> "The crawl is paused and waiting for your decision."
+    }
+}
+
+private fun formatPauseElapsedTime(elapsedTimeMs: Long): String {
+    val totalSeconds = elapsedTimeMs / 1_000L
+    val hours = totalSeconds / 3_600L
+    val minutes = (totalSeconds % 3_600L) / 60L
+    val seconds = totalSeconds % 60L
+    return if (hours > 0L) {
+        String.format("%d:%02d:%02d", hours, minutes, seconds)
+    } else {
+        String.format("%02d:%02d", minutes, seconds)
     }
 }
