@@ -184,7 +184,7 @@ This behavior was observed in the `com.android.settings` crawl investigated on A
 ### Documentation And Tests
 
 - [x] Update crawler documentation to replace one-layer wording
-- [ ] Document desktop graph export usage
+- [x] Document desktop graph export usage
 - [x] Add tests for deep traversal chains
 - [x] Add tests for cycles and deduplication
 - [x] Add tests for external-package skips
