@@ -518,6 +518,66 @@ class DeepCrawlCoordinatorTest {
     }
 
     @Test
+    fun externalPackageDecision_waits_for_delayed_external_package_before_no_navigation_skip() = runBlocking {
+        val tempDir = Files.createTempDirectory("deep-crawl-delayed-external-continue").toFile()
+        val externalPackageName = "com.google.android.gms"
+        try {
+            val host = object : FakeHost(
+                entryScreenId = "A",
+                screens = mapOf(
+                    "A" to fakeScreen(
+                        id = "A",
+                        screenName = "Settings",
+                        elements = listOf(fakeElement("Open Google", 0)),
+                        transitions = mapOf("Open Google" to "G"),
+                    ),
+                    "G" to fakeScreen(
+                        id = "G",
+                        screenName = "Google Services",
+                        packageName = externalPackageName,
+                        elements = emptyList(),
+                        transitions = emptyMap(),
+                    ),
+                ),
+                delayedTransitions = mapOf("Open Google" to DelayedTransition(capturesBeforeTransition = 1)),
+            ) {
+                val pauseReasons = mutableListOf<PauseReason>()
+
+                override suspend fun awaitPauseDecision(
+                    reason: PauseReason,
+                    snapshot: PauseProgressSnapshot,
+                    externalPackageContext: ExternalPackageDecisionContext?,
+                ): PauseDecision {
+                    pauseReasons += reason
+                    return PauseDecision.CONTINUE
+                }
+            }
+
+            val outcome = coordinator(host, tempDir).crawl(
+                initialRoot = host.captureCurrentRootSnapshot("com.example.target")!!,
+                eventClassName = "Settings",
+            )
+
+            val summary = (outcome as DeepCrawlCoordinator.DeepCrawlOutcome.Completed).summary
+            val manifestJson = summary.manifestFile.readText()
+            val crawlLogText = File(summary.manifestFile.parentFile, "crawl.log").readText()
+
+            assertEquals(listOf(PauseReason.EXTERNAL_PACKAGE_BOUNDARY), host.pauseReasons)
+            assertEquals(2, summary.capturedScreenCount)
+            assertEquals(0, summary.skippedElementCount)
+            assertFalse(manifestJson.contains(""""status": "skipped_no_navigation""""))
+            assertTrue(manifestJson.contains(""""screenName": "Google Services""""))
+            assertTrue(manifestJson.contains(""""packageName": "$externalPackageName""""))
+            assertTrue(crawlLogText.contains("child_destination_observe_attempt"))
+            assertTrue(crawlLogText.contains("result=unchanged_retry"))
+            assertTrue(crawlLogText.contains("result=changed"))
+            assertTrue(crawlLogText.contains("external_package_accepted"))
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
     fun externalPackageDecision_replays_through_recorded_package_context() = runBlocking {
         val tempDir = Files.createTempDirectory("deep-crawl-external-replay").toFile()
         val externalPackageName = "com.google.android.googlequicksearchbox"
@@ -572,6 +632,336 @@ class DeepCrawlCoordinatorTest {
             assertTrue(manifestJson.contains(""""screenName": "Results""""))
             assertTrue(manifestJson.contains(""""expectedPackageName": "$externalPackageName""""))
             assertTrue(manifestJson.contains(""""packageName": "$externalPackageName""""))
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun externalPackageDecision_restores_external_foreground_before_real_scan_after_continue() = runBlocking {
+        val tempDir = Files.createTempDirectory("deep-crawl-external-foreground").toFile()
+        val externalPackageName = "com.google.android.googlequicksearchbox"
+        val appPackageName = "com.example.apptohtml"
+        try {
+            val host = object : FakeHost(
+                entryScreenId = "A",
+                screens = mapOf(
+                    "A" to fakeScreen(
+                        id = "A",
+                        screenName = "Settings",
+                        elements = listOf(fakeElement("Open Google", 0)),
+                        transitions = mapOf("Open Google" to "G"),
+                    ),
+                    "G" to fakeScreen(
+                        id = "G",
+                        screenName = "Google Services",
+                        packageName = externalPackageName,
+                        elements = emptyList(),
+                        transitions = emptyMap(),
+                        scrollable = true,
+                    ),
+                    "APP" to fakeScreen(
+                        id = "APP",
+                        screenName = "AppToHTML",
+                        packageName = appPackageName,
+                        elements = emptyList(),
+                        transitions = emptyMap(),
+                    ),
+                ),
+            ) {
+                val pauseReasons = mutableListOf<PauseReason>()
+                val packagesSeenForExternalCapturesAfterPause = mutableListOf<String>()
+                val packagesSeenForScrollAfterPause = mutableListOf<String>()
+                private var returnedFromPause = false
+
+                override suspend fun awaitPauseDecision(
+                    reason: PauseReason,
+                    snapshot: PauseProgressSnapshot,
+                    externalPackageContext: ExternalPackageDecisionContext?,
+                ): PauseDecision {
+                    pauseReasons += reason
+                    foregroundScreen("APP")
+                    returnedFromPause = true
+                    return PauseDecision.CONTINUE
+                }
+
+                override suspend fun captureCurrentRootSnapshot(
+                    expectedPackageName: String?,
+                ): AccessibilityNodeSnapshot? {
+                    if (returnedFromPause && expectedPackageName == externalPackageName) {
+                        packagesSeenForExternalCapturesAfterPause += currentPackageName()
+                    }
+                    return super.captureCurrentRootSnapshot(expectedPackageName)
+                }
+
+                override fun scrollForward(childIndexPath: List<Int>): Boolean {
+                    if (returnedFromPause) {
+                        packagesSeenForScrollAfterPause += currentPackageName()
+                    }
+                    return false
+                }
+            }
+
+            val outcome = coordinator(host, tempDir, useRealScan = true).crawl(
+                initialRoot = host.captureCurrentRootSnapshot("com.example.target")!!,
+                eventClassName = "Settings",
+            )
+
+            val summary = (outcome as DeepCrawlCoordinator.DeepCrawlOutcome.Completed).summary
+            val manifestJson = summary.manifestFile.readText()
+            val childXml = tempDir.walkTopDown()
+                .filter { it.isFile && it.extension == "xml" }
+                .map { it.readText() }
+                .firstOrNull { it.contains(externalPackageName) }
+
+            assertEquals(listOf(PauseReason.EXTERNAL_PACKAGE_BOUNDARY), host.pauseReasons)
+            assertEquals(2, summary.capturedScreenCount)
+            assertTrue(host.packagesSeenForExternalCapturesAfterPause.isNotEmpty())
+            assertTrue(host.packagesSeenForExternalCapturesAfterPause.all { it == externalPackageName })
+            assertTrue(host.packagesSeenForScrollAfterPause.isNotEmpty())
+            assertTrue(host.packagesSeenForScrollAfterPause.all { it == externalPackageName })
+            assertTrue(manifestJson.contains(""""packageName": "$externalPackageName""""))
+            assertFalse(manifestJson.contains(""""packageName": "$appPackageName""""))
+            assertTrue(childXml != null)
+            assertFalse(childXml!!.contains(appPackageName))
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun externalPackageDecision_retries_expected_package_capture_after_continue_restore() = runBlocking {
+        val tempDir = Files.createTempDirectory("deep-crawl-external-restore-retry").toFile()
+        val externalPackageName = "com.google.android.gms"
+        try {
+            val host = object : FakeHost(
+                entryScreenId = "A",
+                screens = mapOf(
+                    "A" to fakeScreen(
+                        id = "A",
+                        screenName = "Settings",
+                        elements = listOf(fakeElement("Open Google", 0)),
+                        transitions = mapOf("Open Google" to "G"),
+                    ),
+                    "G" to fakeScreen(
+                        id = "G",
+                        screenName = "Google Services",
+                        packageName = externalPackageName,
+                        elements = emptyList(),
+                        transitions = emptyMap(),
+                    ),
+                ),
+                delayedTransitions = mapOf("Open Google" to DelayedTransition(capturesBeforeTransition = 1)),
+            ) {
+                val pauseReasons = mutableListOf<PauseReason>()
+
+                override suspend fun awaitPauseDecision(
+                    reason: PauseReason,
+                    snapshot: PauseProgressSnapshot,
+                    externalPackageContext: ExternalPackageDecisionContext?,
+                ): PauseDecision {
+                    pauseReasons += reason
+                    return PauseDecision.CONTINUE
+                }
+            }
+
+            val outcome = coordinator(host, tempDir).crawl(
+                initialRoot = host.captureCurrentRootSnapshot("com.example.target")!!,
+                eventClassName = "Settings",
+            )
+
+            val summary = (outcome as DeepCrawlCoordinator.DeepCrawlOutcome.Completed).summary
+            val manifestJson = summary.manifestFile.readText()
+            val childXml = tempDir.walkTopDown()
+                .filter { it.isFile && it.extension == "xml" }
+                .map { it.readText() }
+                .firstOrNull { it.contains(externalPackageName) }
+
+            assertEquals(listOf(PauseReason.EXTERNAL_PACKAGE_BOUNDARY), host.pauseReasons)
+            assertEquals(2, summary.capturedScreenCount)
+            assertEquals(0, summary.skippedElementCount)
+            assertTrue(host.captureExpectedPackages.count { it == externalPackageName } >= 2)
+            assertTrue(manifestJson.contains(""""screenName": "Google Services""""))
+            assertTrue(manifestJson.contains(""""packageName": "$externalPackageName""""))
+            assertTrue(manifestJson.contains(""""expectedPackageName": "$externalPackageName""""))
+            assertTrue(childXml != null)
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun externalPackageDecision_fails_restore_when_expected_package_never_appears() = runBlocking {
+        val tempDir = Files.createTempDirectory("deep-crawl-external-restore-missing").toFile()
+        val externalPackageName = "com.google.android.gms"
+        val appPackageName = "com.example.apptohtml"
+        try {
+            val host = object : FakeHost(
+                entryScreenId = "A",
+                screens = mapOf(
+                    "A" to fakeScreen(
+                        id = "A",
+                        screenName = "Settings",
+                        elements = listOf(fakeElement("Open Google", 0)),
+                        transitions = mapOf("Open Google" to "G"),
+                    ),
+                    "G" to fakeScreen(
+                        id = "G",
+                        screenName = "Google Services",
+                        packageName = externalPackageName,
+                        elements = emptyList(),
+                        transitions = emptyMap(),
+                    ),
+                    "APP" to fakeScreen(
+                        id = "APP",
+                        screenName = "AppToHTML",
+                        packageName = appPackageName,
+                        elements = emptyList(),
+                        transitions = emptyMap(),
+                    ),
+                ),
+            ) {
+                val pauseReasons = mutableListOf<PauseReason>()
+                private var returnedFromPause = false
+
+                override suspend fun awaitPauseDecision(
+                    reason: PauseReason,
+                    snapshot: PauseProgressSnapshot,
+                    externalPackageContext: ExternalPackageDecisionContext?,
+                ): PauseDecision {
+                    pauseReasons += reason
+                    foregroundScreen("APP")
+                    returnedFromPause = true
+                    return PauseDecision.CONTINUE
+                }
+
+                override suspend fun captureCurrentRootSnapshot(
+                    expectedPackageName: String?,
+                ): AccessibilityNodeSnapshot? {
+                    if (returnedFromPause && expectedPackageName == externalPackageName) {
+                        captureExpectedPackages += expectedPackageName
+                        return null
+                    }
+                    return super.captureCurrentRootSnapshot(expectedPackageName)
+                }
+            }
+
+            val outcome = coordinator(host, tempDir).crawl(
+                initialRoot = host.captureCurrentRootSnapshot("com.example.target")!!,
+                eventClassName = "Settings",
+            )
+
+            val summary = (outcome as DeepCrawlCoordinator.DeepCrawlOutcome.Completed).summary
+            val manifestJson = summary.manifestFile.readText()
+            val childXmls = tempDir.walkTopDown()
+                .filter { it.isFile && it.extension == "xml" }
+                .map { it.readText() }
+                .toList()
+
+            assertEquals(listOf(PauseReason.EXTERNAL_PACKAGE_BOUNDARY), host.pauseReasons)
+            assertEquals(1, summary.capturedScreenCount)
+            assertEquals(0, summary.skippedElementCount)
+            assertEquals(4, host.captureExpectedPackages.count { it == externalPackageName })
+            assertTrue(manifestJson.contains(""""status": "failed""""))
+            assertFalse(manifestJson.contains(""""status": "skipped_no_navigation""""))
+            assertFalse(manifestJson.contains(""""screenName": "Google Services""""))
+            assertFalse(childXmls.any { it.contains(appPackageName) })
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun externalPackageDecision_allows_previously_accepted_packages_and_pauses_for_new_package() = runBlocking {
+        val tempDir = Files.createTempDirectory("deep-crawl-external-allowed-packages").toFile()
+        val googlePackageName = "com.google.android.googlequicksearchbox"
+        val chromePackageName = "com.android.chrome"
+        try {
+            val host = object : FakeHost(
+                entryScreenId = "A",
+                screens = mapOf(
+                    "A" to fakeScreen(
+                        id = "A",
+                        screenName = "Settings",
+                        elements = listOf(
+                            fakeElement("Open Google", 0),
+                            fakeElement("Open Google Again", 1),
+                        ),
+                        transitions = mapOf(
+                            "Open Google" to "G",
+                            "Open Google Again" to "G",
+                        ),
+                    ),
+                    "G" to fakeScreen(
+                        id = "G",
+                        screenName = "Google Services",
+                        packageName = googlePackageName,
+                        elements = listOf(
+                            fakeElement("Open Details", 0),
+                            fakeElement("Back To Settings", 1),
+                            fakeElement("Open Chrome", 2),
+                        ),
+                        transitions = mapOf(
+                            "Open Details" to "H",
+                            "Back To Settings" to "A",
+                            "Open Chrome" to "C",
+                        ),
+                    ),
+                    "H" to fakeScreen(
+                        id = "H",
+                        screenName = "Google Details",
+                        packageName = googlePackageName,
+                        elements = emptyList(),
+                        transitions = emptyMap(),
+                    ),
+                    "C" to fakeScreen(
+                        id = "C",
+                        screenName = "Chrome",
+                        packageName = chromePackageName,
+                        elements = emptyList(),
+                        transitions = emptyMap(),
+                    ),
+                ),
+            ) {
+                val pauseReasons = mutableListOf<PauseReason>()
+                val externalContexts = mutableListOf<ExternalPackageDecisionContext>()
+
+                override suspend fun awaitPauseDecision(
+                    reason: PauseReason,
+                    snapshot: PauseProgressSnapshot,
+                    externalPackageContext: ExternalPackageDecisionContext?,
+                ): PauseDecision {
+                    pauseReasons += reason
+                    externalPackageContext?.let { externalContexts += it }
+                    return PauseDecision.CONTINUE
+                }
+            }
+
+            val outcome = coordinator(host, tempDir).crawl(
+                initialRoot = host.captureCurrentRootSnapshot("com.example.target")!!,
+                eventClassName = "Settings",
+            )
+
+            val summary = (outcome as DeepCrawlCoordinator.DeepCrawlOutcome.Completed).summary
+            val manifestJson = summary.manifestFile.readText()
+
+            assertEquals(
+                listOf(
+                    PauseReason.EXTERNAL_PACKAGE_BOUNDARY,
+                    PauseReason.EXTERNAL_PACKAGE_BOUNDARY,
+                ),
+                host.pauseReasons,
+            )
+            assertEquals(
+                listOf(googlePackageName, chromePackageName),
+                host.externalContexts.map { it.nextPackageName },
+            )
+            assertEquals(4, summary.capturedScreenCount)
+            assertTrue(manifestJson.contains(""""screenName": "Google Details""""))
+            assertTrue(manifestJson.contains(""""screenName": "Settings""""))
+            assertTrue(manifestJson.contains(""""screenName": "Chrome""""))
+            assertTrue(manifestJson.contains(""""packageName": "$googlePackageName""""))
+            assertTrue(manifestJson.contains(""""packageName": "$chromePackageName""""))
         } finally {
             tempDir.deleteRecursively()
         }
@@ -1021,6 +1411,7 @@ class DeepCrawlCoordinatorTest {
         blacklist: CrawlBlacklist = CrawlBlacklist(skipCheckable = false),
         pauseConfig: PauseCheckpointConfig = PauseCheckpointConfig(),
         timeProvider: () -> Long = { System.currentTimeMillis() },
+        useRealScan: Boolean = false,
     ): DeepCrawlCoordinator {
         return DeepCrawlCoordinator(
             selectedApp = selectedApp(),
@@ -1038,7 +1429,7 @@ class DeepCrawlCoordinatorTest {
                 )
             },
             pauseConfig = pauseConfig,
-            scanScreenOverride = { _, initialRoot, _, _ ->
+            scanScreenOverride = if (useRealScan) null else { _, initialRoot, _, _ ->
                 host.snapshotForRoot(initialRoot)
             },
             timeProvider = timeProvider,
@@ -1060,6 +1451,7 @@ class DeepCrawlCoordinatorTest {
         packageName: String = "com.example.target",
         elements: List<PressableElement>,
         transitions: Map<String, String>,
+        scrollable: Boolean = false,
     ): FakeScreen {
         return FakeScreen(
             id = id,
@@ -1067,6 +1459,7 @@ class DeepCrawlCoordinatorTest {
             packageName = packageName,
             elements = elements,
             transitions = transitions,
+            scrollable = scrollable,
         )
     }
 
@@ -1093,6 +1486,16 @@ class DeepCrawlCoordinatorTest {
         val packageName: String,
         val elements: List<PressableElement>,
         val transitions: Map<String, String>,
+        val scrollable: Boolean = false,
+    )
+
+    private data class DelayedTransition(
+        val capturesBeforeTransition: Int,
+    )
+
+    private data class PendingDelayedTransition(
+        val destinationScreenId: String,
+        val capturesBeforeTransition: Int,
     )
 
     private open class FakeHost(
@@ -1102,37 +1505,55 @@ class DeepCrawlCoordinatorTest {
         private val showBackAffordanceOnEntryRoot: Boolean = false,
         private val screensWithoutBackAffordance: Set<String> = emptySet(),
         private val shiftedBoundsOnReplayScreens: Set<String> = emptySet(),
+        private val delayedTransitions: Map<String, DelayedTransition> = emptyMap(),
     ) : DeepCrawlCoordinator.Host {
         private var currentScreenId = initialScreenId
         private val backStack = mutableListOf(initialScreenId)
         private val captureCountsByScreenId = mutableMapOf<String, Int>()
+        private var pendingDelayedTransition: PendingDelayedTransition? = null
         private var returnedToEntryScreen = false
         val captureExpectedPackages = mutableListOf<String?>()
         var relaunchCount = 0
             private set
 
-        override suspend fun captureCurrentRootSnapshot(expectedPackageName: String?): AccessibilityNodeSnapshot? {
+        open override suspend fun captureCurrentRootSnapshot(expectedPackageName: String?): AccessibilityNodeSnapshot? {
             captureExpectedPackages += expectedPackageName
-            val currentPackageName = screens.getValue(currentScreenId).packageName
+            val captureScreenId = currentScreenId
+            val currentPackageName = screens.getValue(captureScreenId).packageName
+            val pendingTransition = pendingDelayedTransition
             if (expectedPackageName != null && expectedPackageName != currentPackageName) {
+                advancePendingDelayedTransitionAfterCapture(pendingTransition)
                 return null
             }
-            val captureCount = captureCountsByScreenId.getOrDefault(currentScreenId, 0)
-            captureCountsByScreenId[currentScreenId] = captureCount + 1
-            return rootFor(
-                screenId = currentScreenId,
-                shiftedBounds = currentScreenId in shiftedBoundsOnReplayScreens && captureCount >= 2,
+            val captureCount = captureCountsByScreenId.getOrDefault(captureScreenId, 0)
+            captureCountsByScreenId[captureScreenId] = captureCount + 1
+            val root = rootFor(
+                screenId = captureScreenId,
+                shiftedBounds = captureScreenId in shiftedBoundsOnReplayScreens && captureCount >= 2,
             )
+            advancePendingDelayedTransitionAfterCapture(pendingTransition)
+            return root
         }
 
-        override fun scrollForward(childIndexPath: List<Int>): Boolean = false
+        open override fun scrollForward(childIndexPath: List<Int>): Boolean = false
 
-        override fun scrollBackward(childIndexPath: List<Int>): Boolean = false
+        open override fun scrollBackward(childIndexPath: List<Int>): Boolean = false
 
         override fun click(element: PressableElement): Boolean {
             val current = screens.getValue(currentScreenId)
             val destination = current.transitions[element.label] ?: return false
             if (destination != currentScreenId) {
+                val delayedTransition = delayedTransitions[element.label]
+                if (delayedTransition != null) {
+                    pendingDelayedTransition = PendingDelayedTransition(
+                        destinationScreenId = destination,
+                        capturesBeforeTransition = delayedTransition.capturesBeforeTransition.coerceAtLeast(0),
+                    )
+                    if (pendingDelayedTransition?.capturesBeforeTransition == 0) {
+                        completePendingDelayedTransition()
+                    }
+                    return true
+                }
                 currentScreenId = destination
                 backStack += destination
             }
@@ -1156,6 +1577,7 @@ class DeepCrawlCoordinatorTest {
             currentScreenId = entryScreenId
             backStack.clear()
             backStack += entryScreenId
+            pendingDelayedTransition = null
             return null
         }
 
@@ -1168,6 +1590,39 @@ class DeepCrawlCoordinatorTest {
         override fun publishProgress(message: String) = Unit
 
         override fun setActiveCrawlLogger(logger: CrawlLogger?) = Unit
+
+        protected fun foregroundScreen(screenId: String) {
+            currentScreenId = screenId
+            backStack.clear()
+            backStack += screenId
+            pendingDelayedTransition = null
+        }
+
+        protected fun currentPackageName(): String {
+            return screens.getValue(currentScreenId).packageName
+        }
+
+        private fun advancePendingDelayedTransitionAfterCapture(
+            pendingTransition: PendingDelayedTransition?,
+        ) {
+            if (pendingTransition == null || pendingDelayedTransition !== pendingTransition) {
+                return
+            }
+            if (pendingTransition.capturesBeforeTransition <= 1) {
+                completePendingDelayedTransition()
+            } else {
+                pendingDelayedTransition = pendingTransition.copy(
+                    capturesBeforeTransition = pendingTransition.capturesBeforeTransition - 1,
+                )
+            }
+        }
+
+        private fun completePendingDelayedTransition() {
+            val destination = pendingDelayedTransition?.destinationScreenId ?: return
+            currentScreenId = destination
+            backStack += destination
+            pendingDelayedTransition = null
+        }
 
         fun snapshotForRoot(root: AccessibilityNodeSnapshot): ScreenSnapshot {
             val screenId = root.viewIdResourceName?.substringAfterLast('/') ?: error("Missing fake screen id.")
@@ -1202,7 +1657,7 @@ class DeepCrawlCoordinatorTest {
                 contentDescription = null,
                 clickable = false,
                 supportsClickAction = false,
-                scrollable = false,
+                scrollable = screen.scrollable,
                 enabled = true,
                 visibleToUser = true,
                 bounds = rootBounds,

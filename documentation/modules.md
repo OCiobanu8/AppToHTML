@@ -3,7 +3,8 @@
 ## Overview
 
 AppToHTML is an Android app that launches a selected target app, observes its
-accessibility tree, and exports the first screen as merged HTML and XML. The
+accessibility tree, performs a safe deep crawl across reachable in-app targets,
+and exports both per-screen artifacts and crawl-level graph artifacts. The
 codebase is intentionally small, with most logic grouped by responsibility.
 
 ## Modules
@@ -72,12 +73,14 @@ codebase is intentionally small, with most logic grouped by responsibility.
 
 - `app/src/main/java/com/example/apptohtml/AppToHtmlAccessibilityService.kt`
 - `app/src/main/java/com/example/apptohtml/crawler/CrawlerSession.kt`
+- `app/src/main/java/com/example/apptohtml/MainActivity.kt`
 
 **Responsibility**
 
 - Receives accessibility events while the target app is active.
-- Coordinates scan start, progress, completion, and failure.
-- Performs scroll-to-top preparation and downward scan execution.
+- Coordinates crawl start, progress, pause, completion, and failure.
+- Publishes pause metadata and graph artifact paths to the UI.
+- Resolves user decisions for checkpoint pauses and external-package boundaries.
 
 **Boundary**
 
@@ -89,6 +92,8 @@ codebase is intentionally small, with most logic grouped by responsibility.
 **Main files**
 
 - `app/src/main/java/com/example/apptohtml/crawler/AccessibilityTreeSnapshotter.kt`
+- `app/src/main/java/com/example/apptohtml/crawler/DeepCrawlCoordinator.kt`
+- `app/src/main/java/com/example/apptohtml/crawler/PauseCheckpointTracker.kt`
 - `app/src/main/java/com/example/apptohtml/crawler/ScrollScanCoordinator.kt`
 - `app/src/main/java/com/example/apptohtml/crawler/ScreenNaming.kt`
 - `app/src/main/java/com/example/apptohtml/crawler/CrawlerModels.kt`
@@ -99,8 +104,11 @@ codebase is intentionally small, with most logic grouped by responsibility.
 
 - Converts live accessibility nodes into stable snapshots.
 - Detects pressable elements.
+- Filters risky or unwanted targets before traversal.
 - Ranks scrollable containers.
-- Drives scroll scanning.
+- Drives scroll scanning and route replay.
+- Expands the breadth-first crawl frontier.
+- Handles pause checkpoints and external-package boundaries.
 - Names the captured screen.
 - Launches the target app and returns to AppToHTML.
 
@@ -116,12 +124,17 @@ codebase is intentionally small, with most logic grouped by responsibility.
 - `app/src/main/java/com/example/apptohtml/crawler/HtmlRenderer.kt`
 - `app/src/main/java/com/example/apptohtml/crawler/AccessibilityXmlSerializer.kt`
 - `app/src/main/java/com/example/apptohtml/crawler/CaptureFileStore.kt`
+- `app/src/main/java/com/example/apptohtml/crawler/CrawlGraphBuilder.kt`
+- `app/src/main/java/com/example/apptohtml/crawler/CrawlGraphJsonWriter.kt`
+- `app/src/main/java/com/example/apptohtml/crawler/CrawlGraphHtmlRenderer.kt`
 
 **Responsibility**
 
 - Renders merged HTML output.
 - Builds synthetic XML output for scroll scans.
-- Writes capture artifacts to app storage.
+- Builds normalized graph data from crawl manifests.
+- Writes capture and graph artifacts to app storage.
+- Produces the offline desktop graph viewer.
 
 **Boundary**
 
@@ -135,16 +148,19 @@ codebase is intentionally small, with most logic grouped by responsibility.
 - `app/src/main/java/com/example/apptohtml/model/SelectedAppRef.kt`
 - `app/src/main/java/com/example/apptohtml/storage/SelectedAppRepository.kt`
 - `app/src/main/java/com/example/apptohtml/storage/SelectedAppRefCodec.kt`
+- `app/src/main/java/com/example/apptohtml/crawler/CrawlerModels.kt`
+- `app/src/main/java/com/example/apptohtml/crawler/CrawlGraph.kt`
 
 **Responsibility**
 
 - Defines the persisted target-app reference.
 - Stores and restores the selected app from DataStore.
+- Defines runtime crawl session, manifest, and graph models.
 
 **Boundary**
 
 - Only long-lived user selection state is stored here.
-- Crawl session state is intentionally not persisted.
+- Crawl session state is intentionally not persisted across process death, but crawl artifacts and manifests are persisted to files during execution.
 
 ### 8. Diagnostics
 
