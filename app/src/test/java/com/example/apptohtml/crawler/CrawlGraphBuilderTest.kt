@@ -10,12 +10,12 @@ class CrawlGraphBuilderTest {
         val manifest = manifest(
             screens = listOf(
                 screenRecord(
-                    screenId = "screen_010",
+                    screenId = "screen_00010",
                     screenName = "Second discovered",
                     depth = 1,
                 ),
                 screenRecord(
-                    screenId = "screen_002",
+                    screenId = "screen_00002",
                     screenName = "First discovered",
                     depth = 0,
                 ),
@@ -24,7 +24,7 @@ class CrawlGraphBuilderTest {
 
         val graph = CrawlGraphBuilder.build(manifest)
 
-        assertEquals(listOf("screen_010", "screen_002"), graph.nodes.map { it.screenId })
+        assertEquals(listOf("screen_00010", "screen_00002"), graph.nodes.map { it.screenId })
         assertEquals(listOf(0, 1), graph.nodes.map { it.discoveryIndex })
     }
 
@@ -34,8 +34,8 @@ class CrawlGraphBuilderTest {
             edges = listOf(
                 CrawlEdgeRecord(
                     edgeId = "edge_000",
-                    parentScreenId = "screen_000",
-                    childScreenId = "screen_001",
+                    parentScreenId = "screen_00000",
+                    childScreenId = "screen_00001",
                     label = "Open details",
                     resourceId = "com.example:id/open_details",
                     className = "android.widget.Button",
@@ -47,7 +47,7 @@ class CrawlGraphBuilderTest {
                 ),
                 CrawlEdgeRecord(
                     edgeId = "edge_001",
-                    parentScreenId = "screen_001",
+                    parentScreenId = "screen_00001",
                     childScreenId = null,
                     label = "Skip external",
                     resourceId = "com.example:id/open_external",
@@ -69,11 +69,11 @@ class CrawlGraphBuilderTest {
             graph.edges.map { it.edgeId },
         )
         assertEquals(
-            listOf("screen_000", "screen_001"),
+            listOf("screen_00000", "screen_00001"),
             graph.edges.map { it.fromScreenId },
         )
         assertEquals(
-            listOf("screen_001", null),
+            listOf("screen_00001", null),
             graph.edges.map { it.toScreenId },
         )
         assertEquals(
@@ -91,17 +91,17 @@ class CrawlGraphBuilderTest {
         val manifest = manifest(
             screens = listOf(
                 screenRecord(
-                    screenId = "screen_000",
+                    screenId = "screen_00000",
                     screenName = "Home",
-                    htmlPath = "C:\\captures\\crawl_123\\000_home.html",
-                    xmlPath = "C:\\captures\\crawl_123\\000_home.xml",
-                    mergedXmlPath = "C:\\captures\\crawl_123\\000_home_merged_accessibility.xml",
+                    htmlPath = "C:\\captures\\crawl_123\\screen_00000_home.html",
+                    xmlPath = "C:\\captures\\crawl_123\\screen_00000_home.xml",
+                    mergedXmlPath = "C:\\captures\\crawl_123\\screen_00000_home_merged_accessibility.xml",
                 ),
                 screenRecord(
-                    screenId = "screen_001",
+                    screenId = "screen_00001",
                     screenName = "Details",
-                    htmlPath = "/tmp/crawl/001_details.html",
-                    xmlPath = "/tmp/crawl/001_details.xml",
+                    htmlPath = "/tmp/crawl/screen_00001_details.html",
+                    xmlPath = "/tmp/crawl/screen_00001_details.xml",
                     mergedXmlPath = null,
                 ),
             ),
@@ -109,11 +109,11 @@ class CrawlGraphBuilderTest {
 
         val graph = CrawlGraphBuilder.build(manifest)
 
-        assertEquals("000_home.html", graph.nodes[0].htmlFileName)
-        assertEquals("000_home.xml", graph.nodes[0].xmlFileName)
-        assertEquals("000_home_merged_accessibility.xml", graph.nodes[0].mergedXmlFileName)
-        assertEquals("001_details.html", graph.nodes[1].htmlFileName)
-        assertEquals("001_details.xml", graph.nodes[1].xmlFileName)
+        assertEquals("screen_00000_home.html", graph.nodes[0].htmlFileName)
+        assertEquals("screen_00000_home.xml", graph.nodes[0].xmlFileName)
+        assertEquals("screen_00000_home_merged_accessibility.xml", graph.nodes[0].mergedXmlFileName)
+        assertEquals("screen_00001_details.html", graph.nodes[1].htmlFileName)
+        assertEquals("screen_00001_details.xml", graph.nodes[1].xmlFileName)
         assertNull(graph.nodes[1].mergedXmlFileName)
     }
 
@@ -127,7 +127,7 @@ class CrawlGraphBuilderTest {
             startedAt = 1_000L,
             finishedAt = 2_000L,
             status = CrawlRunStatus.IN_PROGRESS,
-            rootScreenId = "screen_000",
+            rootScreenId = "screen_00000",
             maxDepthReached = 2,
             screens = screens,
             edges = edges,
@@ -135,12 +135,12 @@ class CrawlGraphBuilderTest {
     }
 
     private fun screenRecord(
-        screenId: String = "screen_000",
+        screenId: String = "screen_00000",
         screenName: String = "Home",
         depth: Int = 0,
-        htmlPath: String = "C:\\captures\\crawl_123\\000_home.html",
-        xmlPath: String = "C:\\captures\\crawl_123\\000_home.xml",
-        mergedXmlPath: String? = "C:\\captures\\crawl_123\\000_home_merged_accessibility.xml",
+        htmlPath: String = "C:\\captures\\crawl_123\\screen_00000_home.html",
+        xmlPath: String = "C:\\captures\\crawl_123\\screen_00000_home.xml",
+        mergedXmlPath: String? = "C:\\captures\\crawl_123\\screen_00000_home_merged_accessibility.xml",
     ): CrawlScreenRecord {
         return CrawlScreenRecord(
             screenId = screenId,

@@ -14,26 +14,26 @@ class CrawlGraphJsonWriterTest {
                 sessionId = "crawl_20260421_190000",
                 packageName = "com.example.target",
                 generatedAtMs = 1_234L,
-                rootScreenId = "screen_000",
+                rootScreenId = "screen_00000",
                 maxDepthReached = 2,
                 nodes = listOf(
                     CrawlGraphNode(
-                        screenId = "screen_000",
+                        screenId = "screen_00000",
                         screenName = "Home",
                         fingerprint = "fp-home",
                         packageName = "com.example.target",
                         depth = 0,
                         discoveryIndex = 0,
-                        htmlFileName = "000_home.html",
-                        xmlFileName = "000_home.xml",
-                        mergedXmlFileName = "000_home_merged_accessibility.xml",
+                        htmlFileName = "screen_00000_home.html",
+                        xmlFileName = "screen_00000_home.xml",
+                        mergedXmlFileName = "screen_00000_home_merged_accessibility.xml",
                     )
                 ),
                 edges = listOf(
                     CrawlGraphEdge(
                         edgeId = "edge_000",
-                        fromScreenId = "screen_000",
-                        toScreenId = "screen_001",
+                        fromScreenId = "screen_00000",
+                        toScreenId = "screen_00001",
                         label = "Open details",
                         status = CrawlEdgeStatus.CAPTURED,
                         message = "Child screen captured.",
@@ -50,20 +50,20 @@ class CrawlGraphJsonWriterTest {
             assertEquals("crawl_20260421_190000", parsed.string("sessionId"))
             assertEquals("com.example.target", parsed.string("packageName"))
             assertEquals(1_234L, parsed.long("generatedAtMs"))
-            assertEquals("screen_000", parsed.string("rootScreenId"))
+            assertEquals("screen_00000", parsed.string("rootScreenId"))
             assertEquals(2L, parsed.long("maxDepthReached"))
-            assertEquals("screen_000", node.string("screenId"))
+            assertEquals("screen_00000", node.string("screenId"))
             assertEquals("Home", node.string("screenName"))
             assertEquals("fp-home", node.string("fingerprint"))
             assertEquals("com.example.target", node.string("packageName"))
             assertEquals(0L, node.long("depth"))
             assertEquals(0L, node.long("discoveryIndex"))
-            assertEquals("000_home.html", node.string("htmlFileName"))
-            assertEquals("000_home.xml", node.string("xmlFileName"))
-            assertEquals("000_home_merged_accessibility.xml", node.string("mergedXmlFileName"))
+            assertEquals("screen_00000_home.html", node.string("htmlFileName"))
+            assertEquals("screen_00000_home.xml", node.string("xmlFileName"))
+            assertEquals("screen_00000_home_merged_accessibility.xml", node.string("mergedXmlFileName"))
             assertEquals("edge_000", edge.string("edgeId"))
-            assertEquals("screen_000", edge.string("fromScreenId"))
-            assertEquals("screen_001", edge.string("toScreenId"))
+            assertEquals("screen_00000", edge.string("fromScreenId"))
+            assertEquals("screen_00001", edge.string("toScreenId"))
             assertEquals("Open details", edge.string("label"))
             assertEquals("captured", edge.string("status"))
             assertEquals("Child screen captured.", edge.string("message"))
@@ -82,21 +82,21 @@ class CrawlGraphJsonWriterTest {
             maxDepthReached = 0,
             nodes = listOf(
                 CrawlGraphNode(
-                    screenId = "screen_000",
+                    screenId = "screen_00000",
                     screenName = "Home \"Screen\"",
                     fingerprint = "fp-home",
                     packageName = "com.example.target",
                     depth = 0,
                     discoveryIndex = 0,
-                    htmlFileName = "000_home.html",
-                    xmlFileName = "000_home.xml",
+                    htmlFileName = "screen_00000_home.html",
+                    xmlFileName = "screen_00000_home.xml",
                     mergedXmlFileName = null,
                 )
             ),
             edges = listOf(
                 CrawlGraphEdge(
                     edgeId = "edge_000",
-                    fromScreenId = "screen_000",
+                    fromScreenId = "screen_00000",
                     toScreenId = null,
                     label = "Open \"details\"\nnow",
                     status = CrawlEdgeStatus.FAILED,
