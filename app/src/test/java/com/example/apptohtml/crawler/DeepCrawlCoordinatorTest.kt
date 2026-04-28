@@ -396,7 +396,7 @@ class DeepCrawlCoordinatorTest {
             assertTrue(crawlLogText.contains("crawl_start"))
             assertTrue(crawlLogText.contains("manifest_status_transition status=in_progress"))
             assertTrue(crawlLogText.contains("frontier_mutation mutation=enqueue_initial_root"))
-            assertTrue(crawlLogText.contains("frontier_dequeue screenId=screen_000"))
+            assertTrue(crawlLogText.contains("frontier_dequeue screenId=screen_00000"))
             assertTrue(crawlLogText.contains("linked_existing"))
             assertTrue(crawlLogText.contains("manifest_status_transition status=completed"))
         } finally {

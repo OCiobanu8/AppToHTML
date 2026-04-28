@@ -142,7 +142,7 @@ class CrawlerSessionTest {
                 externalPackageContext = ExternalPackageDecisionContext(
                     currentPackageName = "com.example.target",
                     nextPackageName = "com.google.android.googlequicksearchbox",
-                    parentScreenId = "screen_000",
+                    parentScreenId = "screen_00000",
                     parentScreenName = "Home",
                     triggerLabel = "Open Google",
                 ),

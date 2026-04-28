@@ -1,6 +1,7 @@
 package com.example.apptohtml.crawler
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -253,10 +254,11 @@ class CrawlerTraversalTest {
             )
 
             val rootSequence = tracker.nextScreenSequenceNumber()
+            val rootScreenId = "screen_%05d".format(rootSequence)
             val rootSnapshot = testSnapshot("Home Screen", "Open First")
-            val rootFiles = CaptureFileStore.saveScreen(session, rootSnapshot, rootSequence, "root")
+            val rootFiles = CaptureFileStore.saveScreen(session, rootSnapshot, rootScreenId)
             tracker.addScreen(
-                screenId = "screen_000",
+                screenId = rootScreenId,
                 snapshot = rootSnapshot,
                 screenFingerprint = ScreenNaming.dedupFingerprint(
                     screenName = rootSnapshot.screenName,
@@ -272,10 +274,11 @@ class CrawlerTraversalTest {
 
             val firstTrigger = rootSnapshot.elements.first()
             val firstChildSequence = tracker.nextScreenSequenceNumber()
+            val firstChildScreenId = "screen_%05d".format(firstChildSequence)
             val firstChildSnapshot = testSnapshot("Google Screen", "Primary Action")
-            val firstChildFiles = CaptureFileStore.saveScreen(session, firstChildSnapshot, firstChildSequence, "child")
+            val firstChildFiles = CaptureFileStore.saveScreen(session, firstChildSnapshot, firstChildScreenId)
             tracker.addScreen(
-                screenId = "screen_001",
+                screenId = firstChildScreenId,
                 snapshot = firstChildSnapshot,
                 screenFingerprint = ScreenNaming.dedupFingerprint(
                     screenName = firstChildSnapshot.screenName,
@@ -283,14 +286,14 @@ class CrawlerTraversalTest {
                     root = firstChildSnapshot.mergedRoot,
                 ),
                 files = firstChildFiles,
-                parentScreenId = "screen_000",
+                parentScreenId = rootScreenId,
                 triggerElement = firstTrigger,
                 route = CrawlRoute(listOf(firstTrigger.toRouteStep())),
                 depth = 1,
             )
             tracker.addEdge(
-                parentScreenId = "screen_000",
-                childScreenId = "screen_001",
+                parentScreenId = rootScreenId,
+                childScreenId = firstChildScreenId,
                 element = firstTrigger,
                 status = CrawlEdgeStatus.CAPTURED,
                 message = "Captured first child screen.",
@@ -306,10 +309,10 @@ class CrawlerTraversalTest {
                 )
             )
 
-            assertEquals("screen_001", existingScreenId)
+            assertEquals(firstChildScreenId, existingScreenId)
 
             tracker.addEdge(
-                parentScreenId = "screen_000",
+                parentScreenId = rootScreenId,
                 childScreenId = existingScreenId,
                 element = secondTrigger,
                 status = CrawlEdgeStatus.LINKED_EXISTING,
@@ -320,7 +323,7 @@ class CrawlerTraversalTest {
 
             assertEquals(2, manifest.screens.size)
             assertEquals(2, manifest.edges.size)
-            assertEquals("screen_001", manifest.edges.last().childScreenId)
+            assertEquals(firstChildScreenId, manifest.edges.last().childScreenId)
             assertEquals(CrawlEdgeStatus.LINKED_EXISTING, manifest.edges.last().status)
             assertEquals(1, manifest.maxDepthReached)
             assertEquals(
@@ -329,11 +332,11 @@ class CrawlerTraversalTest {
                     packageName = "com.example.target",
                     root = firstChildSnapshot.mergedRoot,
                 ),
-                manifest.screens.single { it.screenId == "screen_001" }.screenFingerprint
+                manifest.screens.single { it.screenId == firstChildScreenId }.screenFingerprint
             )
             assertEquals(
                 listOf(firstTrigger.toRouteStep()),
-                manifest.screens.single { it.screenId == "screen_001" }.route.steps
+                manifest.screens.single { it.screenId == firstChildScreenId }.route.steps
             )
         } finally {
             baseDir.deleteRecursively()
@@ -359,10 +362,11 @@ class CrawlerTraversalTest {
             )
 
             val rootSequence = tracker.nextScreenSequenceNumber()
+            val rootScreenId = "screen_%05d".format(rootSequence)
             val rootSnapshot = testSnapshot("Home Screen", "Open Details")
-            val rootFiles = CaptureFileStore.saveScreen(session, rootSnapshot, rootSequence, "root")
+            val rootFiles = CaptureFileStore.saveScreen(session, rootSnapshot, rootScreenId)
             tracker.addScreen(
-                screenId = "screen_000",
+                screenId = rootScreenId,
                 snapshot = rootSnapshot,
                 screenFingerprint = ScreenNaming.dedupFingerprint(
                     screenName = rootSnapshot.screenName,
@@ -377,11 +381,12 @@ class CrawlerTraversalTest {
             )
 
             val childSequence = tracker.nextScreenSequenceNumber()
+            val childScreenId = "screen_%05d".format(childSequence)
             val trigger = rootSnapshot.elements.first()
             val childSnapshot = testSnapshot("Details Screen", "Done")
-            val childFiles = CaptureFileStore.saveScreen(session, childSnapshot, childSequence, "child")
+            val childFiles = CaptureFileStore.saveScreen(session, childSnapshot, childScreenId)
             tracker.addScreen(
-                screenId = "screen_001",
+                screenId = childScreenId,
                 snapshot = childSnapshot,
                 screenFingerprint = ScreenNaming.dedupFingerprint(
                     screenName = childSnapshot.screenName,
@@ -389,14 +394,14 @@ class CrawlerTraversalTest {
                     root = childSnapshot.mergedRoot,
                 ),
                 files = childFiles,
-                parentScreenId = "screen_000",
+                parentScreenId = rootScreenId,
                 triggerElement = trigger,
                 route = CrawlRoute(listOf(trigger.toRouteStep())),
                 depth = 1,
             )
             tracker.addEdge(
-                parentScreenId = "screen_000",
-                childScreenId = "screen_001",
+                parentScreenId = rootScreenId,
+                childScreenId = childScreenId,
                 element = trigger,
                 status = CrawlEdgeStatus.CAPTURED,
                 message = "Captured child screen.",
@@ -426,22 +431,33 @@ class CrawlerTraversalTest {
             assertTrue(manifestFile.exists())
             assertTrue(session.graphJsonFile.exists())
             assertTrue(session.graphHtmlFile.exists())
-            assertEquals("000_root_home_screen.html", rootFiles.htmlFile.name)
-            assertEquals("001_child_details_screen.html", childFiles.htmlFile.name)
-            assertEquals("000_root_home_screen_merged_accessibility.xml", rootFiles.mergedXmlFile?.name)
+            assertEquals("screen_00000_home_screen.html", rootFiles.htmlFile.name)
+            assertEquals("screen_00001_details_screen.html", childFiles.htmlFile.name)
+            assertEquals("screen_00000_home_screen_merged_accessibility.xml", rootFiles.mergedXmlFile?.name)
+            listOfNotNull(
+                rootFiles.htmlFile.name,
+                rootFiles.xmlFile.name,
+                rootFiles.mergedXmlFile?.name,
+                childFiles.htmlFile.name,
+                childFiles.xmlFile.name,
+                childFiles.mergedXmlFile?.name,
+            ).forEach { fileName ->
+                assertFalse(fileName.contains("_root_"))
+                assertFalse(fileName.contains("_child_"))
+            }
             val rootHtml = rootFiles.htmlFile.readText()
-            assertTrue(rootHtml.contains("""href="001_child_details_screen.html""""))
+            assertTrue(rootHtml.contains("""href="screen_00001_details_screen.html""""))
             assertTrue(rootHtml.contains(">Open Details</a>"))
 
             val manifestJson = manifestFile.readText()
-            assertTrue(manifestJson.contains("screen_000"))
-            assertTrue(manifestJson.contains("screen_001"))
+            assertTrue(manifestJson.contains("screen_00000"))
+            assertTrue(manifestJson.contains("screen_00001"))
             assertTrue(manifestJson.contains("captured"))
             assertTrue(manifestJson.contains("mergedXmlPath"))
             assertTrue(manifestJson.contains("screenFingerprint"))
             assertTrue(manifestJson.contains("maxDepthReached"))
             assertTrue(manifestJson.contains(""""route": ["""))
-            assertTrue(session.graphJsonFile.readText().contains(""""screenId": "screen_001""""))
+            assertTrue(session.graphJsonFile.readText().contains(""""screenId": "screen_00001""""))
             assertTrue(session.graphHtmlFile.readText().contains("crawl-graph-data"))
             assertTrue(CrawlManifestStore.toJson(tracker.buildManifest(CrawlRunStatus.COMPLETED)).contains(""""screens": ["""))
         } finally {

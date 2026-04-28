@@ -363,10 +363,10 @@ class CrawlerExportTest {
 
         val html = HtmlRenderer.render(
             snapshot = snapshot,
-            resolvedChildLinks = mapOf(element.toLinkKey() to "001_child_details_screen.html"),
+            resolvedChildLinks = mapOf(element.toLinkKey() to "screen_00001_details_screen.html"),
         )
 
-        assertTrue(html.contains("""<a href="001_child_details_screen.html""""))
+        assertTrue(html.contains("""<a href="screen_00001_details_screen.html""""))
         assertTrue(html.contains(">Continue</a>"))
     }
 

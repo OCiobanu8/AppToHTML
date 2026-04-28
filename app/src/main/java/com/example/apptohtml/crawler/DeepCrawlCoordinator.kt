@@ -90,8 +90,7 @@ internal class DeepCrawlCoordinator(
             val rootFiles = CaptureFileStore.saveScreen(
                 session = session,
                 snapshot = rootSnapshot,
-                sequenceNumber = rootSequence,
-                screenPrefix = "root",
+                screenId = rootScreenId,
             )
             tracker.addScreen(
                 screenId = rootScreenId,
@@ -550,8 +549,7 @@ internal class DeepCrawlCoordinator(
                     val childFiles = CaptureFileStore.saveScreen(
                         session = session,
                         snapshot = childSnapshot,
-                        sequenceNumber = childSequence,
-                        screenPrefix = "child",
+                        screenId = childScreenId,
                     )
                     tracker.addScreen(
                         screenId = childScreenId,
@@ -1380,7 +1378,7 @@ internal class DeepCrawlCoordinator(
     }
 
     private fun screenIdFor(sequenceNumber: Int): String {
-        return "screen_%03d".format(sequenceNumber)
+        return "screen_%05d".format(sequenceNumber)
     }
 
     private fun buildSummary(

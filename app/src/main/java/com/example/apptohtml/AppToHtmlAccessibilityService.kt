@@ -791,10 +791,6 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
         return "\"${value.replace("\"", "\\\"")}\""
     }
 
-    private fun screenIdFor(sequenceNumber: Int): String {
-        return "screen_%03d".format(sequenceNumber)
-    }
-
     private fun buildSummary(
         session: CrawlSessionDirectory,
         tracker: CrawlRunTracker,

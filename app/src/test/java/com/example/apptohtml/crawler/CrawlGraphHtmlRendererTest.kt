@@ -12,8 +12,8 @@ class CrawlGraphHtmlRendererTest {
 
         assertTrue(html.contains("""<script type="application/json" id="crawl-graph-data">"""))
         assertTrue(html.contains(""""sessionId": "crawl_20260421_190000""""))
-        assertTrue(html.contains(""""screenId": "screen_000""""))
-        assertTrue(html.contains(""""htmlFileName": "000_home.html""""))
+        assertTrue(html.contains(""""screenId": "screen_00000""""))
+        assertTrue(html.contains(""""htmlFileName": "screen_00000_home.html""""))
     }
 
     @Test
@@ -40,44 +40,44 @@ class CrawlGraphHtmlRendererTest {
             sessionId = "crawl_20260421_190000",
             packageName = "com.example.target",
             generatedAtMs = 1_234L,
-            rootScreenId = "screen_000",
+            rootScreenId = "screen_00000",
             maxDepthReached = 2,
             nodes = listOf(
                 CrawlGraphNode(
-                    screenId = "screen_000",
+                    screenId = "screen_00000",
                     screenName = "Home",
                     fingerprint = "fp-home",
                     packageName = "com.example.target",
                     depth = 0,
                     discoveryIndex = 0,
-                    htmlFileName = "000_home.html",
-                    xmlFileName = "000_home.xml",
-                    mergedXmlFileName = "000_home_merged_accessibility.xml",
+                    htmlFileName = "screen_00000_home.html",
+                    xmlFileName = "screen_00000_home.xml",
+                    mergedXmlFileName = "screen_00000_home_merged_accessibility.xml",
                 ),
                 CrawlGraphNode(
-                    screenId = "screen_001",
+                    screenId = "screen_00001",
                     screenName = "Details",
                     fingerprint = "fp-details",
                     packageName = "com.example.target",
                     depth = 1,
                     discoveryIndex = 1,
-                    htmlFileName = "001_details.html",
-                    xmlFileName = "001_details.xml",
+                    htmlFileName = "screen_00001_details.html",
+                    xmlFileName = "screen_00001_details.xml",
                     mergedXmlFileName = null,
                 ),
             ),
             edges = listOf(
                 CrawlGraphEdge(
                     edgeId = "edge_000",
-                    fromScreenId = "screen_000",
-                    toScreenId = "screen_001",
+                    fromScreenId = "screen_00000",
+                    toScreenId = "screen_00001",
                     label = "Open details",
                     status = CrawlEdgeStatus.CAPTURED,
                     message = null,
                 ),
                 CrawlGraphEdge(
                     edgeId = "edge_001",
-                    fromScreenId = "screen_001",
+                    fromScreenId = "screen_00001",
                     toScreenId = null,
                     label = "Open browser",
                     status = CrawlEdgeStatus.SKIPPED_EXTERNAL_PACKAGE,

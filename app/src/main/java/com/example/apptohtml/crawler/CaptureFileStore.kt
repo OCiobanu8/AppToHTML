@@ -47,16 +47,10 @@ object CaptureFileStore {
     fun saveScreen(
         session: CrawlSessionDirectory,
         snapshot: ScreenSnapshot,
-        sequenceNumber: Int,
-        screenPrefix: String,
+        screenId: String,
         resolvedChildLinks: Map<PressableElementLinkKey, String> = emptyMap(),
     ): CapturedScreenFiles {
-        val baseName = "%03d_%s_%s".format(
-            Locale.US,
-            sequenceNumber,
-            screenPrefix,
-            ScreenNaming.toFileBase(snapshot.screenName),
-        )
+        val baseName = "${screenId}_${ScreenNaming.toFileBase(snapshot.screenName)}"
         val htmlFile = File(session.directory, "$baseName.html")
         val xmlFile = File(session.directory, "$baseName.xml")
         val mergedXmlFile = snapshot.mergedXmlDump?.let {
