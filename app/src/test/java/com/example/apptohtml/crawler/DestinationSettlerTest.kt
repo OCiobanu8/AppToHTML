@@ -97,7 +97,7 @@ class DestinationSettlerTest {
         assertEquals(DestinationSettleStopReason.FIXED_DWELL_EXHAUSTED, result.stopReason)
         assertEquals(DestinationSelectionReason.FINAL_AVAILABLE_SAMPLE, result.selectionReason)
         assertEquals(1, result.rootMetrics().distinctPressableCount)
-        assertEquals(10_000L, result.elapsedMillis)
+        assertEquals(3_000L, result.elapsedMillis)
     }
 
     @Test
@@ -121,7 +121,7 @@ class DestinationSettlerTest {
         assertNull(result.root)
         assertNull(result.fingerprint)
         assertEquals(DestinationSettleStopReason.NO_ELIGIBLE_SAMPLE, result.stopReason)
-        assertEquals(4, result.samples.size)
+        assertEquals(2, result.samples.size)
         assertTrue(result.samples.all { it.root == null })
         assertTrue(result.samples.all { it.eligibilityReason == DestinationEligibilityReason.NULL_CAPTURE })
         assertTrue(capturedExpectedPackages.all { it == "com.example.destination" })
@@ -189,7 +189,7 @@ class DestinationSettlerTest {
         assertEquals(DestinationSettleStopReason.KNOWN_DESTINATION_FINGERPRINT_MATCHED, result.stopReason)
         assertEquals(DestinationSelectionReason.KNOWN_ROUTE_FINGERPRINT_MATCH, result.selectionReason)
         assertEquals(2, result.samples.size)
-        assertTrue(result.elapsedMillis < 10_000L)
+        assertTrue(result.elapsedMillis < 3_000L)
     }
 
     @Test
@@ -206,8 +206,8 @@ class DestinationSettlerTest {
 
         assertEquals(destinationRoot, result.root)
         assertEquals(DestinationSettleStopReason.FIXED_DWELL_EXHAUSTED, result.stopReason)
-        assertEquals(10_000L, result.elapsedMillis)
-        assertEquals(10, result.samples.size)
+        assertEquals(3_000L, result.elapsedMillis)
+        assertEquals(3, result.samples.size)
         assertTrue(result.samples.drop(1).all { it.sameFingerprintAsPrevious })
     }
 
@@ -328,7 +328,7 @@ class DestinationSettlerTest {
     private suspend fun settleWithCaptures(
         captures: List<AccessibilityNodeSnapshot>,
         parentPackageName: String,
-        maxSettleMillis: Long = 10_000L,
+        maxSettleMillis: Long = 3_000L,
     ): DestinationSettleResult {
         var now = 0L
         var captureIndex = 0
@@ -351,7 +351,7 @@ class DestinationSettlerTest {
         knownDestinationFingerprint: String? = null,
         mode: DestinationSettleMode = DestinationSettleMode.DISCOVERY,
         timeProvider: () -> Long,
-        maxSettleMillis: Long = 10_000L,
+        maxSettleMillis: Long = 3_000L,
         capture: suspend (String?) -> AccessibilityNodeSnapshot?,
     ): DestinationSettleRequest {
         val parentRoot = rootSnapshot(

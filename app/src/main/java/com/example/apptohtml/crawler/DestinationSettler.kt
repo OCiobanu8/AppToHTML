@@ -367,7 +367,7 @@ internal data class DestinationSettleRequest(
     val fingerprint: (AccessibilityNodeSnapshot) -> String,
     val capture: suspend (String?) -> AccessibilityNodeSnapshot?,
     val timeProvider: () -> Long,
-    val maxSettleMillis: Long = 10_000L,
+    val maxSettleMillis: Long = 3_000L,
 )
 
 internal data class DestinationSettleResult(

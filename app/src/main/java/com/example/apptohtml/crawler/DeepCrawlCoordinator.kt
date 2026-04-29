@@ -1943,7 +1943,7 @@ internal class DeepCrawlCoordinator(
     ) : IllegalStateException(message)
 
     private companion object {
-        private const val DEFAULT_MAX_POST_CLICK_SETTLE_MILLIS = 10_000L
+        private const val DEFAULT_MAX_POST_CLICK_SETTLE_MILLIS = 3_000L
         private const val DEFAULT_MAX_ENTRY_RESTORE_SETTLE_MILLIS = 3_000L
         private const val maxEntryRestoreCaptureAttempts = 10
     }
