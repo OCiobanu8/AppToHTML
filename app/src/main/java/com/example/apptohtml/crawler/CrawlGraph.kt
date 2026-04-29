@@ -4,6 +4,7 @@ data class CrawlGraphNode(
     val screenId: String,
     val screenName: String,
     val fingerprint: String,
+    val replayFingerprint: String,
     val packageName: String,
     val depth: Int,
     val discoveryIndex: Int,
