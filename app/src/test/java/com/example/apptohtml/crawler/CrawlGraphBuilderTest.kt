@@ -147,6 +147,7 @@ class CrawlGraphBuilderTest {
             screenName = screenName,
             packageName = "com.example.target",
             screenFingerprint = "fingerprint-$screenId",
+            replayFingerprint = "replay-$screenId",
             htmlPath = htmlPath,
             xmlPath = xmlPath,
             mergedXmlPath = mergedXmlPath,

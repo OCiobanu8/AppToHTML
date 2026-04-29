@@ -13,6 +13,7 @@ internal class DeepCrawlCoordinator(
     private val createSession: (Long) -> CrawlSessionDirectory,
     private val pauseConfig: PauseCheckpointConfig = PauseCheckpointConfig(),
     private val scrollScanCoordinator: ScrollScanCoordinator = ScrollScanCoordinator(),
+    private val destinationSettler: DestinationSettler = DestinationSettler(),
     private val scanScreenOverride: (suspend (
         eventClassName: String?,
         initialRoot: AccessibilityNodeSnapshot,
@@ -20,6 +21,10 @@ internal class DeepCrawlCoordinator(
         progressPrefix: String,
     ) -> ScreenSnapshot)? = null,
     private val timeProvider: () -> Long = { System.currentTimeMillis() },
+    private val postClickSettleTimeProvider: () -> Long = timeProvider,
+    private val maxPostClickSettleMillis: Long = DEFAULT_MAX_POST_CLICK_SETTLE_MILLIS,
+    private val entryRestoreSettleTimeProvider: () -> Long = timeProvider,
+    private val maxEntryRestoreSettleMillis: Long = DEFAULT_MAX_ENTRY_RESTORE_SETTLE_MILLIS,
 ) {
     private val resolvedLinksByScreenId = mutableMapOf<String, MutableMap<PressableElementLinkKey, String>>()
     private val crashContext = CrawlCrashContext()
@@ -96,6 +101,7 @@ internal class DeepCrawlCoordinator(
                 screenId = rootScreenId,
                 snapshot = rootSnapshot,
                 screenFingerprint = rootScreenFingerprint,
+                replayFingerprint = entryScreenLogicalFingerprint,
                 indexFingerprint = rootScreenIdentity.canLinkToExisting,
                 files = rootFiles,
                 parentScreenId = null,
@@ -313,15 +319,13 @@ internal class DeepCrawlCoordinator(
                 val beforeClickFingerprint = openedChild.beforeClickFingerprint
                 val currentPackageName = screenRecord.packageName
                 val childPackageName = activeChildRoot.packageName ?: currentPackageName
-                val afterClickFingerprint = if (usesEntryFingerprint) {
-                    scrollScanCoordinator.logicalEntryViewportFingerprint(activeChildRoot)
-                } else {
-                    scrollScanCoordinator.logicalViewportFingerprint(activeChildRoot)
-                }
+                val afterClickFingerprint = openedChild.fingerprint
                 crawlLogger?.info(
                     "edge_click_result parentScreenId=${screenRecord.screenId} parentScreenName=${quote(screenRecord.screenName)} " +
                         "fingerprintType=logical beforeClickFingerprint=${quote(beforeClickFingerprint)} afterClickFingerprint=${quote(afterClickFingerprint)} " +
-                        "topFingerprint=${quote(topFingerprint)} element=${formatElement(element)}"
+                        "topFingerprint=${quote(topFingerprint)} settleStopReason=${openedChild.settleStopReason.name.lowercase()} " +
+                        "settleElapsedMillis=${openedChild.settleElapsedMillis} settleSampleCount=${openedChild.sampleCount} " +
+                        "selectedMetrics=${quote(formatDestinationMetrics(openedChild.selectedMetrics))} element=${formatElement(element)}"
                 )
                 val remainedInCurrentPackage = childPackageName == currentPackageName
                 if (
@@ -384,7 +388,11 @@ internal class DeepCrawlCoordinator(
                                     "parentScreenName=${quote(screenRecord.screenName)} triggerLabel=${quote(element.label)} " +
                                     "currentPackageName=${quote(currentPackageName)} nextPackageName=${quote(childPackageName)} " +
                                     "allowedPackageNames=${quote(allowedPackageSet)} " +
-                                    "expectedDestinationFingerprint=${quote(afterClickFingerprint)}"
+                                    "expectedDestinationFingerprint=${quote(afterClickFingerprint)} " +
+                                    "settleStopReason=${openedChild.settleStopReason.name.lowercase()} " +
+                                    "settleElapsedMillis=${openedChild.settleElapsedMillis} settleSampleCount=${openedChild.sampleCount} " +
+                                    "destinationCompatible=pending compatibilityReason=deferred_until_restore " +
+                                    "selectedMetrics=${quote(formatDestinationMetrics(openedChild.selectedMetrics))}"
                             )
                             crawlLogger?.info(
                                 "external_boundary_restore_attempt parentScreenId=${screenRecord.screenId} " +
@@ -405,11 +413,15 @@ internal class DeepCrawlCoordinator(
                             )
                             val restoredRoot = restoredChild.root
                             val restoredPackageName = restoredRoot.packageName
-                            val restoredFingerprint = if (usesEntryFingerprint) {
-                                scrollScanCoordinator.logicalEntryViewportFingerprint(restoredRoot)
-                            } else {
-                                scrollScanCoordinator.logicalViewportFingerprint(restoredRoot)
-                            }
+                            val restoredFingerprint = restoredChild.fingerprint
+                            val compatibility = destinationSettler.compatibility(
+                                expectedRoot = activeChildRoot,
+                                expectedFingerprint = afterClickFingerprint,
+                                expectedMetrics = openedChild.selectedMetrics,
+                                actualRoot = restoredRoot,
+                                actualFingerprint = restoredFingerprint,
+                                actualMetrics = restoredChild.selectedMetrics,
+                            )
                             crawlLogger?.info(
                                 "external_boundary_restore_result parentScreenId=${screenRecord.screenId} " +
                                     "parentScreenName=${quote(screenRecord.screenName)} triggerLabel=${quote(element.label)} " +
@@ -418,9 +430,15 @@ internal class DeepCrawlCoordinator(
                                     "expectedPackageName=${quote(childPackageName)} actualPackageName=${quote(restoredPackageName.orEmpty())} " +
                                     "expectedDestinationFingerprint=${quote(afterClickFingerprint)} " +
                                     "actualDestinationFingerprint=${quote(restoredFingerprint)} " +
-                                    "destinationFingerprintMatched=${restoredFingerprint == afterClickFingerprint}"
+                                    "destinationFingerprintMatched=${restoredFingerprint == afterClickFingerprint} " +
+                                    "destinationCompatible=${compatibility.isCompatible} " +
+                                    "compatibilityReason=${compatibility.reason.name.lowercase()} " +
+                                    "settleStopReason=${restoredChild.settleStopReason.name.lowercase()} " +
+                                    "settleElapsedMillis=${restoredChild.settleElapsedMillis} settleSampleCount=${restoredChild.sampleCount} " +
+                                    "expectedSelectedMetrics=${quote(formatDestinationMetrics(openedChild.selectedMetrics))} " +
+                                    "actualSelectedMetrics=${quote(formatDestinationMetrics(restoredChild.selectedMetrics))}"
                             )
-                            if (restoredPackageName != childPackageName || restoredFingerprint != afterClickFingerprint) {
+                            if (restoredPackageName != childPackageName || !compatibility.isCompatible) {
                                 failCurrentEdge(
                                     parentScreenId = screenRecord.screenId,
                                     element = element,
@@ -486,8 +504,15 @@ internal class DeepCrawlCoordinator(
                     capturePackageName = childPackageName,
                     progressPrefix = "Mapping screen '${element.label}'.",
                 )
+                val childTopRoot = childSnapshot.stepSnapshots.firstOrNull()?.root ?: activeChildRoot
+                val childReplayFingerprint = scrollScanCoordinator.logicalViewportFingerprint(childTopRoot)
                 val childRoute = screenRecord.route.append(
-                    element.toRouteStep(expectedPackageName = childSnapshot.packageName)
+                    element.toRouteStep(
+                        expectedPackageName = childSnapshot.packageName,
+                        expectedDestinationFingerprint = openedChild.fingerprint,
+                        expectedReplayFingerprint = childReplayFingerprint,
+                        expectedReplayScreenName = childSnapshot.screenName,
+                    )
                 )
                 val childScreenIdentity = screenIdentityFor(
                     snapshot = childSnapshot,
@@ -555,6 +580,7 @@ internal class DeepCrawlCoordinator(
                         screenId = childScreenId,
                         snapshot = childSnapshot,
                         screenFingerprint = childScreenFingerprint,
+                        replayFingerprint = childReplayFingerprint,
                         indexFingerprint = childScreenIdentity.canLinkToExisting,
                         files = childFiles,
                         parentScreenId = screenRecord.screenId,
@@ -892,7 +918,7 @@ internal class DeepCrawlCoordinator(
             )
         }
 
-        val childRoot = captureChildDestinationAfterClick(
+        val openedChild = captureChildDestinationAfterClick(
             screenRecord = screenRecord,
             element = element,
             expectedChildPackageName = expectedChildPackageName,
@@ -900,21 +926,16 @@ internal class DeepCrawlCoordinator(
             expectedTopFingerprint = expectedTopFingerprint,
             usesEntryFingerprint = usesEntryFingerprint,
         )
-        val afterClickFingerprint = if (usesEntryFingerprint) {
-            scrollScanCoordinator.logicalEntryViewportFingerprint(childRoot)
-        } else {
-            scrollScanCoordinator.logicalViewportFingerprint(childRoot)
-        }
         crawlLogger?.info(
             "child_open_restore_result parentScreenId=${screenRecord.screenId} parentScreenName=${quote(screenRecord.screenName)} " +
                 "triggerLabel=${quote(element.label)} expectedPackageName=${quote(expectedChildPackageName.orEmpty())} " +
-                "actualPackageName=${quote(childRoot.packageName.orEmpty())} destinationFingerprintMatched=${afterClickFingerprint != beforeClickFingerprint} " +
-                "result=captured"
+                "actualPackageName=${quote(openedChild.root.packageName.orEmpty())} " +
+                "destinationFingerprintMatched=${openedChild.fingerprint != beforeClickFingerprint} " +
+                "settleStopReason=${openedChild.settleStopReason.name.lowercase()} " +
+                "settleElapsedMillis=${openedChild.settleElapsedMillis} settleSampleCount=${openedChild.sampleCount} " +
+                "selectedMetrics=${quote(formatDestinationMetrics(openedChild.selectedMetrics))} result=captured"
         )
-        return OpenedChildDestination(
-            root = childRoot,
-            beforeClickFingerprint = beforeClickFingerprint,
-        )
+        return openedChild
     }
 
     private suspend fun captureChildDestinationAfterClick(
@@ -924,117 +945,62 @@ internal class DeepCrawlCoordinator(
         beforeClickFingerprint: String,
         expectedTopFingerprint: String,
         usesEntryFingerprint: Boolean,
-    ): AccessibilityNodeSnapshot {
-        var lastCapturedRoot: AccessibilityNodeSnapshot? = null
-
-        repeat(maxPostClickCaptureAttempts) { attempt ->
-            val attemptNumber = attempt + 1
-            logChildDestinationObserveAttempt(
-                screenRecord = screenRecord,
-                element = element,
-                expectedChildPackageName = expectedChildPackageName,
-                beforeClickFingerprint = beforeClickFingerprint,
-                expectedTopFingerprint = expectedTopFingerprint,
-                attemptNumber = attemptNumber,
-            )
-            val capturedRoot = host.captureCurrentRootSnapshot(expectedChildPackageName)
-
-            if (capturedRoot == null) {
-                val result = when {
-                    expectedChildPackageName != null && attemptNumber == maxPostClickCaptureAttempts ->
-                        "expected_package_missing_final"
-
-                    expectedChildPackageName != null ->
-                        "expected_package_missing_retry"
-
-                    attemptNumber == maxPostClickCaptureAttempts ->
-                        "capture_missing_final"
-
-                    else ->
-                        "capture_missing_retry"
-                }
-                logChildDestinationObserveResult(
-                    screenRecord = screenRecord,
-                    element = element,
-                    expectedChildPackageName = expectedChildPackageName,
-                    beforeClickFingerprint = beforeClickFingerprint,
-                    expectedTopFingerprint = expectedTopFingerprint,
-                    observedFingerprint = null,
-                    actualPackageName = null,
-                    attemptNumber = attemptNumber,
-                    result = result,
-                )
-                return@repeat
-            }
-
-            if (expectedChildPackageName != null) {
-                val capturedFingerprint = if (usesEntryFingerprint) {
-                    scrollScanCoordinator.logicalEntryViewportFingerprint(capturedRoot)
-                } else {
-                    scrollScanCoordinator.logicalViewportFingerprint(capturedRoot)
-                }
-                logChildDestinationObserveResult(
-                    screenRecord = screenRecord,
-                    element = element,
-                    expectedChildPackageName = expectedChildPackageName,
-                    beforeClickFingerprint = beforeClickFingerprint,
-                    expectedTopFingerprint = expectedTopFingerprint,
-                    observedFingerprint = capturedFingerprint,
-                    actualPackageName = capturedRoot.packageName,
-                    attemptNumber = attemptNumber,
-                    result = "captured",
-                )
-                return capturedRoot
-            }
-
-            lastCapturedRoot = capturedRoot
-            val capturedFingerprint = if (usesEntryFingerprint) {
-                scrollScanCoordinator.logicalEntryViewportFingerprint(capturedRoot)
+    ): OpenedChildDestination {
+        val fingerprint: (AccessibilityNodeSnapshot) -> String = { root ->
+            if (usesEntryFingerprint) {
+                scrollScanCoordinator.logicalEntryViewportFingerprint(root)
             } else {
-                scrollScanCoordinator.logicalViewportFingerprint(capturedRoot)
+                scrollScanCoordinator.logicalViewportFingerprint(root)
             }
-            val capturedPackageName = capturedRoot.packageName
-            val packageChanged = capturedPackageName != null && capturedPackageName != screenRecord.packageName
-            val fingerprintChanged =
-                capturedFingerprint != beforeClickFingerprint && capturedFingerprint != expectedTopFingerprint
-
-            if (packageChanged || fingerprintChanged) {
-                logChildDestinationObserveResult(
-                    screenRecord = screenRecord,
-                    element = element,
-                    expectedChildPackageName = expectedChildPackageName,
-                    beforeClickFingerprint = beforeClickFingerprint,
-                    expectedTopFingerprint = expectedTopFingerprint,
-                    observedFingerprint = capturedFingerprint,
-                    actualPackageName = capturedPackageName,
-                    attemptNumber = attemptNumber,
-                    result = "changed",
-                )
-                return capturedRoot
-            }
-
-            val result = if (attemptNumber == maxPostClickCaptureAttempts) {
-                "unchanged_final"
-            } else {
-                "unchanged_retry"
-            }
-            logChildDestinationObserveResult(
-                screenRecord = screenRecord,
-                element = element,
-                expectedChildPackageName = expectedChildPackageName,
-                beforeClickFingerprint = beforeClickFingerprint,
-                expectedTopFingerprint = expectedTopFingerprint,
-                observedFingerprint = capturedFingerprint,
-                actualPackageName = capturedPackageName,
-                attemptNumber = attemptNumber,
-                result = result,
-            )
         }
+        val result = destinationSettler.settle(
+            DestinationSettleRequest(
+                parentPackageName = screenRecord.packageName,
+                expectedPackageName = expectedChildPackageName,
+                beforeClickFingerprint = beforeClickFingerprint,
+                topFingerprint = expectedTopFingerprint,
+                mode = DestinationSettleMode.DISCOVERY,
+                fingerprint = fingerprint,
+                capture = { expectedPackageName ->
+                    host.captureCurrentRootSnapshot(expectedPackageName)
+                },
+                timeProvider = postClickSettleTimeProvider,
+                maxSettleMillis = maxPostClickSettleMillis,
+            )
+        )
+        logChildDestinationSettleSamples(
+            screenRecord = screenRecord,
+            element = element,
+            expectedChildPackageName = expectedChildPackageName,
+            beforeClickFingerprint = beforeClickFingerprint,
+            expectedTopFingerprint = expectedTopFingerprint,
+            settleResult = result,
+        )
 
-        return lastCapturedRoot ?: failCurrentEdge(
+        val selectedSample = result.samples.firstOrNull { sample ->
+            sample.root != null &&
+                sample.root == result.root &&
+                sample.fingerprint == result.fingerprint
+        } ?: result.samples.lastOrNull { sample -> sample.root != null }
+        val selectedRoot = result.root ?: selectedSample?.root ?: failCurrentEdge(
             parentScreenId = screenRecord.screenId,
             element = element,
             message = "The target app was lost immediately after clicking '${element.label}'.",
+        )
+        val selectedFingerprint = result.fingerprint ?: selectedSample?.fingerprint ?: fingerprint(selectedRoot)
+        val selectedMetrics = selectedSample?.metrics ?: DestinationRichnessMetrics.from(
+            root = selectedRoot,
+            logicalFingerprint = selectedFingerprint,
+        )
+
+        return OpenedChildDestination(
+            root = selectedRoot,
+            beforeClickFingerprint = beforeClickFingerprint,
+            fingerprint = selectedFingerprint,
+            settleStopReason = result.stopReason,
+            settleElapsedMillis = result.elapsedMillis,
+            sampleCount = result.samples.size,
+            selectedMetrics = selectedMetrics,
         )
     }
 
@@ -1044,12 +1010,13 @@ internal class DeepCrawlCoordinator(
         expectedChildPackageName: String?,
         beforeClickFingerprint: String,
         expectedTopFingerprint: String,
-        attemptNumber: Int,
+        sample: DestinationSample,
     ) {
         crawlLogger?.info(
             "child_destination_observe_attempt parentScreenId=${screenRecord.screenId} " +
                 "parentScreenName=${quote(screenRecord.screenName)} triggerLabel=${quote(element.label)} " +
-                "attempt=$attemptNumber/$maxPostClickCaptureAttempts " +
+                "attempt=${sample.attemptNumber} elapsedSettleMillis=${sample.elapsedMillis} " +
+                "maxSettleMillis=$maxPostClickSettleMillis " +
                 "expectedPackageName=${quote(expectedChildPackageName.orEmpty())} " +
                 "beforeClickFingerprint=${quote(beforeClickFingerprint)} topFingerprint=${quote(expectedTopFingerprint)}"
         )
@@ -1061,20 +1028,102 @@ internal class DeepCrawlCoordinator(
         expectedChildPackageName: String?,
         beforeClickFingerprint: String,
         expectedTopFingerprint: String,
-        observedFingerprint: String?,
-        actualPackageName: String?,
-        attemptNumber: Int,
+        sample: DestinationSample,
         result: String,
     ) {
         crawlLogger?.info(
             "child_destination_observe_result parentScreenId=${screenRecord.screenId} " +
                 "parentScreenName=${quote(screenRecord.screenName)} triggerLabel=${quote(element.label)} " +
-                "attempt=$attemptNumber/$maxPostClickCaptureAttempts " +
+                "attempt=${sample.attemptNumber} elapsedSettleMillis=${sample.elapsedMillis} " +
+                "maxSettleMillis=$maxPostClickSettleMillis " +
                 "expectedPackageName=${quote(expectedChildPackageName.orEmpty())} " +
-                "actualPackageName=${quote(actualPackageName.orEmpty())} " +
+                "actualPackageName=${quote(sample.packageName.orEmpty())} " +
                 "beforeClickFingerprint=${quote(beforeClickFingerprint)} topFingerprint=${quote(expectedTopFingerprint)} " +
-                "observedFingerprint=${quote(observedFingerprint.orEmpty())} result=$result"
+                "observedFingerprint=${quote(sample.fingerprint.orEmpty())} " +
+                "eligibilityReason=${sample.eligibilityReason.name.lowercase()} eligible=${sample.eligible} " +
+                "packageChanged=${sample.packageChanged} fingerprintChangedFromBefore=${sample.fingerprintChangedFromBefore} " +
+                "fingerprintChangedFromTop=${sample.fingerprintChangedFromTop} sameFingerprintAsPrevious=${sample.sameFingerprintAsPrevious} " +
+                "becameCurrentBest=${sample.becameCurrentBest} " +
+                "metrics=${quote(formatDestinationMetrics(sample.metrics))} result=$result"
         )
+    }
+
+    private fun logChildDestinationSettleSamples(
+        screenRecord: CrawlScreenRecord,
+        element: PressableElement,
+        expectedChildPackageName: String?,
+        beforeClickFingerprint: String,
+        expectedTopFingerprint: String,
+        settleResult: DestinationSettleResult,
+    ) {
+        settleResult.samples.forEach { sample ->
+            logChildDestinationObserveAttempt(
+                screenRecord = screenRecord,
+                element = element,
+                expectedChildPackageName = expectedChildPackageName,
+                beforeClickFingerprint = beforeClickFingerprint,
+                expectedTopFingerprint = expectedTopFingerprint,
+                sample = sample,
+            )
+            logChildDestinationObserveResult(
+                screenRecord = screenRecord,
+                element = element,
+                expectedChildPackageName = expectedChildPackageName,
+                beforeClickFingerprint = beforeClickFingerprint,
+                expectedTopFingerprint = expectedTopFingerprint,
+                sample = sample,
+                result = observeResultForSample(
+                    sample = sample,
+                    expectedChildPackageName = expectedChildPackageName,
+                    settleResult = settleResult,
+                ),
+            )
+        }
+        crawlLogger?.info(
+            "child_destination_settle_result parentScreenId=${screenRecord.screenId} " +
+                "parentScreenName=${quote(screenRecord.screenName)} triggerLabel=${quote(element.label)} " +
+                "expectedPackageName=${quote(expectedChildPackageName.orEmpty())} " +
+                "selectedPackageName=${quote(settleResult.packageName.orEmpty())} " +
+                "selectedFingerprint=${quote(settleResult.fingerprint.orEmpty())} " +
+                "sampleCount=${settleResult.samples.size} elapsedSettleMillis=${settleResult.elapsedMillis} " +
+                "stopReason=${settleResult.stopReason.name.lowercase()} " +
+                "selectionReason=${settleResult.selectionReason?.name?.lowercase().orEmpty()} " +
+                "selectedMetrics=${quote(formatDestinationMetrics(selectedMetrics(settleResult)))}"
+        )
+    }
+
+    private fun observeResultForSample(
+        sample: DestinationSample,
+        expectedChildPackageName: String?,
+        settleResult: DestinationSettleResult,
+    ): String {
+        if (sample.root == null) {
+            return if (expectedChildPackageName != null) {
+                if (sample == settleResult.samples.last()) "expected_package_missing_final" else "expected_package_missing_retry"
+            } else {
+                if (sample == settleResult.samples.last()) "capture_missing_final" else "capture_missing_retry"
+            }
+        }
+
+        if (sample.eligible) {
+            return if (expectedChildPackageName != null) "captured" else "changed"
+        }
+
+        return when (sample.eligibilityReason) {
+            DestinationEligibilityReason.EXPECTED_PACKAGE_MISMATCH ->
+                if (sample == settleResult.samples.last()) "expected_package_mismatch_final" else "expected_package_mismatch_retry"
+
+            else ->
+                if (sample == settleResult.samples.last()) "unchanged_final" else "unchanged_retry"
+        }
+    }
+
+    private fun selectedMetrics(settleResult: DestinationSettleResult): DestinationRichnessMetrics? {
+        return settleResult.samples.firstOrNull { sample ->
+            sample.root != null &&
+                sample.root == settleResult.root &&
+                sample.fingerprint == settleResult.fingerprint
+        }?.metrics
     }
 
     private suspend fun restoreLiveScreenForEdge(
@@ -1183,7 +1232,20 @@ internal class DeepCrawlCoordinator(
                 message = "Could not scroll back to '${routeStep.label}' while replaying '${screenRecord.screenName}'.",
             )
 
-            val beforeClickFingerprint = scrollScanCoordinator.logicalViewportFingerprint(targetStepRoot)
+            val routeStepUsesEntryFingerprint = parentScreen.route.steps.isEmpty()
+            val routeStepFingerprint: (AccessibilityNodeSnapshot) -> String = { root ->
+                if (routeStepUsesEntryFingerprint) {
+                    scrollScanCoordinator.logicalEntryViewportFingerprint(root)
+                } else {
+                    scrollScanCoordinator.logicalViewportFingerprint(root)
+                }
+            }
+            val topFingerprint = if (routeStepUsesEntryFingerprint) {
+                entryScreenLogicalFingerprint
+            } else {
+                scrollScanCoordinator.logicalViewportFingerprint(topRoot)
+            }
+            val beforeClickFingerprint = routeStepFingerprint(targetStepRoot)
             if (!host.click(routeStep.toPressableElement())) {
                 return replayFailure(
                     parentScreenId = parentScreenId,
@@ -1192,24 +1254,91 @@ internal class DeepCrawlCoordinator(
                 )
             }
 
-            val nextRoot = host.captureCurrentRootSnapshot(routeStep.expectedPackageName)
-                ?: return replayFailure(
-                    parentScreenId = parentScreenId,
-                    element = routeStep.toPressableElement(),
-                    message = "The target app was lost while replaying '${screenRecord.screenName}'.",
+            val settleResult = destinationSettler.settle(
+                DestinationSettleRequest(
+                    parentPackageName = parentScreen.packageName,
+                    expectedPackageName = routeStep.expectedPackageName,
+                    beforeClickFingerprint = beforeClickFingerprint,
+                    topFingerprint = topFingerprint,
+                    knownDestinationFingerprint = routeStep.expectedDestinationFingerprint,
+                    mode = DestinationSettleMode.ROUTE_REPLAY,
+                    fingerprint = routeStepFingerprint,
+                    capture = { expectedPackageName ->
+                        host.captureCurrentRootSnapshot(expectedPackageName)
+                    },
+                    timeProvider = postClickSettleTimeProvider,
+                    maxSettleMillis = maxPostClickSettleMillis,
                 )
-            val afterClickFingerprint = scrollScanCoordinator.logicalViewportFingerprint(nextRoot)
-            crawlLogger?.info(
-                "replay_route_step_result destinationScreenId=${screenRecord.screenId} destinationScreenName=${quote(screenRecord.screenName)} " +
-                    "fingerprintType=logical stepIndex=$index beforeClickFingerprint=${quote(beforeClickFingerprint)} " +
-                    "afterClickFingerprint=${quote(afterClickFingerprint)} step=${formatRouteStep(routeStep)}"
             )
-            if (afterClickFingerprint == beforeClickFingerprint) {
+            logChildDestinationSettleSamples(
+                screenRecord = parentScreen,
+                element = routeStep.toPressableElement(),
+                expectedChildPackageName = routeStep.expectedPackageName,
+                beforeClickFingerprint = beforeClickFingerprint,
+                expectedTopFingerprint = topFingerprint,
+                settleResult = settleResult,
+            )
+            val nextRoot = settleResult.root ?: return replayFailure(
+                parentScreenId = parentScreenId,
+                element = routeStep.toPressableElement(),
+                message = "The target app was lost while replaying '${screenRecord.screenName}'.",
+            )
+            val afterClickFingerprint = settleResult.fingerprint ?: routeStepFingerprint(nextRoot)
+            crawlLogger?.info(
+                "replay_route_step_settle_result destinationScreenId=${screenRecord.screenId} " +
+                    "destinationScreenName=${quote(screenRecord.screenName)} stepIndex=$index " +
+                    "parentScreenId=$parentScreenId expectedPackageName=${quote(routeStep.expectedPackageName.orEmpty())} " +
+                    "knownDestinationFingerprint=${quote(routeStep.expectedDestinationFingerprint.orEmpty())} " +
+                    "selectedPackageName=${quote(settleResult.packageName.orEmpty())} " +
+                    "selectedFingerprint=${quote(afterClickFingerprint)} sampleCount=${settleResult.samples.size} " +
+                    "elapsedSettleMillis=${settleResult.elapsedMillis} " +
+                    "stopReason=${settleResult.stopReason.name.lowercase()} " +
+                    "selectionReason=${settleResult.selectionReason?.name?.lowercase().orEmpty()} " +
+                    "selectedMetrics=${quote(formatDestinationMetrics(selectedMetrics(settleResult)))} " +
+                    "step=${formatRouteStep(routeStep)}"
+            )
+            if (
+                afterClickFingerprint == beforeClickFingerprint ||
+                afterClickFingerprint == topFingerprint
+            ) {
                 return replayFailure(
                     parentScreenId = parentScreenId,
                     element = routeStep.toPressableElement(),
                     message = "Clicking '${routeStep.label}' did not navigate while replaying '${screenRecord.screenName}'.",
                 )
+            }
+            crawlLogger?.info(
+                "replay_route_step_result destinationScreenId=${screenRecord.screenId} destinationScreenName=${quote(screenRecord.screenName)} " +
+                    "fingerprintType=logical stepIndex=$index beforeClickFingerprint=${quote(beforeClickFingerprint)} " +
+                    "topFingerprint=${quote(topFingerprint)} afterClickFingerprint=${quote(afterClickFingerprint)} " +
+                    "step=${formatRouteStep(routeStep)}"
+            )
+
+            val expectedReplayFingerprint = routeStep.expectedReplayFingerprint
+            val expectedReplayScreenName = routeStep.expectedReplayScreenName
+                ?: if (index == screenRecord.route.steps.lastIndex) screenRecord.screenName else null
+            if (expectedReplayFingerprint != null) {
+                val observedReplayFingerprint = scrollScanCoordinator.logicalViewportFingerprint(nextRoot)
+                val matched = observedReplayFingerprint == expectedReplayFingerprint
+                crawlLogger?.info(
+                    "replay_route_step_validation destinationScreenId=${screenRecord.screenId} " +
+                        "destinationScreenName=${quote(screenRecord.screenName)} stepIndex=$index " +
+                        "expectedReplayScreenName=${quote(expectedReplayScreenName.orEmpty())} " +
+                        "expectedReplayFingerprint=${quote(expectedReplayFingerprint)} " +
+                        "observedReplayFingerprint=${quote(observedReplayFingerprint)} " +
+                        "matchedExpectedReplay=$matched step=${formatRouteStep(routeStep)}"
+                )
+                if (!matched) {
+                    val expectedScreenLabel = expectedReplayScreenName?.takeIf { it.isNotBlank() }
+                        ?: "<unnamed>"
+                    return replayFailure(
+                        parentScreenId = parentScreenId,
+                        element = routeStep.toPressableElement(),
+                        message = "Route replay step $index for '${routeStep.label}' reached an unexpected screen while replaying '${screenRecord.screenName}': " +
+                            "expected '$expectedScreenLabel' (replay fingerprint '$expectedReplayFingerprint') " +
+                            "but observed replay fingerprint '$observedReplayFingerprint'.",
+                    )
+                }
             }
 
             currentRoot = nextRoot
@@ -1294,11 +1423,11 @@ internal class DeepCrawlCoordinator(
                 expectedEntryLogicalFingerprint = expectedEntryLogicalFingerprint,
             )
             crawlLogger?.info(
-                "entry_restore_result strategy=restore_to_entry stopReason=${entryResetResult.stopReason.name.lowercase()} " +
-                    "matchedExpectedLogical=${expectedEntryLogicalFingerprint != null && entryResetResult.stopReason == EntryScreenResetStopReason.NO_BACK_AFFORDANCE}"
+                "entry_restore_result strategy=restore_to_entry attempt=1/1 " +
+                    formatEntryResetResult(entryResetResult)
             )
             if (
-                entryResetResult.stopReason == EntryScreenResetStopReason.NO_BACK_AFFORDANCE &&
+                entryResetResult.verifiedForReplay &&
                 !entryIsAmbiguous
             ) {
                 return entryResetResult.root
@@ -1312,24 +1441,49 @@ internal class DeepCrawlCoordinator(
             return null
         }
 
-        repeat(maxForegroundCaptureAttempts) { attempt ->
-            val relaunchedRoot = host.captureCurrentRootSnapshot(selectedApp.packageName) ?: return@repeat
+        val startedAt = entryRestoreSettleTimeProvider()
+        var attemptNumber = 0
+        var shouldContinueSampling = true
+        while (shouldContinueSampling && attemptNumber < maxEntryRestoreCaptureAttempts) {
+            attemptNumber += 1
+            val relaunchedRoot = host.captureCurrentRootSnapshot(selectedApp.packageName)
+            if (relaunchedRoot == null) {
+                val elapsedMillis = entryRestoreSettleTimeProvider() - startedAt
+                crawlLogger?.info(
+                    "entry_restore_relaunch_attempt attempt=$attemptNumber/$maxEntryRestoreCaptureAttempts " +
+                        "elapsedSettleMillis=$elapsedMillis maxSettleMillis=$maxEntryRestoreSettleMillis " +
+                        "observedPackageName=${quote("")} observedLogicalFingerprint=${quote("")} " +
+                        "expectedLogicalFingerprintPresent=${expectedEntryLogicalFingerprint != null} " +
+                        "expectedLogicalFingerprint=${quote(expectedEntryLogicalFingerprint.orEmpty())} " +
+                        "outcome=capture_missing matchedExpectedLogical=false verifiedForReplay=false"
+                )
+                shouldContinueSampling = elapsedMillis < maxEntryRestoreSettleMillis
+                continue
+            }
             val entryResetResult = normalizeRootToEntryScreen(
                 targetPackageName = selectedApp.packageName,
                 initialRoot = relaunchedRoot,
                 expectedEntryLogicalFingerprint = expectedEntryLogicalFingerprint,
             )
+            val elapsedMillis = entryRestoreSettleTimeProvider() - startedAt
             crawlLogger?.info(
-                "entry_restore_relaunch_attempt attempt=${attempt + 1}/$maxForegroundCaptureAttempts " +
-                    "stopReason=${entryResetResult.stopReason.name.lowercase()}"
+                "entry_restore_relaunch_attempt attempt=$attemptNumber/$maxEntryRestoreCaptureAttempts " +
+                    "elapsedSettleMillis=$elapsedMillis maxSettleMillis=$maxEntryRestoreSettleMillis " +
+                    formatEntryResetResult(entryResetResult)
             )
-            if (entryResetResult.stopReason == EntryScreenResetStopReason.NO_BACK_AFFORDANCE) {
+            if (entryResetResult.verifiedForReplay) {
                 crawlLogger?.info("entry_restore_result strategy=relaunch success=true")
                 return entryResetResult.root
             }
+            shouldContinueSampling = elapsedMillis < maxEntryRestoreSettleMillis
         }
 
-        crawlLogger?.warn("entry_restore_result strategy=relaunch success=false message=${quote("No entry screen root was captured after relaunch.")}")
+        val failureMessage = if (expectedEntryLogicalFingerprint != null) {
+            "The expected entry screen did not settle after relaunch."
+        } else {
+            "No entry screen root was captured after relaunch."
+        }
+        crawlLogger?.warn("entry_restore_result strategy=relaunch success=false message=${quote(failureMessage)}")
         return null
     }
 
@@ -1361,20 +1515,34 @@ internal class DeepCrawlCoordinator(
         )
     }
 
-    private fun entryScreenResetFailureMessage(stopReason: EntryScreenResetStopReason): String {
-        return when (stopReason) {
-            EntryScreenResetStopReason.NO_BACK_AFFORDANCE ->
-                "Reset to the first screen unexpectedly failed after the back button disappeared."
+    private fun entryScreenResetFailureMessage(outcome: EntryScreenResetOutcome): String {
+        return when (outcome) {
+            EntryScreenResetOutcome.MATCHED_EXPECTED_LOGICAL,
+            EntryScreenResetOutcome.NO_BACK_AFFORDANCE_ASSUMED_ENTRY ->
+                "Reset to the first screen succeeded and was reported as a failure unexpectedly."
 
-            EntryScreenResetStopReason.BACK_ACTION_FAILED ->
+            EntryScreenResetOutcome.EXPECTED_LOGICAL_NOT_FOUND ->
+                "Could not reset to the first screen because the expected logical entry fingerprint was not observed."
+
+            EntryScreenResetOutcome.BACK_ACTION_FAILED ->
                 "Could not reset to the first screen because a visible in-app back button was still present when Android back stopped working."
 
-            EntryScreenResetStopReason.LEFT_TARGET_APP ->
+            EntryScreenResetOutcome.LEFT_TARGET_APP ->
                 "Could not reset to the first screen because backing out left the target app before the in-app back button disappeared."
 
-            EntryScreenResetStopReason.MAX_ATTEMPTS_REACHED ->
+            EntryScreenResetOutcome.MAX_ATTEMPTS_REACHED ->
                 "Could not reset to the first screen because a visible in-app back button was still present after the maximum number of back attempts."
         }
+    }
+
+    private fun formatEntryResetResult(result: EntryScreenResetResult): String {
+        return "observedPackageName=${quote(result.root.packageName.orEmpty())} " +
+            "outcome=${result.outcome.name.lowercase()} " +
+            "observedLogicalFingerprint=${quote(result.observedLogicalFingerprint)} " +
+            "expectedLogicalFingerprintPresent=${result.expectedLogicalFingerprint != null} " +
+            "expectedLogicalFingerprint=${quote(result.expectedLogicalFingerprint.orEmpty())} " +
+            "matchedExpectedLogical=${result.matchedExpectedLogical} " +
+            "verifiedForReplay=${result.verifiedForReplay}"
     }
 
     private fun screenIdFor(sequenceNumber: Int): String {
@@ -1636,6 +1804,21 @@ internal class DeepCrawlCoordinator(
         }
     }
 
+    private fun formatDestinationMetrics(metrics: DestinationRichnessMetrics?): String {
+        if (metrics == null) {
+            return "<none>"
+        }
+        return "richnessScore=${metrics.richnessScore} " +
+            "visibleNodeCount=${metrics.visibleNodeCount} " +
+            "visibleTextOrContentDescriptionCount=${metrics.visibleTextOrContentDescriptionCount} " +
+            "visibleTextOrContentDescriptionCharacterCount=${metrics.visibleTextOrContentDescriptionCharacterCount} " +
+            "distinctPressableCount=${metrics.distinctPressableCount} " +
+            "nonEmptyPressableLabelCount=${metrics.nonEmptyPressableLabelCount} " +
+            "logicalFingerprintLength=${metrics.logicalFingerprintLength} " +
+            "scrollableNodeCount=${metrics.scrollableNodeCount} " +
+            "progressIndicatorCount=${metrics.progressIndicatorCount}"
+    }
+
     private fun formatRoute(route: CrawlRoute): String {
         if (route.steps.isEmpty()) {
             return "<root>"
@@ -1725,6 +1908,11 @@ internal class DeepCrawlCoordinator(
     private data class OpenedChildDestination(
         val root: AccessibilityNodeSnapshot,
         val beforeClickFingerprint: String,
+        val fingerprint: String,
+        val settleStopReason: DestinationSettleStopReason,
+        val settleElapsedMillis: Long,
+        val sampleCount: Int,
+        val selectedMetrics: DestinationRichnessMetrics,
     )
 
     private data class CrawlCrashContext(
@@ -1755,7 +1943,8 @@ internal class DeepCrawlCoordinator(
     ) : IllegalStateException(message)
 
     private companion object {
-        private const val maxForegroundCaptureAttempts = 4
-        private const val maxPostClickCaptureAttempts = 4
+        private const val DEFAULT_MAX_POST_CLICK_SETTLE_MILLIS = 10_000L
+        private const val DEFAULT_MAX_ENTRY_RESTORE_SETTLE_MILLIS = 3_000L
+        private const val maxEntryRestoreCaptureAttempts = 10
     }
 }

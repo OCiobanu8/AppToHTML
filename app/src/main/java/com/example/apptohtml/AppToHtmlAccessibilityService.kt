@@ -10,6 +10,7 @@ import com.example.apptohtml.crawler.AccessibilityTreeSnapshotter
 import com.example.apptohtml.crawler.AppLaunchHelper
 import com.example.apptohtml.crawler.CaptureFileStore
 import com.example.apptohtml.crawler.CapturedScreenFiles
+import com.example.apptohtml.crawler.ClickFallbackMatcher
 import com.example.apptohtml.crawler.CrawlBlacklistLoader
 import com.example.apptohtml.crawler.CrawlEdgeStatus
 import com.example.apptohtml.crawler.CrawlLogger
@@ -20,7 +21,7 @@ import com.example.apptohtml.crawler.CrawlSessionDirectory
 import com.example.apptohtml.crawler.CrawlerPhase
 import com.example.apptohtml.crawler.CrawlerSession
 import com.example.apptohtml.crawler.DeepCrawlCoordinator
-import com.example.apptohtml.crawler.EntryScreenResetStopReason
+import com.example.apptohtml.crawler.EntryScreenResetOutcome
 import com.example.apptohtml.crawler.ExternalPackageDecisionContext
 import com.example.apptohtml.crawler.PathReplayResolver
 import com.example.apptohtml.crawler.PauseDecision
@@ -44,7 +45,6 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.io.File
-import kotlin.math.abs
 
 class AppToHtmlAccessibilityService : AccessibilityService() {
     private val scrollScanCoordinator = ScrollScanCoordinator()
@@ -59,7 +59,6 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
         private const val scrollSettleDelayMillis = 350L
         private const val maxBackNavigationAttempts = 3
         private const val clickBoundsTolerancePx = 24
-        private val boundsRegex = Regex("\\[(\\d+),(\\d+)]\\[(\\d+),(\\d+)]")
     }
 
     override fun onServiceConnected() {
@@ -276,18 +275,22 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
         },
     )
 
-    private fun entryScreenResetFailureMessage(stopReason: EntryScreenResetStopReason): String {
-        return when (stopReason) {
-            EntryScreenResetStopReason.NO_BACK_AFFORDANCE ->
-                "Reset to the first screen unexpectedly failed after the back button disappeared."
+    private fun entryScreenResetFailureMessage(outcome: EntryScreenResetOutcome): String {
+        return when (outcome) {
+            EntryScreenResetOutcome.MATCHED_EXPECTED_LOGICAL,
+            EntryScreenResetOutcome.NO_BACK_AFFORDANCE_ASSUMED_ENTRY ->
+                "Reset to the first screen succeeded and was reported as a failure unexpectedly."
 
-            EntryScreenResetStopReason.BACK_ACTION_FAILED ->
+            EntryScreenResetOutcome.EXPECTED_LOGICAL_NOT_FOUND ->
+                "Could not reset to the first screen because the expected logical entry fingerprint was not observed."
+
+            EntryScreenResetOutcome.BACK_ACTION_FAILED ->
                 "Could not reset to the first screen because a visible in-app back button was still present when Android back stopped working."
 
-            EntryScreenResetStopReason.LEFT_TARGET_APP ->
+            EntryScreenResetOutcome.LEFT_TARGET_APP ->
                 "Could not reset to the first screen because backing out left the target app before the in-app back button disappeared."
 
-            EntryScreenResetStopReason.MAX_ATTEMPTS_REACHED ->
+            EntryScreenResetOutcome.MAX_ATTEMPTS_REACHED ->
                 "Could not reset to the first screen because a visible in-app back button was still present after the maximum number of back attempts."
         }
     }
@@ -501,11 +504,20 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
             return true
         }
 
-        val fallbackCandidates = collectClickableCandidates(root, element)
-            .filterNot { candidate -> pathNodes.any { it === candidate } }
+        val target = clickFallbackTargetFor(element)
+        val allCandidates = collectClickFallbackCandidates(root)
+            .filterNot { entry -> pathNodes.any { it === entry.node } }
+        val matches = ClickFallbackMatcher.selectMatches(
+            candidates = allCandidates.map { it.candidate },
+            target = target,
+            boundsTolerancePx = clickBoundsTolerancePx,
+        )
+        val fallbackCandidates = matches.map { match -> match.candidate.handle }
         activeCrawlLogger?.info(
             "live_action_fallback type=ACTION_CLICK intendedChildIndexPath=${element.childIndexPath} " +
-                "fallbackCandidateCount=${fallbackCandidates.size} label=${quoteForLog(element.label)}"
+                "fallbackCandidateCount=${fallbackCandidates.size} totalLiveCandidateCount=${allCandidates.size} " +
+                "label=${quoteForLog(element.label)} eligibilityReasons=${quoteForLog(formatEligibilityReasons(matches))} " +
+                "topRankScore=${matches.firstOrNull()?.rankScore ?: 0}"
         )
         if (attemptActionOnCandidates(fallbackCandidates, AccessibilityNodeInfo.ACTION_CLICK, "fallback")) {
             return true
@@ -514,12 +526,37 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
         activeCrawlLogger?.warn(
             "live_action_failed type=ACTION_CLICK intendedChildIndexPath=${element.childIndexPath} " +
                 "resolvedNodeCount=${pathNodes.size} fallbackCandidateCount=${fallbackCandidates.size} " +
+                "totalLiveCandidateCount=${allCandidates.size} " +
                 "pathResolutionStatus=${pathResolution.status.name.lowercase()} label=${quoteForLog(element.label)}"
         )
         DiagnosticLogger.log(
             "Click action failed for '${element.label}' with path=${element.childIndexPath}; no candidate accepted the gesture."
         )
         return false
+    }
+
+    private fun formatEligibilityReasons(
+        matches: List<ClickFallbackMatcher.Match<AccessibilityNodeInfo>>,
+    ): String {
+        if (matches.isEmpty()) {
+            return ""
+        }
+        return matches
+            .groupingBy { it.eligibilityReason.name.lowercase() }
+            .eachCount()
+            .entries
+            .joinToString(",") { (reason, count) -> "$reason:$count" }
+    }
+
+    private fun clickFallbackTargetFor(element: PressableElement): ClickFallbackMatcher.Target {
+        return ClickFallbackMatcher.Target(
+            label = element.label,
+            resourceId = element.resourceId,
+            className = element.className,
+            bounds = element.bounds,
+            checkable = element.checkable,
+            checked = element.checked,
+        )
     }
 
     private fun resolvePathNodes(
@@ -625,16 +662,38 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
         return candidates.sortedByDescending { it.score }.map { it.node }
     }
 
-    private fun collectClickableCandidates(
+    private fun collectClickFallbackCandidates(
         root: AccessibilityNodeInfo,
-        element: PressableElement,
-    ): List<AccessibilityNodeInfo> {
-        val candidates = mutableListOf<LiveCandidate>()
+    ): List<LiveClickCandidate> {
+        val candidates = mutableListOf<LiveClickCandidate>()
 
         fun walk(node: AccessibilityNodeInfo, depth: Int) {
-            val score = clickableCandidateScore(node, element, depth)
-            if (score > 0) {
-                candidates += LiveCandidate(node = node, score = score)
+            val supportsClick = node.actionList.any { it.id == AccessibilityNodeInfo.ACTION_CLICK }
+            if (node.isVisibleToUser && node.isEnabled && (node.isClickable || supportsClick)) {
+                val bounds = Rect()
+                node.getBoundsInScreen(bounds)
+                candidates += LiveClickCandidate(
+                    node = node,
+                    candidate = ClickFallbackMatcher.Candidate(
+                        handle = node,
+                        visible = node.isVisibleToUser,
+                        enabled = node.isEnabled,
+                        clickable = node.isClickable,
+                        supportsClickAction = supportsClick,
+                        resolvedLabel = resolveLiveLabel(node),
+                        resourceId = node.viewIdResourceName,
+                        className = node.className?.toString(),
+                        bounds = ClickFallbackMatcher.Bounds(
+                            left = bounds.left,
+                            top = bounds.top,
+                            right = bounds.right,
+                            bottom = bounds.bottom,
+                        ),
+                        checkable = node.isCheckable,
+                        checked = isNodeChecked(node),
+                        depth = depth,
+                    ),
+                )
             }
             repeat(node.childCount) { index ->
                 node.getChild(index)?.let { child ->
@@ -644,7 +703,7 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
         }
 
         walk(root, depth = 0)
-        return candidates.sortedByDescending { it.score }.map { it.node }
+        return candidates
     }
 
     private fun scrollableCandidateScore(node: AccessibilityNodeInfo, depth: Int): Int {
@@ -659,44 +718,6 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
             else -> 250
         }
         return classScore + depth
-    }
-
-    private fun clickableCandidateScore(
-        node: AccessibilityNodeInfo,
-        element: PressableElement,
-        depth: Int,
-    ): Int {
-        if (!node.isVisibleToUser || !node.isEnabled) {
-            return Int.MIN_VALUE
-        }
-        if (!node.isClickable && node.actionList.none { it.id == AccessibilityNodeInfo.ACTION_CLICK }) {
-            return Int.MIN_VALUE
-        }
-
-        var score = 100 - depth
-        if (node.viewIdResourceName == element.resourceId && !element.resourceId.isNullOrBlank()) {
-            score += 1_000
-        }
-        if (node.className?.toString() == element.className && !element.className.isNullOrBlank()) {
-            score += 300
-        }
-        if (resolveLiveLabel(node) == element.label) {
-            score += 700
-        }
-        if (node.isCheckable == element.checkable) {
-            score += 75
-        }
-        if (isNodeChecked(node) == element.checked) {
-            score += 25
-        }
-
-        val bounds = Rect()
-        node.getBoundsInScreen(bounds)
-        if (isBoundsMatch(bounds, element.bounds)) {
-            score += 200
-        }
-
-        return score
     }
 
     private fun resolveLiveLabel(node: AccessibilityNodeInfo): String? {
@@ -738,24 +759,6 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
             findNestedTextLabel(child)?.let { return it }
         }
         return null
-    }
-
-    private fun isBoundsMatch(bounds: Rect, targetBounds: String): Boolean {
-        val parsed = parseBounds(targetBounds) ?: return false
-        return abs(bounds.left - parsed.left) <= clickBoundsTolerancePx &&
-            abs(bounds.top - parsed.top) <= clickBoundsTolerancePx &&
-            abs(bounds.right - parsed.right) <= clickBoundsTolerancePx &&
-            abs(bounds.bottom - parsed.bottom) <= clickBoundsTolerancePx
-    }
-
-    private fun parseBounds(bounds: String): Rect? {
-        val match = boundsRegex.matchEntire(bounds) ?: return null
-        return Rect(
-            match.groupValues[1].toInt(),
-            match.groupValues[2].toInt(),
-            match.groupValues[3].toInt(),
-            match.groupValues[4].toInt(),
-        )
     }
 
     @Suppress("DEPRECATION")
@@ -858,6 +861,11 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
     private data class LiveCandidate(
         val node: AccessibilityNodeInfo,
         val score: Int,
+    )
+
+    private data class LiveClickCandidate(
+        val node: AccessibilityNodeInfo,
+        val candidate: ClickFallbackMatcher.Candidate<AccessibilityNodeInfo>,
     )
 
     private class PartialCrawlAbortException(

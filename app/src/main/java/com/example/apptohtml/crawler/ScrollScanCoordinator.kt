@@ -117,50 +117,68 @@ internal class ScrollScanCoordinator(
         var backAttempts = 0
 
         while (true) {
+            val observedLogicalFingerprint = logicalEntryViewportFingerprint(currentRoot)
             if (expectedEntryLogicalFingerprint != null &&
-                logicalEntryViewportFingerprint(currentRoot) == expectedEntryLogicalFingerprint
+                observedLogicalFingerprint == expectedEntryLogicalFingerprint
             ) {
                 onProgress("Resetting to the first screen. Matched the captured logical entry screen.")
-                return EntryScreenResetResult(
+                return entryScreenResetResult(
                     root = currentRoot,
-                    stopReason = EntryScreenResetStopReason.NO_BACK_AFFORDANCE,
+                    outcome = EntryScreenResetOutcome.MATCHED_EXPECTED_LOGICAL,
+                    observedLogicalFingerprint = observedLogicalFingerprint,
+                    expectedLogicalFingerprint = expectedEntryLogicalFingerprint,
                 )
             }
 
             if (!EntryScreenBackAffordanceDetector.hasVisibleInAppBackAffordance(currentRoot)) {
                 onProgress("Resetting to the first screen. No visible in-app back button was found.")
-                return EntryScreenResetResult(
+                val outcome = if (expectedEntryLogicalFingerprint == null) {
+                    EntryScreenResetOutcome.NO_BACK_AFFORDANCE_ASSUMED_ENTRY
+                } else {
+                    EntryScreenResetOutcome.EXPECTED_LOGICAL_NOT_FOUND
+                }
+                return entryScreenResetResult(
                     root = currentRoot,
-                    stopReason = EntryScreenResetStopReason.NO_BACK_AFFORDANCE,
+                    outcome = outcome,
+                    observedLogicalFingerprint = observedLogicalFingerprint,
+                    expectedLogicalFingerprint = expectedEntryLogicalFingerprint,
                 )
             }
 
             if (backAttempts >= maxBackToEntryAttempts) {
-                return EntryScreenResetResult(
+                return entryScreenResetResult(
                     root = currentRoot,
-                    stopReason = EntryScreenResetStopReason.MAX_ATTEMPTS_REACHED,
+                    outcome = EntryScreenResetOutcome.MAX_ATTEMPTS_REACHED,
+                    observedLogicalFingerprint = observedLogicalFingerprint,
+                    expectedLogicalFingerprint = expectedEntryLogicalFingerprint,
                 )
             }
 
             onProgress("Resetting to the first screen. Back attempt ${backAttempts + 1} of $maxBackToEntryAttempts.")
 
             if (!tryBack()) {
-                return EntryScreenResetResult(
+                return entryScreenResetResult(
                     root = currentRoot,
-                    stopReason = EntryScreenResetStopReason.BACK_ACTION_FAILED,
+                    outcome = EntryScreenResetOutcome.BACK_ACTION_FAILED,
+                    observedLogicalFingerprint = observedLogicalFingerprint,
+                    expectedLogicalFingerprint = expectedEntryLogicalFingerprint,
                 )
             }
             backAttempts += 1
 
             val nextRoot = captureCurrentRoot()
-                ?: return EntryScreenResetResult(
+                ?: return entryScreenResetResult(
                     root = currentRoot,
-                    stopReason = EntryScreenResetStopReason.LEFT_TARGET_APP,
+                    outcome = EntryScreenResetOutcome.LEFT_TARGET_APP,
+                    observedLogicalFingerprint = observedLogicalFingerprint,
+                    expectedLogicalFingerprint = expectedEntryLogicalFingerprint,
                 )
             if (nextRoot.packageName != targetPackageName) {
-                return EntryScreenResetResult(
+                return entryScreenResetResult(
                     root = currentRoot,
-                    stopReason = EntryScreenResetStopReason.LEFT_TARGET_APP,
+                    outcome = EntryScreenResetOutcome.LEFT_TARGET_APP,
+                    observedLogicalFingerprint = observedLogicalFingerprint,
+                    expectedLogicalFingerprint = expectedEntryLogicalFingerprint,
                 )
             }
 
@@ -230,6 +248,25 @@ internal class ScrollScanCoordinator(
         }
 
         return currentRoot
+    }
+
+    private fun entryScreenResetResult(
+        root: AccessibilityNodeSnapshot,
+        outcome: EntryScreenResetOutcome,
+        observedLogicalFingerprint: String,
+        expectedLogicalFingerprint: String?,
+    ): EntryScreenResetResult {
+        val matchedExpectedLogical = expectedLogicalFingerprint != null &&
+            observedLogicalFingerprint == expectedLogicalFingerprint
+        return EntryScreenResetResult(
+            root = root,
+            outcome = outcome,
+            observedLogicalFingerprint = observedLogicalFingerprint,
+            expectedLogicalFingerprint = expectedLogicalFingerprint,
+            matchedExpectedLogical = matchedExpectedLogical,
+            verifiedForReplay = outcome == EntryScreenResetOutcome.MATCHED_EXPECTED_LOGICAL ||
+                outcome == EntryScreenResetOutcome.NO_BACK_AFFORDANCE_ASSUMED_ENTRY,
+        )
     }
 
     private fun visiblePressableCount(root: AccessibilityNodeSnapshot): Int {
@@ -382,11 +419,17 @@ internal class ScrollScanCoordinator(
 
 internal data class EntryScreenResetResult(
     val root: AccessibilityNodeSnapshot,
-    val stopReason: EntryScreenResetStopReason,
+    val outcome: EntryScreenResetOutcome,
+    val observedLogicalFingerprint: String,
+    val expectedLogicalFingerprint: String?,
+    val matchedExpectedLogical: Boolean,
+    val verifiedForReplay: Boolean,
 )
 
-internal enum class EntryScreenResetStopReason {
-    NO_BACK_AFFORDANCE,
+internal enum class EntryScreenResetOutcome {
+    MATCHED_EXPECTED_LOGICAL,
+    NO_BACK_AFFORDANCE_ASSUMED_ENTRY,
+    EXPECTED_LOGICAL_NOT_FOUND,
     BACK_ACTION_FAILED,
     LEFT_TARGET_APP,
     MAX_ATTEMPTS_REACHED,
@@ -421,7 +464,7 @@ internal object EntryScreenBackAffordanceDetector {
             return false
         }
 
-        val normalizedLabel = normalize(node.contentDescription ?: node.text)
+        val normalizedLabel = normalize(resolveBackAffordanceLabel(node))
         val normalizedResourceId = normalize(node.viewIdResourceName)
         val hasResourceSignal = normalizedResourceId.contains("back") ||
             normalizedResourceId.contains("navigate up") ||
@@ -448,6 +491,40 @@ internal object EntryScreenBackAffordanceDetector {
         }
 
         return hasResourceSignal || hasStrongLabelSignal || (hasWeakLabelSignal && toolbarContext)
+    }
+
+    private fun resolveBackAffordanceLabel(node: AccessibilityNodeSnapshot): String? {
+        directLabel(node)?.let { return it }
+        findNestedTitleLabel(node.children)?.let { return it }
+        return findNestedTextLabel(node.children)
+    }
+
+    private fun directLabel(node: AccessibilityNodeSnapshot): String? {
+        val text = node.text?.trim().orEmpty()
+        if (text.isNotEmpty()) return text
+
+        val contentDescription = node.contentDescription?.trim().orEmpty()
+        if (contentDescription.isNotEmpty()) return contentDescription
+
+        return null
+    }
+
+    private fun findNestedTitleLabel(children: List<AccessibilityNodeSnapshot>): String? {
+        children.forEach { child ->
+            if (child.viewIdResourceName?.substringAfterLast('/') == "title") {
+                directLabel(child)?.let { return it }
+            }
+            findNestedTitleLabel(child.children)?.let { return it }
+        }
+        return null
+    }
+
+    private fun findNestedTextLabel(children: List<AccessibilityNodeSnapshot>): String? {
+        children.forEach { child ->
+            directLabel(child)?.let { return it }
+            findNestedTextLabel(child.children)?.let { return it }
+        }
+        return null
     }
 
     private fun isToolbarLikeNode(node: AccessibilityNodeSnapshot): Boolean {

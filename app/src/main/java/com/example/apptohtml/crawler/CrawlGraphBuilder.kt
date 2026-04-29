@@ -13,6 +13,7 @@ object CrawlGraphBuilder {
                     screenId = screen.screenId,
                     screenName = screen.screenName,
                     fingerprint = screen.screenFingerprint,
+                    replayFingerprint = screen.replayFingerprint,
                     packageName = screen.packageName,
                     depth = screen.depth,
                     discoveryIndex = index,

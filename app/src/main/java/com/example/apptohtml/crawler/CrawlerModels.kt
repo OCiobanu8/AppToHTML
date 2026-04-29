@@ -290,6 +290,9 @@ data class CrawlRouteStep(
     val editable: Boolean,
     val firstSeenStep: Int,
     val expectedPackageName: String? = null,
+    val expectedDestinationFingerprint: String? = null,
+    val expectedReplayFingerprint: String? = null,
+    val expectedReplayScreenName: String? = null,
 )
 
 data class CrawlRoute(
@@ -326,7 +329,12 @@ internal fun PressableElement.toLinkKey(): PressableElementLinkKey {
     )
 }
 
-internal fun PressableElement.toRouteStep(expectedPackageName: String? = null): CrawlRouteStep {
+internal fun PressableElement.toRouteStep(
+    expectedPackageName: String? = null,
+    expectedDestinationFingerprint: String? = null,
+    expectedReplayFingerprint: String? = null,
+    expectedReplayScreenName: String? = null,
+): CrawlRouteStep {
     return CrawlRouteStep(
         childIndexPath = childIndexPath,
         bounds = bounds,
@@ -338,6 +346,9 @@ internal fun PressableElement.toRouteStep(expectedPackageName: String? = null): 
         editable = editable,
         firstSeenStep = firstSeenStep,
         expectedPackageName = expectedPackageName,
+        expectedDestinationFingerprint = expectedDestinationFingerprint,
+        expectedReplayFingerprint = expectedReplayFingerprint,
+        expectedReplayScreenName = expectedReplayScreenName,
     )
 }
 
@@ -418,6 +429,7 @@ data class CrawlScreenRecord(
     val screenName: String,
     val packageName: String,
     val screenFingerprint: String,
+    val replayFingerprint: String,
     val htmlPath: String,
     val xmlPath: String,
     val mergedXmlPath: String? = null,
