@@ -21,6 +21,7 @@ class CrawlGraphJsonWriterTest {
                         screenId = "screen_00000",
                         screenName = "Home",
                         fingerprint = "fp-home",
+                        replayFingerprint = "rfp-home",
                         packageName = "com.example.target",
                         depth = 0,
                         discoveryIndex = 0,
@@ -55,6 +56,7 @@ class CrawlGraphJsonWriterTest {
             assertEquals("screen_00000", node.string("screenId"))
             assertEquals("Home", node.string("screenName"))
             assertEquals("fp-home", node.string("fingerprint"))
+            assertEquals("rfp-home", node.string("replayFingerprint"))
             assertEquals("com.example.target", node.string("packageName"))
             assertEquals(0L, node.long("depth"))
             assertEquals(0L, node.long("discoveryIndex"))
@@ -85,6 +87,7 @@ class CrawlGraphJsonWriterTest {
                     screenId = "screen_00000",
                     screenName = "Home \"Screen\"",
                     fingerprint = "fp-home",
+                    replayFingerprint = "rfp-home",
                     packageName = "com.example.target",
                     depth = 0,
                     discoveryIndex = 0,

@@ -23,6 +23,7 @@ object CrawlGraphJsonWriter {
                     appendLine("""      "screenId": "${escape(node.screenId)}",""")
                     appendLine("""      "screenName": "${escape(node.screenName)}",""")
                     appendLine("""      "fingerprint": "${escape(node.fingerprint)}",""")
+                    appendLine("""      "replayFingerprint": "${escape(node.replayFingerprint)}",""")
                     appendLine("""      "packageName": "${escape(node.packageName)}",""")
                     appendLine("""      "depth": ${node.depth},""")
                     appendLine("""      "discoveryIndex": ${node.discoveryIndex},""")

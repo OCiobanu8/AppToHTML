@@ -51,6 +51,13 @@ skipped traversal outcomes.
 - Scrolls down while the viewport still changes.
 - Merges newly discovered elements by logical identity.
 
+### `DestinationSettler`
+
+- Settles clicked destinations after a traversal target is pressed.
+- Samples the active root for a fixed dwell window before choosing the authoritative destination.
+- Ranks eligible samples by richness metrics such as visible text, pressable controls, fingerprint length, scrollable nodes, and loading indicators.
+- Keeps sparse destinations valid while making sparse-to-rich transitions diagnosable in `crawl.log`.
+
 ### `ScreenNaming`
 
 - Chooses a useful screen name from event classes, resource IDs, or launcher
@@ -74,11 +81,101 @@ skipped traversal outcomes.
 4. The deep crawl coordinator restores the entry screen and captures the root screen.
 5. Scroll scanning rewinds to the top of the current surface and merges unique elements.
 6. Safe elements are ordered deterministically and filtered through the blacklist.
-7. Eligible targets are replayed breadth-first until the frontier is exhausted.
-8. Manifest and graph artifacts are refreshed in app storage as progress is made.
-9. If a checkpoint or external-package boundary fires, the current state is saved before AppToHTML is brought back to the foreground.
-10. The user can continue or stop and save for checkpoint pauses; external-package boundaries can be continued or skipped.
-11. AppToHTML is brought back to the foreground when the crawl completes or aborts.
+7. After each click, destination settling observes post-click roots before no-navigation checks, external-package pause handling, and child scanning.
+8. Eligible targets are replayed breadth-first until the frontier is exhausted.
+9. Manifest and graph artifacts are refreshed in app storage as progress is made.
+10. If a checkpoint or external-package boundary fires, the current state is saved before AppToHTML is brought back to the foreground.
+11. The user can continue or stop and save for checkpoint pauses; external-package boundaries can be continued or skipped.
+12. AppToHTML is brought back to the foreground when the crawl completes or aborts.
+
+## Settling behavior
+
+Scroll viewport settling and clicked-destination settling solve different
+problems. `ScrollScanCoordinator` samples around scroll and back transitions so
+the current viewport is stable before it is merged into a screen capture.
+`DestinationSettler` runs after a click, when the crawler must decide which
+root is the child destination for no-navigation detection, external-boundary
+decisions, route metadata, and child screen scanning.
+
+Destination settling does not reject sparse roots outright. It records every
+sample in `crawl.log` with package, fingerprint, eligibility, richness metrics,
+and whether the sample became the current best candidate. After the fixed dwell,
+the best eligible sample is selected. This lets legitimate one-control screens
+settle successfully while allowing a transitional root, such as a toolbar-only
+or empty loading state, to be replaced by a richer later root.
+
+For external-package Continue, restore validation still requires the expected
+package. Destination identity is validated by compatibility over the settled
+expected and restored roots, not by exact raw fingerprint equality alone. Exact
+fingerprint matches pass, and compatible enrichment can pass when pressable
+identity and richness signals show that the restored root is the same
+destination with more loaded content. Incompatible same-package destinations
+still fail the edge.
+
+## Entry restore as a verified replay prerequisite
+
+Entry restore is split between initial discovery and replay/recovery:
+
+- Initial discovery may use the no-back-affordance assumed-entry policy when no
+  expected entry fingerprint is known yet.
+- Replay/recovery requires that the observed root match the captured entry
+  logical fingerprint. `EntryScreenResetOutcome.MATCHED_EXPECTED_LOGICAL` and
+  `verifiedForReplay=true` are the only success modes for that path.
+- `restoreToEntryScreenOrRelaunch(...)` treats an expected entry fingerprint as
+  a bounded settle operation. Current-package restore continues to relaunch when
+  the expected logical fingerprint is not observed; relaunch restore samples
+  until the expected entry root appears or the bounded restore window expires.
+- `EntryScreenBackAffordanceDetector` resolves descendant labels for top or
+  toolbar-aligned clickable parents so Compose-style `Navigate up` controls are
+  recognised as in-app back affordances.
+
+`entry_restore_*` log entries record observed/expected/matched/verified fields
+so the source of every assumed-entry decision is auditable.
+
+## Click fallback eligibility
+
+`ClickFallbackMatcher` evaluates fallback candidates after path-based clicking
+diverges. It accepts only candidates that match the intended element on at
+least one of: exact non-blank resource ID, exact non-blank resolved label,
+exact class name plus compatible bounds, or strong bounds compatibility for
+unlabeled icon-like controls. Class-only or check-state-only matches are
+rejected. Checkable, depth, and tie-breaker signals are used only to rank
+already-eligible candidates, never to make a candidate eligible. Fallback
+attempts and rejection reasons are logged for diagnosis.
+
+## Route replay step validation
+
+`replayRouteToScreen(...)` validates each route step against the screen it is
+expected to reach. Each `CrawlScreenRecord` stores a bounds-free
+`replayFingerprint` derived from `logicalEntryViewportFingerprint(topRoot)` for
+the root screen and `logicalViewportFingerprint(topRoot)` for non-root screens.
+`CrawlRouteStep` carries the expected replay fingerprint and screen name for
+the screen that step should reach. After each settled step click, the observed
+logical fingerprint is compared with the expected replay fingerprint:
+
+- A match continues the replay.
+- A mismatch fails immediately with a `replay_route_step_validation` log entry
+  naming the route step, expected screen, expected fingerprint, and observed
+  fingerprint, and the edge is reported as failed.
+
+The "fingerprint changed from before/top" check still runs as a no-navigation
+guard but is no longer the only success criterion when expected metadata
+exists. Stored replay fingerprints are bounds-free; geometry-sensitive
+fingerprints remain local to scroll progress and settling.
+
+## Diagnostic guidance
+
+When investigating a failed or oscillating crawl, inspect the following
+`crawl.log` fields:
+
+- `entry_restore_*` for observed, expected, matched, and verified entry status
+- `screen_top_validation` for parent restore mismatches
+- `live_action_path_diverged` and fallback attempt/rejection logs for stale
+  fallback selection
+- `replay_route_step_*` for expected and observed replay fingerprints at every
+  intermediate route step
+- `external_boundary_restore_result` for external-package Continue compatibility
+  decisions
 
 ## Merge strategy
 

@@ -93,10 +93,12 @@ codebase is intentionally small, with most logic grouped by responsibility.
 
 - `app/src/main/java/com/example/apptohtml/crawler/AccessibilityTreeSnapshotter.kt`
 - `app/src/main/java/com/example/apptohtml/crawler/DeepCrawlCoordinator.kt`
+- `app/src/main/java/com/example/apptohtml/crawler/DestinationSettler.kt`
 - `app/src/main/java/com/example/apptohtml/crawler/PauseCheckpointTracker.kt`
 - `app/src/main/java/com/example/apptohtml/crawler/ScrollScanCoordinator.kt`
 - `app/src/main/java/com/example/apptohtml/crawler/ScreenNaming.kt`
 - `app/src/main/java/com/example/apptohtml/crawler/CrawlerModels.kt`
+- `app/src/main/java/com/example/apptohtml/crawler/ClickFallbackMatcher.kt`
 - `app/src/main/java/com/example/apptohtml/crawler/AppLaunchHelper.kt`
 - `app/src/main/java/com/example/apptohtml/crawler/AppToHtmlNavigator.kt`
 
@@ -106,7 +108,13 @@ codebase is intentionally small, with most logic grouped by responsibility.
 - Detects pressable elements.
 - Filters risky or unwanted targets before traversal.
 - Ranks scrollable containers.
-- Drives scroll scanning and route replay.
+- Drives scroll scanning and route replay, validating each replay step against
+  the screen identity it should reach.
+- Verifies entry restore against an expected logical fingerprint before
+  treating the current root as replay-ready.
+- Settles clicked destinations and external-package boundaries.
+- Gates click fallback candidates by meaningful eligibility (resource id,
+  label, class plus bounds, or strong bounds for icon-only controls).
 - Expands the breadth-first crawl frontier.
 - Handles pause checkpoints and external-package boundaries.
 - Names the captured screen.

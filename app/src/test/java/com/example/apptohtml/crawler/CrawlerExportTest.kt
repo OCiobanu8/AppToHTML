@@ -1105,7 +1105,8 @@ class CrawlerExportTest {
         )
 
         assertEquals(2, backAttempts)
-        assertEquals(EntryScreenResetStopReason.NO_BACK_AFFORDANCE, result.stopReason)
+        assertEquals(EntryScreenResetOutcome.NO_BACK_AFFORDANCE_ASSUMED_ENTRY, result.outcome)
+        assertTrue(result.verifiedForReplay)
         assertEquals(listOf("Home Search"), AccessibilityTreeSnapshotter.collectPressableElements(result.root).map { it.label })
     }
 
@@ -1133,7 +1134,8 @@ class CrawlerExportTest {
         )
 
         assertEquals(0, backAttempts)
-        assertEquals(EntryScreenResetStopReason.NO_BACK_AFFORDANCE, result.stopReason)
+        assertEquals(EntryScreenResetOutcome.NO_BACK_AFFORDANCE_ASSUMED_ENTRY, result.outcome)
+        assertTrue(result.verifiedForReplay)
         assertEquals(listOf("Home Search"), AccessibilityTreeSnapshotter.collectPressableElements(result.root).map { it.label })
     }
 
@@ -1167,7 +1169,8 @@ class CrawlerExportTest {
         )
 
         assertEquals(2, backAttempts)
-        assertEquals(EntryScreenResetStopReason.MAX_ATTEMPTS_REACHED, result.stopReason)
+        assertEquals(EntryScreenResetOutcome.MAX_ATTEMPTS_REACHED, result.outcome)
+        assertFalse(result.verifiedForReplay)
         assertEquals(listOf("Navigate up", "Detail Action"), AccessibilityTreeSnapshotter.collectPressableElements(result.root).map { it.label })
     }
 
@@ -1200,7 +1203,8 @@ class CrawlerExportTest {
         )
 
         assertEquals(1, backAttempts)
-        assertEquals(EntryScreenResetStopReason.LEFT_TARGET_APP, result.stopReason)
+        assertEquals(EntryScreenResetOutcome.LEFT_TARGET_APP, result.outcome)
+        assertFalse(result.verifiedForReplay)
     }
 
     @Test
