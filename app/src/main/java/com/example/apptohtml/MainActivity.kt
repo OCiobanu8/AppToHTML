@@ -13,8 +13,12 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
@@ -32,11 +36,18 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
+import com.example.apptohtml.crawler.CrawlStartIntent
 import com.example.apptohtml.crawler.CrawlerPhase
 import com.example.apptohtml.crawler.CrawlerSession
 import com.example.apptohtml.crawler.PauseReason
+import com.example.apptohtml.crawler.ResumeMode
+import com.example.apptohtml.crawler.ScreenExpansionStatus
 import com.example.apptohtml.model.SelectedAppRef
+import com.example.apptohtml.storage.AllowedPackage
 import com.example.apptohtml.storage.SelectedAppRepository
+import com.example.apptohtml.storage.SavedCrawlRepository
+import com.example.apptohtml.storage.SavedCrawlSnapshot
+import com.example.apptohtml.storage.SavedScreenSummary
 import com.example.apptohtml.ui.theme.AppToHTMLTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -73,9 +84,12 @@ private fun AppToHtmlScreen(
     val selectedApp by repository.selectedAppFlow.collectAsState(initial = null)
     val crawlerState by CrawlerSession.uiState.collectAsState()
     val scope = rememberCoroutineScope()
+    val savedCrawlRepository = remember { SavedCrawlRepository(context.applicationContext) }
 
     var availableApps by remember { mutableStateOf<List<InstalledApp>>(emptyList()) }
     var showPicker by remember { mutableStateOf(false) }
+    var showNewCrawlConfirmation by remember { mutableStateOf(false) }
+    var savedCrawlSnapshot by remember { mutableStateOf<SavedCrawlSnapshot?>(null) }
     var accessibilityEnabled by remember {
         mutableStateOf(AppDiscovery.isAccessibilityServiceEnabled(context, context.packageName))
     }
@@ -92,6 +106,23 @@ private fun AppToHtmlScreen(
             repository.clearSelectedApp()
             return@LaunchedEffect
         }
+        val packageName = selectedApp?.packageName ?: run {
+            savedCrawlSnapshot = null
+            return@LaunchedEffect
+        }
+        savedCrawlRepository.snapshotFlow(packageName).collect { snapshot ->
+            savedCrawlSnapshot = snapshot
+        }
+    }
+
+    LaunchedEffect(selectedApp?.packageName, crawlerState.phase) {
+        if (
+            crawlerState.phase == CrawlerPhase.CAPTURED ||
+            crawlerState.phase == CrawlerPhase.ABORTED ||
+            crawlerState.phase == CrawlerPhase.FAILED
+        ) {
+            savedCrawlRepository.refresh()
+        }
     }
 
     LaunchedEffect(context) {
@@ -104,6 +135,7 @@ private fun AppToHtmlScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
+            .verticalScroll(rememberScrollState())
             .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp),
     ) {
@@ -169,7 +201,12 @@ private fun AppToHtmlScreen(
         Button(
             onClick = {
                 selectedApp?.let { app ->
-                    CrawlerSession.startCapture(context.applicationContext, app)
+                    CrawlerSession.startCrawl(
+                        context = context.applicationContext,
+                        selectedApp = app,
+                        crawlStartIntent = CrawlStartIntent.RESUME,
+                        resumeMode = ResumeMode.ContinueAuto,
+                    )
                 }
             },
             enabled = canStartCapture,
@@ -177,6 +214,43 @@ private fun AppToHtmlScreen(
         ) {
             Text("Start Deep Crawl")
         }
+        SavedCrawlSection(
+            selectedApp = selectedApp,
+            snapshot = savedCrawlSnapshot,
+            canStartCapture = canStartCapture,
+            onContinueAuto = { app ->
+                CrawlerSession.startCrawl(
+                    context = context.applicationContext,
+                    selectedApp = app,
+                    crawlStartIntent = CrawlStartIntent.RESUME,
+                    resumeMode = ResumeMode.ContinueAuto,
+                )
+            },
+            onResumeFromScreen = { app, screenId ->
+                CrawlerSession.startCrawl(
+                    context = context.applicationContext,
+                    selectedApp = app,
+                    crawlStartIntent = CrawlStartIntent.RESUME,
+                    resumeMode = ResumeMode.ResumeFromScreen(screenId),
+                )
+            },
+            onReExpandScreen = { app, screenId ->
+                CrawlerSession.startCrawl(
+                    context = context.applicationContext,
+                    selectedApp = app,
+                    crawlStartIntent = CrawlStartIntent.RESUME,
+                    resumeMode = ResumeMode.ReExpand(screenId),
+                )
+            },
+            onNewCrawl = { showNewCrawlConfirmation = true },
+            onRevokeApproval = { edgeId ->
+                selectedApp?.packageName?.let { packageName ->
+                    if (savedCrawlRepository.revokeApproval(packageName, edgeId)) {
+                        savedCrawlRepository.refresh()
+                    }
+                }
+            },
+        )
         Text(crawlerState.statusMessage)
         if (!canStartCapture) {
             Text(
@@ -331,6 +405,212 @@ private fun AppToHtmlScreen(
         if (crawlerState.phase == CrawlerPhase.PAUSED_FOR_DECISION) {
             PauseDecisionDialog(crawlerState = crawlerState)
         }
+
+        if (showNewCrawlConfirmation) {
+            val app = selectedApp
+            AlertDialog(
+                onDismissRequest = { showNewCrawlConfirmation = false },
+                title = { Text("New Crawl") },
+                text = {
+                    Text("Wipe the saved crawl for ${app?.appName ?: "this app"}? This deletes all captured screens for this app.")
+                },
+                confirmButton = {
+                    TextButton(
+                        onClick = {
+                            showNewCrawlConfirmation = false
+                            app?.let {
+                                CrawlerSession.startCrawl(
+                                    context = context.applicationContext,
+                                    selectedApp = it,
+                                    crawlStartIntent = CrawlStartIntent.NEW_CRAWL,
+                                    resumeMode = ResumeMode.ContinueAuto,
+                                )
+                            }
+                        }
+                    ) {
+                        Text("New Crawl")
+                    }
+                },
+                dismissButton = {
+                    TextButton(onClick = { showNewCrawlConfirmation = false }) {
+                        Text("Cancel")
+                    }
+                },
+            )
+        }
+    }
+}
+
+@Composable
+private fun SavedCrawlSection(
+    selectedApp: SelectedAppRef?,
+    snapshot: SavedCrawlSnapshot?,
+    canStartCapture: Boolean,
+    onContinueAuto: (SelectedAppRef) -> Unit,
+    onResumeFromScreen: (SelectedAppRef, String) -> Unit,
+    onReExpandScreen: (SelectedAppRef, String) -> Unit,
+    onNewCrawl: () -> Unit,
+    onRevokeApproval: (String) -> Unit,
+) {
+    HorizontalDivider()
+    Text("Saved crawl", style = MaterialTheme.typography.titleMedium)
+
+    val app = selectedApp
+    if (app == null || snapshot == null || snapshot.screens.isEmpty()) {
+        Text("No saved crawl. Tap Start Deep Crawl to begin one.")
+        return
+    }
+
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Button(
+            onClick = { onContinueAuto(app) },
+            enabled = canStartCapture && snapshot.hasPendingWork,
+            modifier = Modifier.weight(1f),
+        ) {
+            Text("Continue auto")
+        }
+        TextButton(
+            onClick = onNewCrawl,
+            enabled = canStartCapture,
+        ) {
+            Text("New Crawl")
+        }
+    }
+    if (!snapshot.hasPendingWork) {
+        Text(
+            text = "Crawl complete. Re-expand a screen to refine.",
+            style = MaterialTheme.typography.bodySmall,
+        )
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        snapshot.screens.forEach { screen ->
+            SavedScreenRow(
+                app = app,
+                screen = screen,
+                canStartCapture = canStartCapture,
+                onResumeFromScreen = onResumeFromScreen,
+                onReExpandScreen = onReExpandScreen,
+            )
+        }
+    }
+
+    if (snapshot.allowedPackages.isNotEmpty()) {
+        Text("Allowed external packages", style = MaterialTheme.typography.titleSmall)
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            snapshot.allowedPackages.forEach { allowedPackage ->
+                AllowedPackageRow(
+                    allowedPackage = allowedPackage,
+                    onRevokeApproval = onRevokeApproval,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SavedScreenRow(
+    app: SelectedAppRef,
+    screen: SavedScreenSummary,
+    canStartCapture: Boolean,
+    onResumeFromScreen: (SelectedAppRef, String) -> Unit,
+    onReExpandScreen: (SelectedAppRef, String) -> Unit,
+) {
+    var menuExpanded by remember { mutableStateOf(false) }
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(start = (screen.depth * 16).dp, top = 4.dp, bottom = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(screen.screenName)
+            Text(
+                text = screen.screenId,
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        Text(
+            text = screenStatusText(screen.expansionStatus),
+            style = MaterialTheme.typography.bodySmall,
+        )
+        if (screen.pendingEdgeCount > 0) {
+            Text(
+                text = "${screen.pendingEdgeCount} pending",
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        TextButton(
+            onClick = { menuExpanded = true },
+            enabled = canStartCapture,
+        ) {
+            Text("...")
+        }
+        DropdownMenu(
+            expanded = menuExpanded,
+            onDismissRequest = { menuExpanded = false },
+        ) {
+            DropdownMenuItem(
+                text = { Text("Resume from here") },
+                onClick = {
+                    menuExpanded = false
+                    onResumeFromScreen(app, screen.screenId)
+                },
+                enabled = canStartCapture,
+            )
+            DropdownMenuItem(
+                text = { Text("Re-expand") },
+                onClick = {
+                    menuExpanded = false
+                    onReExpandScreen(app, screen.screenId)
+                },
+                enabled = canStartCapture,
+            )
+        }
+    }
+}
+
+@Composable
+private fun AllowedPackageRow(
+    allowedPackage: AllowedPackage,
+    onRevokeApproval: (String) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(allowedPackage.packageName)
+            Text(
+                text = buildString {
+                    append("approved from ")
+                    append(allowedPackage.parentScreenName)
+                    allowedPackage.triggerLabel?.let { label ->
+                        append(" -> ")
+                        append(label)
+                    }
+                },
+                style = MaterialTheme.typography.bodySmall,
+            )
+        }
+        TextButton(
+            onClick = {
+                onRevokeApproval(allowedPackage.edgeId)
+            }
+        ) {
+            Text("Revoke")
+        }
+    }
+}
+
+private fun screenStatusText(status: ScreenExpansionStatus): String {
+    return when (status) {
+        ScreenExpansionStatus.COMPLETE -> "complete"
+        ScreenExpansionStatus.IN_PROGRESS -> "in progress"
+        ScreenExpansionStatus.NOT_STARTED -> "not started"
     }
 }
 

@@ -209,11 +209,12 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
                 loadBlacklist = {
                     CrawlBlacklistLoader.load(this@AppToHtmlAccessibilityService)
                 },
-                createSession = { startedAt ->
+                createSession = { startedAt, wipeExisting ->
                     CaptureFileStore.createSession(
                         context = this@AppToHtmlAccessibilityService,
                         packageName = targetPackageName,
                         startedAt = startedAt,
+                        wipeExisting = wipeExisting,
                     )
                 },
                 scrollScanCoordinator = scrollScanCoordinator,
@@ -223,6 +224,8 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
                 val result = coordinator.crawl(
                     initialRoot = initialRoot,
                     eventClassName = eventClassName,
+                    intent = current.crawlStartIntent,
+                    resumeMode = current.resumeMode,
                 )
             ) {
                 is DeepCrawlCoordinator.DeepCrawlOutcome.Completed -> {

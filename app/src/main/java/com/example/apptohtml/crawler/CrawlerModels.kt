@@ -19,6 +19,8 @@ enum class CrawlerPhase {
 data class CrawlerUiState(
     val phase: CrawlerPhase = CrawlerPhase.IDLE,
     val selectedApp: SelectedAppRef? = null,
+    val crawlStartIntent: CrawlStartIntent = CrawlStartIntent.RESUME,
+    val resumeMode: ResumeMode = ResumeMode.ContinueAuto,
     val requestId: Long? = null,
     val statusMessage: String = "No capture started yet.",
     val pauseDecisionId: Long? = null,
@@ -45,7 +47,13 @@ data class CrawlerUiState(
     val partialResult: Boolean = false,
     val failureMessage: String? = null,
 ) {
-    fun withLaunching(requestId: Long, selectedApp: SelectedAppRef, alreadyRunning: Boolean): CrawlerUiState {
+    fun withLaunching(
+        requestId: Long,
+        selectedApp: SelectedAppRef,
+        alreadyRunning: Boolean,
+        crawlStartIntent: CrawlStartIntent = CrawlStartIntent.RESUME,
+        resumeMode: ResumeMode = ResumeMode.ContinueAuto,
+    ): CrawlerUiState {
         val message = if (alreadyRunning) {
             "Target app appears to already be running. Bringing it to the foreground now."
         } else {
@@ -54,6 +62,8 @@ data class CrawlerUiState(
         return CrawlerUiState(
             phase = CrawlerPhase.LAUNCHING,
             selectedApp = selectedApp,
+            crawlStartIntent = crawlStartIntent,
+            resumeMode = resumeMode,
             requestId = requestId,
             statusMessage = message,
         )
@@ -415,13 +425,38 @@ enum class CrawlRunStatus {
     FAILED,
 }
 
+enum class ScreenExpansionStatus {
+    NOT_STARTED,
+    IN_PROGRESS,
+    COMPLETE,
+}
+
 enum class CrawlEdgeStatus {
+    PENDING,
+    IN_PROGRESS,
     CAPTURED,
     LINKED_EXISTING,
     SKIPPED_BLACKLIST,
     SKIPPED_NO_NAVIGATION,
     SKIPPED_EXTERNAL_PACKAGE,
     FAILED,
+}
+
+enum class CrawlEdgeApproval {
+    NONE,
+    EXPLICIT,
+    REVOKED,
+}
+
+enum class CrawlStartIntent {
+    NEW_CRAWL,
+    RESUME,
+}
+
+sealed class ResumeMode {
+    object ContinueAuto : ResumeMode()
+    data class ResumeFromScreen(val screenId: String) : ResumeMode()
+    data class ReExpand(val screenId: String) : ResumeMode()
 }
 
 data class CrawlScreenRecord(
@@ -439,6 +474,7 @@ data class CrawlScreenRecord(
     val triggerResourceId: String?,
     val route: CrawlRoute = CrawlRoute(),
     val depth: Int,
+    val expansionStatus: ScreenExpansionStatus = ScreenExpansionStatus.NOT_STARTED,
 )
 
 data class CrawlEdgeRecord(
@@ -453,6 +489,51 @@ data class CrawlEdgeRecord(
     val firstSeenStep: Int,
     val status: CrawlEdgeStatus,
     val message: String? = null,
+    val childScreenName: String? = null,
+    val approval: CrawlEdgeApproval = CrawlEdgeApproval.NONE,
+    val externalPackage: String? = null,
+)
+
+data class ScreenIdentityFields(
+    val packageName: String,
+    val title: String,
+    val hints: List<String> = emptyList(),
+)
+
+data class ParentEdgeRef(
+    val screenId: String,
+    val triggerLabel: String?,
+    val triggerResourceId: String?,
+)
+
+data class RunLevelState(
+    val sessionId: String,
+    val startedAt: Long,
+    val finishedAt: Long? = null,
+    val status: CrawlRunStatus = CrawlRunStatus.IN_PROGRESS,
+    val maxDepthReached: Int = 0,
+)
+
+data class EdgeXmlView(
+    val edgeId: String,
+    val status: CrawlEdgeStatus,
+    val childScreenId: String? = null,
+    val childScreenName: String? = null,
+    val message: String? = null,
+    val approval: CrawlEdgeApproval = CrawlEdgeApproval.NONE,
+    val externalPackage: String? = null,
+)
+
+data class ScreenCrawlState(
+    val screenId: String,
+    val depth: Int,
+    val expansionStatus: ScreenExpansionStatus,
+    val isRoot: Boolean,
+    val screenIdentity: ScreenIdentityFields,
+    val parent: ParentEdgeRef?,
+    val route: CrawlRoute,
+    val runLevel: RunLevelState? = null,
+    val edgesByElement: Map<PressableElementLinkKey, EdgeXmlView> = emptyMap(),
 )
 
 data class CrawlManifest(

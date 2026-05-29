@@ -10,7 +10,7 @@ internal class DeepCrawlCoordinator(
     private val selectedApp: SelectedAppRef,
     private val host: Host,
     private val loadBlacklist: () -> CrawlBlacklist,
-    private val createSession: (Long) -> CrawlSessionDirectory,
+    private val createSession: (Long, Boolean) -> CrawlSessionDirectory,
     private val pauseConfig: PauseCheckpointConfig = PauseCheckpointConfig(),
     private val scrollScanCoordinator: ScrollScanCoordinator = ScrollScanCoordinator(),
     private val destinationSettler: DestinationSettler = DestinationSettler(),
@@ -19,6 +19,7 @@ internal class DeepCrawlCoordinator(
         initialRoot: AccessibilityNodeSnapshot,
         capturePackageName: String?,
         progressPrefix: String,
+        preferredName: String?,
     ) -> ScreenSnapshot)? = null,
     private val timeProvider: () -> Long = { System.currentTimeMillis() },
     private val postClickSettleTimeProvider: () -> Long = timeProvider,
@@ -35,15 +36,35 @@ internal class DeepCrawlCoordinator(
     suspend fun crawl(
         initialRoot: AccessibilityNodeSnapshot,
         eventClassName: String?,
+        intent: CrawlStartIntent = CrawlStartIntent.RESUME,
+        resumeMode: ResumeMode = ResumeMode.ContinueAuto,
     ): DeepCrawlOutcome {
         val crawlStartedAt = timeProvider()
         val blacklist = loadBlacklist()
-        val session = createSession(crawlStartedAt)
-        val tracker = CrawlRunTracker(
-            sessionId = session.sessionId,
-            packageName = selectedApp.packageName,
-            startedAt = crawlStartedAt,
-        )
+        val wipeExisting = intent == CrawlStartIntent.NEW_CRAWL
+        val session = createSession(crawlStartedAt, wipeExisting)
+        val loaded = if (intent == CrawlStartIntent.RESUME) {
+            SavedCrawlLoader.load(session.directory)?.takeIf { it.screens.isNotEmpty() }
+        } else null
+        val tracker = if (loaded != null) {
+            CrawlRunTracker.fromExistingState(
+                sessionId = session.sessionId,
+                packageName = selectedApp.packageName,
+                startedAt = crawlStartedAt,
+                screens = loaded.screens,
+                edges = loaded.edges,
+                screenFingerprintToId = loaded.screenFingerprintToId,
+                rootScreenId = loaded.rootScreenId,
+                nextScreenSequence = loaded.nextScreenSequence,
+                nextEdgeSequence = loaded.nextEdgeSequence,
+            )
+        } else {
+            CrawlRunTracker(
+                sessionId = session.sessionId,
+                packageName = selectedApp.packageName,
+                startedAt = crawlStartedAt,
+            )
+        }
         val pauseTracker = PauseCheckpointTracker(
             config = pauseConfig,
             startedAtMs = crawlStartedAt,
@@ -60,10 +81,18 @@ internal class DeepCrawlCoordinator(
         crashContext.reset()
         allowedPackageNames.clear()
         allowedPackageNames += selectedApp.packageName
+        if (loaded != null) {
+            allowedPackageNames += loaded.allowedPackages
+        }
+        resolvedLinksByScreenId.clear()
+        loaded?.resolvedLinks?.forEach { (parentId, links) ->
+            resolvedLinksByScreenId[parentId] = links.toMutableMap()
+        }
         logger.info(
             "crawl_start startedAt=$crawlStartedAt packageName=${selectedApp.packageName} " +
                 "appName=${selectedApp.appName.ifBlank { "<blank>" }} initialEventClass=${eventClassName.orEmpty()} " +
-                "manifestFile=${session.manifestFile.absolutePath} logFile=${session.logFile.absolutePath}"
+                "manifestFile=${session.manifestFile.absolutePath} logFile=${session.logFile.absolutePath} " +
+                "intent=${intent.name.lowercase()} resumeMode=${resumeMode.toLogString()} resumeLoaded=${loaded != null}"
         )
 
         try {
@@ -75,64 +104,121 @@ internal class DeepCrawlCoordinator(
                     "Target app left the foreground while resetting to the first screen."
                 )
 
-            val rootSnapshot = scanCurrentScreen(
-                eventClassName = liveEntryRoot.className ?: initialRoot.className ?: eventClassName,
-                initialRoot = liveEntryRoot,
-                capturePackageName = selectedApp.packageName,
-                progressPrefix = "Mapping the root screen.",
-            )
-            val entryScreenLogicalFingerprint = scrollScanCoordinator.logicalEntryViewportFingerprint(
-                rootSnapshot.stepSnapshots.firstOrNull()?.root ?: liveEntryRoot
-            )
+            val rootScreenId: String
+            val rootFiles: CapturedScreenFiles
+            val rootSnapshot: ScreenSnapshot
+            val entryScreenLogicalFingerprint: String
 
-            val rootSequence = tracker.nextScreenSequenceNumber()
-            val rootScreenId = screenIdFor(rootSequence)
-            val rootScreenIdentity = screenIdentityFor(
-                snapshot = rootSnapshot,
-                root = rootSnapshot.mergedRoot ?: liveEntryRoot,
-            )
-            val rootScreenFingerprint = rootScreenIdentity.fingerprint
-            val rootFiles = CaptureFileStore.saveScreen(
-                session = session,
-                snapshot = rootSnapshot,
-                screenId = rootScreenId,
-            )
-            tracker.addScreen(
-                screenId = rootScreenId,
-                snapshot = rootSnapshot,
-                screenFingerprint = rootScreenFingerprint,
-                replayFingerprint = entryScreenLogicalFingerprint,
-                indexFingerprint = rootScreenIdentity.canLinkToExisting,
-                files = rootFiles,
-                parentScreenId = null,
-                triggerElement = null,
-                route = CrawlRoute(),
-                depth = 0,
-            )
-            resolvedLinksByScreenId[rootScreenId] = mutableMapOf()
-            rememberScreen(rootScreenId, rootSnapshot.screenName)
-            logPersistedScreenCapture(
-                screenId = rootScreenId,
-                parentScreenId = null,
-                depth = 0,
-                route = CrawlRoute(),
-                snapshot = rootSnapshot,
-                screenFingerprint = rootScreenFingerprint,
-                files = rootFiles,
-                namingEventClassName = liveEntryRoot.className ?: initialRoot.className ?: eventClassName,
-                namingRoot = rootSnapshot.mergedRoot ?: liveEntryRoot,
-            )
+            if (loaded != null) {
+                val loadedRoot = loaded.screens.firstOrNull { it.depth == 0 }
+                    ?: throw IllegalStateException("Loaded crawl has no root screen.")
+                rootScreenId = loadedRoot.screenId
+                rootFiles = filesFor(loadedRoot)
+                rootSnapshot = scanCurrentScreen(
+                    eventClassName = liveEntryRoot.className ?: initialRoot.className ?: eventClassName,
+                    initialRoot = liveEntryRoot,
+                    capturePackageName = selectedApp.packageName,
+                    progressPrefix = "Mapping the root screen.",
+                    preferredName = loadedRoot.screenName,
+                )
+                entryScreenLogicalFingerprint = scrollScanCoordinator.logicalEntryViewportFingerprint(
+                    rootSnapshot.stepSnapshots.firstOrNull() ?.root ?: liveEntryRoot
+                )
+                rememberScreen(rootScreenId, loadedRoot.screenName)
+                logger.info(
+                    "crawl_resume_hydrated rootScreenId=$rootScreenId rootScreenName=${quote(loadedRoot.screenName)} " +
+                        "screensLoaded=${loaded.screens.size} edgesLoaded=${loaded.edges.size} " +
+                        "allowedPackagesLoaded=${quote(formatAllowedPackageNames())}"
+                )
+            } else {
+                rootSnapshot = scanCurrentScreen(
+                    eventClassName = liveEntryRoot.className ?: initialRoot.className ?: eventClassName,
+                    initialRoot = liveEntryRoot,
+                    capturePackageName = selectedApp.packageName,
+                    progressPrefix = "Mapping the root screen.",
+                )
+                entryScreenLogicalFingerprint = scrollScanCoordinator.logicalEntryViewportFingerprint(
+                    rootSnapshot.stepSnapshots.firstOrNull()?.root ?: liveEntryRoot
+                )
+
+                val rootSequence = tracker.nextScreenSequenceNumber()
+                rootScreenId = screenIdFor(rootSequence)
+                val rootScreenIdentity = screenIdentityFor(
+                    snapshot = rootSnapshot,
+                    root = rootSnapshot.mergedRoot ?: liveEntryRoot,
+                )
+                val rootScreenFingerprint = rootScreenIdentity.fingerprint
+                rootFiles = CaptureFileStore.saveScreen(
+                    session = session,
+                    snapshot = rootSnapshot,
+                    screenId = rootScreenId,
+                )
+                tracker.addScreen(
+                    screenId = rootScreenId,
+                    snapshot = rootSnapshot,
+                    screenFingerprint = rootScreenFingerprint,
+                    replayFingerprint = entryScreenLogicalFingerprint,
+                    indexFingerprint = rootScreenIdentity.canLinkToExisting,
+                    files = rootFiles,
+                    parentScreenId = null,
+                    triggerElement = null,
+                    route = CrawlRoute(),
+                    depth = 0,
+                )
+                rewriteScreenXmlFor(
+                    tracker = tracker,
+                    snapshot = rootSnapshot,
+                    screenId = rootScreenId,
+                    runStatus = CrawlRunStatus.IN_PROGRESS,
+                )
+                resolvedLinksByScreenId[rootScreenId] = mutableMapOf()
+                rememberScreen(rootScreenId, rootSnapshot.screenName)
+                logPersistedScreenCapture(
+                    screenId = rootScreenId,
+                    parentScreenId = null,
+                    depth = 0,
+                    route = CrawlRoute(),
+                    snapshot = rootSnapshot,
+                    screenFingerprint = rootScreenFingerprint,
+                    files = rootFiles,
+                    namingEventClassName = liveEntryRoot.className ?: initialRoot.className ?: eventClassName,
+                    namingRoot = rootSnapshot.mergedRoot ?: liveEntryRoot,
+                )
+            }
             saveManifest(session, tracker, CrawlRunStatus.IN_PROGRESS)
 
             val frontier = ArrayDeque<String>()
-            frontier.add(rootScreenId)
+            if (loaded != null) {
+                seedResumeFrontier(frontier, tracker, resumeMode)
+                if (frontier.isEmpty()) {
+                    logger.info(
+                        "crawl_resume_complete reason=no_pending_screens resumeMode=${resumeMode.toLogString()}"
+                    )
+                    val manifestFile = saveManifest(
+                        session = session,
+                        tracker = tracker,
+                        status = CrawlRunStatus.COMPLETED,
+                    )
+                    return DeepCrawlOutcome.Completed(
+                        summary = buildSummary(
+                            session = session,
+                            tracker = tracker,
+                            rootSnapshot = rootSnapshot,
+                            rootFiles = rootFiles,
+                            manifestFile = manifestFile,
+                        ),
+                    )
+                }
+            } else {
+                frontier.add(rootScreenId)
+            }
             rememberFrontier(frontier)
             logFrontierState(
                 mutation = "enqueue_initial_root",
                 screenId = rootScreenId,
                 frontier = frontier,
             )
-            var cachedRootSnapshot: ScreenSnapshot? = rootSnapshot
+            var cachedRootSnapshot: ScreenSnapshot? = rootSnapshot.takeIf { frontier.contains(rootScreenId) }
 
             while (frontier.isNotEmpty()) {
                 val nextScreenId = frontier.first()
@@ -245,6 +331,65 @@ internal class DeepCrawlCoordinator(
         }
     }
 
+    private fun seedResumeFrontier(
+        frontier: ArrayDeque<String>,
+        tracker: CrawlRunTracker,
+        mode: ResumeMode,
+    ) {
+        when (mode) {
+            ResumeMode.ContinueAuto -> {
+                val inProgress = tracker.allScreens()
+                    .firstOrNull { it.expansionStatus == ScreenExpansionStatus.IN_PROGRESS }
+                inProgress?.let { frontier.add(it.screenId) }
+                tracker.allScreens()
+                    .filter { it.expansionStatus == ScreenExpansionStatus.NOT_STARTED }
+                    .sortedBy { it.screenId }
+                    .forEach { frontier.add(it.screenId) }
+            }
+
+            is ResumeMode.ResumeFromScreen -> {
+                val start = tracker.findScreen(mode.screenId)
+                    ?: throw IllegalArgumentException(
+                        "ResumeFromScreen target '${mode.screenId}' not found in saved crawl."
+                    )
+                val visited = linkedSetOf(start.screenId)
+                val toExplore = ArrayDeque<String>().apply { add(start.screenId) }
+                while (toExplore.isNotEmpty()) {
+                    val current = toExplore.removeFirst()
+                    tracker.outboundEdges(current)
+                        .asSequence()
+                        .filter {
+                            it.status == CrawlEdgeStatus.CAPTURED ||
+                                it.status == CrawlEdgeStatus.LINKED_EXISTING
+                        }
+                        .mapNotNull { it.childScreenId }
+                        .forEach { childId ->
+                            if (visited.add(childId)) {
+                                toExplore.add(childId)
+                            }
+                        }
+                }
+                frontier.add(start.screenId)
+                visited.asSequence()
+                    .drop(1) // skip start; already added.
+                    .mapNotNull { tracker.findScreen(it) }
+                    .filter { it.expansionStatus == ScreenExpansionStatus.NOT_STARTED }
+                    .sortedBy { it.screenId }
+                    .forEach { frontier.add(it.screenId) }
+            }
+
+            is ResumeMode.ReExpand -> {
+                tracker.findScreen(mode.screenId)
+                    ?: throw IllegalArgumentException(
+                        "ReExpand target '${mode.screenId}' not found in saved crawl."
+                    )
+                tracker.clearOutboundEdges(mode.screenId)
+                tracker.setScreenExpansionStatus(mode.screenId, ScreenExpansionStatus.NOT_STARTED)
+                frontier.add(mode.screenId)
+            }
+        }
+    }
+
     private suspend fun expandScreen(
         session: CrawlSessionDirectory,
         tracker: CrawlRunTracker,
@@ -265,45 +410,98 @@ internal class DeepCrawlCoordinator(
         } else {
             scrollScanCoordinator.logicalViewportFingerprint(topSnapshot)
         }
-        val traversalPlan = TraversalPlanner.planTraversal(snapshot, blacklist)
-        rememberScreen(screenRecord.screenId, screenRecord.screenName)
-        logTraversalPlan(screenRecord, traversalPlan)
-
-        traversalPlan.skippedElements.forEach { skipped ->
-            tracker.addEdge(
-                parentScreenId = screenRecord.screenId,
-                element = skipped.element,
-                status = CrawlEdgeStatus.SKIPPED_BLACKLIST,
-                message = skipped.reason,
+        val isResumeExpansion = screenRecord.expansionStatus != ScreenExpansionStatus.NOT_STARTED
+        val traversalPlan = if (isResumeExpansion) {
+            TraversalPlan(
+                eligibleElements = emptyList(),
+                skippedElements = emptyList(),
             )
-            crawlLogger?.info(
-                "edge_skipped_blacklist parentScreenId=${screenRecord.screenId} parentScreenName=${quote(screenRecord.screenName)} " +
-                    "reason=${quote(skipped.reason)} element=${formatElement(skipped.element)}"
-            )
+        } else {
+            TraversalPlanner.planTraversal(snapshot, blacklist)
         }
+        rememberScreen(screenRecord.screenId, screenRecord.screenName)
+        if (isResumeExpansion) {
+            crawlLogger?.info(
+                "traversal_resume_plan screenId=${screenRecord.screenId} screenName=${quote(screenRecord.screenName)} " +
+                    "pendingEdgeCount=${tracker.outboundEdges(screenRecord.screenId).count { it.status == CrawlEdgeStatus.PENDING || it.status == CrawlEdgeStatus.IN_PROGRESS }}"
+            )
+        } else {
+            logTraversalPlan(screenRecord, traversalPlan)
+            if (tracker.outboundEdges(screenRecord.screenId).isEmpty()) {
+                rewriteScreenXmlFor(tracker, snapshot, screenRecord.screenId, CrawlRunStatus.IN_PROGRESS)
+            }
+        }
+
+        tracker.setScreenExpansionStatus(screenRecord.screenId, ScreenExpansionStatus.IN_PROGRESS)
+
+        if (!isResumeExpansion) {
+            traversalPlan.skippedElements.forEach { skipped ->
+                val skippedEdgeId = tracker.addPendingEdge(
+                    parentScreenId = screenRecord.screenId,
+                    element = skipped.element,
+                )
+                tracker.updateEdgeStatus(
+                    edgeId = skippedEdgeId,
+                    status = CrawlEdgeStatus.SKIPPED_BLACKLIST,
+                    message = skipped.reason,
+                )
+                crawlLogger?.info(
+                    "edge_skipped_blacklist parentScreenId=${screenRecord.screenId} parentScreenName=${quote(screenRecord.screenName)} " +
+                        "reason=${quote(skipped.reason)} element=${formatElement(skipped.element)}"
+                )
+            }
+        }
+        rewriteScreenXmlFor(tracker, snapshot, screenRecord.screenId, CrawlRunStatus.IN_PROGRESS)
         saveManifest(session, tracker, CrawlRunStatus.IN_PROGRESS)
 
-        if (traversalPlan.eligibleElements.isEmpty()) {
+        val edgeWorkItems = if (isResumeExpansion) {
+            resumeEdgeWorkItems(
+                tracker = tracker,
+                screenRecord = screenRecord,
+                snapshot = snapshot,
+            )
+        } else {
+            traversalPlan.eligibleElements.map { element ->
+                EdgeWorkItem(
+                    edgeId = null,
+                    element = element,
+                )
+            }
+        }
+
+        if (edgeWorkItems.isEmpty()) {
+            tracker.setScreenExpansionStatus(screenRecord.screenId, ScreenExpansionStatus.COMPLETE)
+            rewriteScreenXmlFor(tracker, snapshot, screenRecord.screenId, CrawlRunStatus.IN_PROGRESS)
             crawlLogger?.info(
                 "screen_expansion_complete screenId=${screenRecord.screenId} screenName=${quote(screenRecord.screenName)} " +
-                    "result=no_eligible_elements"
+                    "result=${if (isResumeExpansion) "no_pending_edges" else "no_eligible_elements"}"
             )
             return
         }
 
         host.publishProgress(
-            "Mapped '${snapshot.screenName}'. Visiting ${traversalPlan.eligibleElements.size} target(s)."
+            "Mapped '${snapshot.screenName}'. Visiting ${edgeWorkItems.size} target(s)."
         )
 
-        traversalPlan.eligibleElements.forEachIndexed { index, element ->
+        edgeWorkItems.forEachIndexed { index, workItem ->
+            val element = workItem.element
             rememberElement(element)
+            val currentEdgeId = workItem.edgeId ?: tracker.addPendingEdge(
+                parentScreenId = screenRecord.screenId,
+                element = element,
+            )
+            tracker.updateEdgeStatus(
+                edgeId = currentEdgeId,
+                status = CrawlEdgeStatus.IN_PROGRESS,
+            )
+            rewriteScreenXmlFor(tracker, snapshot, screenRecord.screenId, CrawlRunStatus.IN_PROGRESS)
             try {
                 host.publishProgress(
-                    "Visiting target ${index + 1} of ${traversalPlan.eligibleElements.size} from '${snapshot.screenName}': ${element.label}"
+                    "Visiting target ${index + 1} of ${edgeWorkItems.size} from '${snapshot.screenName}': ${element.label}"
                 )
                 crawlLogger?.info(
                     "edge_visit_start parentScreenId=${screenRecord.screenId} parentScreenName=${quote(screenRecord.screenName)} " +
-                        "edgeIndex=${index + 1}/${traversalPlan.eligibleElements.size} element=${formatElement(element)}"
+                        "edgeIndex=${index + 1}/${edgeWorkItems.size} edgeId=$currentEdgeId resume=$isResumeExpansion element=${formatElement(element)}"
                 )
                 val openedChild = openChildFromScreen(
                     tracker = tracker,
@@ -332,9 +530,8 @@ internal class DeepCrawlCoordinator(
                     remainedInCurrentPackage &&
                     (afterClickFingerprint == beforeClickFingerprint || afterClickFingerprint == topFingerprint)
                 ) {
-                    tracker.addEdge(
-                        parentScreenId = screenRecord.screenId,
-                        element = element,
+                    tracker.updateEdgeStatus(
+                        edgeId = currentEdgeId,
                         status = CrawlEdgeStatus.SKIPPED_NO_NAVIGATION,
                         message = "No distinct child screen detected.",
                     )
@@ -342,8 +539,18 @@ internal class DeepCrawlCoordinator(
                         "edge_skipped_no_navigation parentScreenId=${screenRecord.screenId} parentScreenName=${quote(screenRecord.screenName)} " +
                             "element=${formatElement(element)}"
                     )
+                    rewriteScreenXmlFor(tracker, snapshot, screenRecord.screenId, CrawlRunStatus.IN_PROGRESS)
                     saveManifest(session, tracker, CrawlRunStatus.IN_PROGRESS)
                     return@forEachIndexed
+                }
+
+                val externalPackage = childPackageName.takeIf { it != currentPackageName }
+                if (externalPackage != null) {
+                    tracker.updateEdgeStatus(
+                        edgeId = currentEdgeId,
+                        status = CrawlEdgeStatus.IN_PROGRESS,
+                        externalPackage = externalPackage,
+                    )
                 }
 
                 if (childPackageName !in allowedPackageNames) {
@@ -377,6 +584,13 @@ internal class DeepCrawlCoordinator(
                     ) {
                         PauseDecision.CONTINUE -> {
                             allowedPackageNames += childPackageName
+                            tracker.updateEdgeStatus(
+                                edgeId = currentEdgeId,
+                                status = CrawlEdgeStatus.IN_PROGRESS,
+                                approval = CrawlEdgeApproval.EXPLICIT,
+                                externalPackage = childPackageName,
+                            )
+                            rewriteScreenXmlFor(tracker, snapshot, screenRecord.screenId, CrawlRunStatus.IN_PROGRESS)
                             val allowedPackageSet = formatAllowedPackageNames()
                             crawlLogger?.info(
                                 "crawl_pause_resolved reason=${PauseReason.EXTERNAL_PACKAGE_BOUNDARY.name.lowercase()} " +
@@ -449,11 +663,11 @@ internal class DeepCrawlCoordinator(
                         }
 
                         PauseDecision.SKIP_EDGE -> {
-                            tracker.addEdge(
-                                parentScreenId = screenRecord.screenId,
-                                element = element,
+                            tracker.updateEdgeStatus(
+                                edgeId = currentEdgeId,
                                 status = CrawlEdgeStatus.SKIPPED_EXTERNAL_PACKAGE,
                                 message = "Skipped external package '$childPackageName'.",
+                                externalPackage = childPackageName,
                             )
                             crawlLogger?.info(
                                 "edge_skipped_external_package parentScreenId=${screenRecord.screenId} " +
@@ -466,6 +680,7 @@ internal class DeepCrawlCoordinator(
                                 resolvedChildLinks = resolvedLinksByScreenId
                                     .getOrPut(screenRecord.screenId) { mutableMapOf() },
                             )
+                            rewriteScreenXmlFor(tracker, snapshot, screenRecord.screenId, CrawlRunStatus.IN_PROGRESS)
                             saveManifest(session, tracker, CrawlRunStatus.IN_PROGRESS)
                             return@forEachIndexed
                         }
@@ -551,11 +766,11 @@ internal class DeepCrawlCoordinator(
                         ?: throw IllegalStateException(
                             "Existing screen '$existingChildScreenId' was not found for fingerprint '$childScreenFingerprint'."
                         )
-                    tracker.addEdge(
-                        parentScreenId = screenRecord.screenId,
-                        childScreenId = existingChildScreenId,
-                        element = element,
+                    tracker.updateEdgeStatus(
+                        edgeId = currentEdgeId,
                         status = CrawlEdgeStatus.LINKED_EXISTING,
+                        childScreenId = existingChildScreenId,
+                        childScreenName = existingChildScreen.screenName,
                         message = "Linked to existing screen '${existingChildScreen.screenName}'.",
                     )
                     crawlLogger?.info(
@@ -588,11 +803,11 @@ internal class DeepCrawlCoordinator(
                         route = childRoute,
                         depth = screenRecord.depth + 1,
                     )
-                    tracker.addEdge(
-                        parentScreenId = screenRecord.screenId,
-                        childScreenId = childScreenId,
-                        element = element,
+                    tracker.updateEdgeStatus(
+                        edgeId = currentEdgeId,
                         status = CrawlEdgeStatus.CAPTURED,
+                        childScreenId = childScreenId,
+                        childScreenName = childSnapshot.screenName,
                         message = "Captured child screen '${childSnapshot.screenName}'.",
                     )
                     rememberScreen(childScreenId, childSnapshot.screenName)
@@ -611,6 +826,7 @@ internal class DeepCrawlCoordinator(
                         .getOrPut(screenRecord.screenId) { mutableMapOf() }[element.toLinkKey()] =
                         childFiles.htmlFile.name
                     resolvedLinksByScreenId.putIfAbsent(childScreenId, mutableMapOf())
+                    rewriteScreenXmlFor(tracker, childSnapshot, childScreenId, CrawlRunStatus.IN_PROGRESS)
                     frontier.add(childScreenId)
                     rememberFrontier(frontier)
                     logFrontierState(
@@ -626,12 +842,19 @@ internal class DeepCrawlCoordinator(
                     resolvedChildLinks = resolvedLinksByScreenId
                         .getOrPut(screenRecord.screenId) { mutableMapOf() },
                 )
+                rewriteScreenXmlFor(tracker, snapshot, screenRecord.screenId, CrawlRunStatus.IN_PROGRESS)
                 saveManifest(session, tracker, CrawlRunStatus.IN_PROGRESS)
             } catch (edgeFailure: RecoverableTraversalException) {
                 crawlLogger?.warn(
                     "edge_failure_recoverable parentScreenId=${edgeFailure.parentScreenId} message=${quote(edgeFailure.message.orEmpty())} " +
                         "element=${formatElement(edgeFailure.element)}"
                 )
+                tracker.updateEdgeStatus(
+                    edgeId = currentEdgeId,
+                    status = CrawlEdgeStatus.FAILED,
+                    message = edgeFailure.message,
+                )
+                rewriteScreenXmlFor(tracker, snapshot, screenRecord.screenId, CrawlRunStatus.IN_PROGRESS)
                 val recovered = recoverToReplayableState(entryScreenLogicalFingerprint)
                 crawlLogger?.info(
                     "edge_recovery_result parentScreenId=${edgeFailure.parentScreenId} recoverySucceeded=$recovered " +
@@ -645,16 +868,8 @@ internal class DeepCrawlCoordinator(
                         rootSnapshot = rootSnapshot,
                         rootFiles = rootFiles,
                         message = edgeFailure.message.orEmpty(),
-                        failedElement = edgeFailure.element,
                     )
                 }
-
-                tracker.addEdge(
-                    parentScreenId = edgeFailure.parentScreenId,
-                    element = edgeFailure.element,
-                    status = CrawlEdgeStatus.FAILED,
-                    message = edgeFailure.message,
-                )
                 pauseTracker.recordFailedEdge()
                 val pausedAtCheckpoint = handlePauseCheckpointIfNeeded(
                     session = session,
@@ -673,6 +888,42 @@ internal class DeepCrawlCoordinator(
                 )
             }
         }
+
+        tracker.setScreenExpansionStatus(screenRecord.screenId, ScreenExpansionStatus.COMPLETE)
+        rewriteScreenXmlFor(tracker, snapshot, screenRecord.screenId, CrawlRunStatus.IN_PROGRESS)
+    }
+
+    private fun resumeEdgeWorkItems(
+        tracker: CrawlRunTracker,
+        screenRecord: CrawlScreenRecord,
+        snapshot: ScreenSnapshot,
+    ): List<EdgeWorkItem> {
+        val pendingEdges = tracker.outboundEdges(screenRecord.screenId)
+            .filter { edge ->
+                edge.status == CrawlEdgeStatus.PENDING ||
+                    edge.status == CrawlEdgeStatus.IN_PROGRESS
+            }
+        val workItems = mutableListOf<EdgeWorkItem>()
+        pendingEdges.forEach { edge ->
+            val liveElement = snapshot.elements.firstOrNull { element -> matchesElement(edge, element) }
+            if (liveElement == null) {
+                tracker.updateEdgeStatus(
+                    edgeId = edge.edgeId,
+                    status = CrawlEdgeStatus.FAILED,
+                    message = "Element no longer present on rescan.",
+                )
+                crawlLogger?.warn(
+                    "resume_edge_missing screenId=${screenRecord.screenId} screenName=${quote(screenRecord.screenName)} " +
+                        "edgeId=${edge.edgeId} element=${formatEdgeRecord(edge)}"
+                )
+            } else {
+                workItems += EdgeWorkItem(
+                    edgeId = edge.edgeId,
+                    element = liveElement,
+                )
+            }
+        }
+        return workItems
     }
 
     private suspend fun handlePauseCheckpointIfNeeded(
@@ -760,6 +1011,7 @@ internal class DeepCrawlCoordinator(
             initialRoot = replayResult.root,
             capturePackageName = screenRecord.packageName,
             progressPrefix = "Replaying route to '${screenRecord.screenName}'.",
+            preferredName = screenRecord.screenName,
         )
         val liveFingerprint = screenIdentityFor(
             snapshot = snapshot,
@@ -1356,6 +1608,7 @@ internal class DeepCrawlCoordinator(
         initialRoot: AccessibilityNodeSnapshot,
         capturePackageName: String?,
         progressPrefix: String,
+        preferredName: String? = null,
     ): ScreenSnapshot {
         scanScreenOverride?.let { override ->
             return override(
@@ -1363,6 +1616,7 @@ internal class DeepCrawlCoordinator(
                 initialRoot,
                 capturePackageName,
                 progressPrefix,
+                preferredName,
             )
         }
 
@@ -1378,6 +1632,7 @@ internal class DeepCrawlCoordinator(
             onProgress = { message ->
                 host.publishProgress("$progressPrefix $message")
             },
+            preferredName = preferredName,
         )
     }
 
@@ -1513,6 +1768,84 @@ internal class DeepCrawlCoordinator(
             xmlFile = File(screenRecord.xmlPath),
             mergedXmlFile = screenRecord.mergedXmlPath?.let(::File),
         )
+    }
+
+    private fun rewriteScreenXmlFor(
+        tracker: CrawlRunTracker,
+        snapshot: ScreenSnapshot,
+        screenId: String,
+        runStatus: CrawlRunStatus,
+    ) {
+        val screenRecord = tracker.findScreen(screenId) ?: return
+        val crawlState = buildScreenCrawlState(tracker, snapshot, screenRecord, runStatus)
+        CaptureFileStore.rewriteScreenXml(filesFor(screenRecord), snapshot, crawlState)
+    }
+
+    private fun buildScreenCrawlState(
+        tracker: CrawlRunTracker,
+        snapshot: ScreenSnapshot,
+        screenRecord: CrawlScreenRecord,
+        runStatus: CrawlRunStatus,
+    ): ScreenCrawlState {
+        val identity = ScreenIdentityCodec.decode(screenRecord.screenFingerprint)
+            ?: ScreenIdentityFields(
+                packageName = screenRecord.packageName,
+                title = screenRecord.screenName,
+                hints = emptyList(),
+            )
+        val parent = screenRecord.parentScreenId?.let { parentId ->
+            ParentEdgeRef(
+                screenId = parentId,
+                triggerLabel = screenRecord.triggerLabel,
+                triggerResourceId = screenRecord.triggerResourceId,
+            )
+        }
+        val isRoot = screenRecord.depth == 0
+        val runLevel = if (isRoot) {
+            RunLevelState(
+                sessionId = tracker.sessionId,
+                startedAt = tracker.startedAt,
+                finishedAt = null,
+                status = runStatus,
+                maxDepthReached = tracker.maxDiscoveredDepth(),
+            )
+        } else {
+            null
+        }
+        val outbound = tracker.outboundEdges(screenRecord.screenId)
+        val edgesByElement = snapshot.elements.mapNotNull { element ->
+            val edge = outbound.firstOrNull { matchesElement(it, element) }
+                ?: return@mapNotNull null
+            element.toLinkKey() to EdgeXmlView(
+                edgeId = edge.edgeId,
+                status = edge.status,
+                childScreenId = edge.childScreenId,
+                childScreenName = edge.childScreenName,
+                message = edge.message,
+                approval = edge.approval,
+                externalPackage = edge.externalPackage,
+            )
+        }.toMap()
+        return ScreenCrawlState(
+            screenId = screenRecord.screenId,
+            depth = screenRecord.depth,
+            expansionStatus = screenRecord.expansionStatus,
+            isRoot = isRoot,
+            screenIdentity = identity,
+            parent = parent,
+            route = screenRecord.route,
+            runLevel = runLevel,
+            edgesByElement = edgesByElement,
+        )
+    }
+
+    private fun matchesElement(edge: CrawlEdgeRecord, element: PressableElement): Boolean {
+        return edge.label == element.label &&
+            edge.resourceId == element.resourceId &&
+            edge.bounds == element.bounds &&
+            edge.className == element.className &&
+            edge.childIndexPath == element.childIndexPath &&
+            edge.firstSeenStep == element.firstSeenStep
     }
 
     private fun entryScreenResetFailureMessage(outcome: EntryScreenResetOutcome): String {
@@ -1841,6 +2174,12 @@ internal class DeepCrawlCoordinator(
             "childIndexPath=${element.childIndexPath} firstSeenStep=${element.firstSeenStep}"
     }
 
+    private fun formatEdgeRecord(edge: CrawlEdgeRecord): String {
+        return "label=${quote(edge.label)} resourceId=${quote(edge.resourceId.orEmpty())} " +
+            "className=${quote(edge.className.orEmpty())} bounds=${quote(edge.bounds)} " +
+            "childIndexPath=${edge.childIndexPath} firstSeenStep=${edge.firstSeenStep}"
+    }
+
     private fun quote(value: String): String {
         return "\"${value.replace("\"", "\\\"")}\""
     }
@@ -1915,6 +2254,11 @@ internal class DeepCrawlCoordinator(
         val selectedMetrics: DestinationRichnessMetrics,
     )
 
+    private data class EdgeWorkItem(
+        val edgeId: String?,
+        val element: PressableElement,
+    )
+
     private data class CrawlCrashContext(
         var lastScreenId: String? = null,
         var lastScreenName: String? = null,
@@ -1947,4 +2291,10 @@ internal class DeepCrawlCoordinator(
         private const val DEFAULT_MAX_ENTRY_RESTORE_SETTLE_MILLIS = 3_000L
         private const val maxEntryRestoreCaptureAttempts = 10
     }
+}
+
+private fun ResumeMode.toLogString(): String = when (this) {
+    ResumeMode.ContinueAuto -> "continue_auto"
+    is ResumeMode.ResumeFromScreen -> "resume_from_screen:$screenId"
+    is ResumeMode.ReExpand -> "re_expand:$screenId"
 }

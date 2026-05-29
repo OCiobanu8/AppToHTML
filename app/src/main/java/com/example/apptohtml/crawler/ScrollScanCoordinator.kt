@@ -16,6 +16,7 @@ internal class ScrollScanCoordinator(
         tryScrollBackward: (List<Int>) -> Boolean,
         captureCurrentRoot: suspend () -> AccessibilityNodeSnapshot?,
         onProgress: (String) -> Unit = {},
+        preferredName: String? = null,
     ): ScreenSnapshot {
         var currentRoot = settleViewport(initialRoot, captureCurrentRoot)
         currentRoot = rewindToTop(
@@ -29,6 +30,7 @@ internal class ScrollScanCoordinator(
             selectedApp = selectedApp,
             eventClassName = eventClassName,
             initialRoot = currentRoot,
+            preferredName = preferredName,
         )
         accumulator.addStep(currentRoot)
 
@@ -574,11 +576,13 @@ internal class ScrollScanAccumulator(
     selectedApp: SelectedAppRef,
     eventClassName: String?,
     initialRoot: AccessibilityNodeSnapshot,
+    preferredName: String? = null,
 ) {
     private val screenName = ScreenNaming.deriveScreenName(
         eventClassName = eventClassName,
         selectedApp = selectedApp,
         root = initialRoot,
+        preferredName = preferredName,
     )
     private val packageName = initialRoot.packageName ?: selectedApp.packageName
     private val mergedElements = LinkedHashMap<MergedElementKey, PressableElement>()

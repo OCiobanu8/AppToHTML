@@ -13,35 +13,50 @@ data class CapturedScreenFiles(
 )
 
 object CaptureFileStore {
+    private const val CRAWL_DIR_NAME = "crawl"
+
     fun createSession(
         context: Context,
         packageName: String,
         startedAt: Long = System.currentTimeMillis(),
+        wipeExisting: Boolean = false,
     ): CrawlSessionDirectory {
         val baseDir = preferredBaseDir(context, packageName)
         if (!baseDir.exists()) {
             baseDir.mkdirs()
         }
 
-        val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(startedAt))
-        var sessionId = "crawl_$timestamp"
-        var sessionDir = File(baseDir, sessionId)
-        var suffix = 1
-        while (sessionDir.exists()) {
-            sessionId = "crawl_${timestamp}_$suffix"
-            sessionDir = File(baseDir, sessionId)
-            suffix += 1
+        val crawlDir = File(baseDir, CRAWL_DIR_NAME)
+        if (wipeExisting && crawlDir.exists()) {
+            crawlDir.deleteRecursively()
         }
-        sessionDir.mkdirs()
+        if (!crawlDir.exists()) {
+            crawlDir.mkdirs()
+        }
+
+        val timestamp = SimpleDateFormat("yyyyMMdd_HHmmss", Locale.US).format(Date(startedAt))
+        val sessionId = "crawl_$timestamp"
+        val logFile = uniqueLogFile(crawlDir, timestamp)
 
         return CrawlSessionDirectory(
             sessionId = sessionId,
-            directory = sessionDir,
-            manifestFile = File(sessionDir, "crawl-index.json"),
-            logFile = File(sessionDir, "crawl.log"),
-            graphJsonFile = File(sessionDir, "crawl-graph.json"),
-            graphHtmlFile = File(sessionDir, "crawl-graph.html"),
+            directory = crawlDir,
+            manifestFile = File(crawlDir, "crawl-index.json"),
+            logFile = logFile,
+            graphJsonFile = File(crawlDir, "crawl-graph.json"),
+            graphHtmlFile = File(crawlDir, "crawl-graph.html"),
         )
+    }
+
+    fun crawlDirectory(context: Context, packageName: String): File {
+        return File(preferredBaseDir(context, packageName), CRAWL_DIR_NAME)
+    }
+
+    fun wipePackageCrawl(context: Context, packageName: String) {
+        val crawlDir = crawlDirectory(context, packageName)
+        if (crawlDir.exists()) {
+            crawlDir.deleteRecursively()
+        }
     }
 
     fun saveScreen(
@@ -49,6 +64,7 @@ object CaptureFileStore {
         snapshot: ScreenSnapshot,
         screenId: String,
         resolvedChildLinks: Map<PressableElementLinkKey, String> = emptyMap(),
+        crawlState: ScreenCrawlState? = null,
     ): CapturedScreenFiles {
         val baseName = "${screenId}_${ScreenNaming.toFileBase(snapshot.screenName)}"
         val htmlFile = File(session.directory, "$baseName.html")
@@ -58,7 +74,12 @@ object CaptureFileStore {
         }
 
         htmlFile.writeText(HtmlRenderer.render(snapshot, resolvedChildLinks), Charsets.UTF_8)
-        xmlFile.writeText(snapshot.xmlDump, Charsets.UTF_8)
+        val xmlContent = if (crawlState != null) {
+            AccessibilityXmlSerializer.serialize(snapshot, crawlState)
+        } else {
+            snapshot.xmlDump
+        }
+        xmlFile.writeText(xmlContent, Charsets.UTF_8)
         mergedXmlFile?.writeText(snapshot.mergedXmlDump.orEmpty(), Charsets.UTF_8)
 
         return CapturedScreenFiles(
@@ -74,6 +95,27 @@ object CaptureFileStore {
         resolvedChildLinks: Map<PressableElementLinkKey, String>,
     ) {
         files.htmlFile.writeText(HtmlRenderer.render(snapshot, resolvedChildLinks), Charsets.UTF_8)
+    }
+
+    fun rewriteScreenXml(
+        files: CapturedScreenFiles,
+        snapshot: ScreenSnapshot,
+        crawlState: ScreenCrawlState,
+    ) {
+        files.xmlFile.writeText(
+            AccessibilityXmlSerializer.serialize(snapshot, crawlState),
+            Charsets.UTF_8,
+        )
+    }
+
+    private fun uniqueLogFile(crawlDir: File, timestamp: String): File {
+        var candidate = File(crawlDir, "crawl_$timestamp.log")
+        var suffix = 1
+        while (candidate.exists()) {
+            candidate = File(crawlDir, "crawl_${timestamp}_$suffix.log")
+            suffix += 1
+        }
+        return candidate
     }
 
     fun saveManifest(
