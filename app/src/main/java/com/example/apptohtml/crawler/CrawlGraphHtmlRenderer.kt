@@ -1130,6 +1130,8 @@ $statusFilters
 
     private fun CrawlEdgeStatus.displayLabel(): String {
         return when (this) {
+            CrawlEdgeStatus.PENDING -> "Pending"
+            CrawlEdgeStatus.IN_PROGRESS -> "In Progress"
             CrawlEdgeStatus.CAPTURED -> "Captured"
             CrawlEdgeStatus.LINKED_EXISTING -> "Linked Existing"
             CrawlEdgeStatus.SKIPPED_BLACKLIST -> "Skipped Blacklist"

@@ -5,6 +5,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Test
@@ -104,6 +105,145 @@ class DeepCrawlCoordinatorTest {
             assertTrue(manifestJson.contains("linked_existing"))
             assertTrue(manifestJson.contains(""""screenName": "Screen A""""))
             assertTrue(manifestJson.contains(""""screenName": "Screen B""""))
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun resumeContinueAuto_processes_loaded_pending_edge_without_duplicate_edge() = runBlocking {
+        val tempDir = Files.createTempDirectory("deep-crawl-resume-pending").toFile()
+        try {
+            val sessionDir = File(tempDir, "session-1000").apply { mkdirs() }
+            val openB = fakeElement("Open B", 0)
+            writeSavedScreenXml(
+                dir = sessionDir,
+                screenId = "screen_00000",
+                screenName = "Screen A",
+                depth = 0,
+                expansionStatus = ScreenExpansionStatus.IN_PROGRESS,
+                isRoot = true,
+                elements = listOf(openB),
+                edgesByElement = mapOf(
+                    openB.toLinkKey() to EdgeXmlView(
+                        edgeId = "edge_010",
+                        status = CrawlEdgeStatus.PENDING,
+                    )
+                ),
+            )
+            val host = FakeHost(
+                entryScreenId = "A",
+                screens = mapOf(
+                    "A" to fakeScreen(
+                        id = "A",
+                        screenName = "Screen A",
+                        elements = listOf(openB),
+                        transitions = mapOf("Open B" to "B"),
+                    ),
+                    "B" to fakeScreen(
+                        id = "B",
+                        screenName = "Screen B",
+                        elements = emptyList(),
+                        transitions = emptyMap(),
+                    ),
+                ),
+            )
+
+            val outcome = coordinator(
+                host = host,
+                tempDir = tempDir,
+                timeProvider = { 1_000L },
+            ).crawl(
+                initialRoot = host.captureCurrentRootSnapshot("com.example.target")!!,
+                eventClassName = "ScreenA",
+                intent = CrawlStartIntent.RESUME,
+                resumeMode = ResumeMode.ContinueAuto,
+            )
+
+            val summary = (outcome as DeepCrawlCoordinator.DeepCrawlOutcome.Completed).summary
+            val manifestJson = summary.manifestFile.readText()
+            assertEquals(2, summary.capturedScreenCount)
+            assertTrue(manifestJson.contains(""""edgeId": "edge_010""""))
+            assertTrue(manifestJson.contains(""""status": "captured""""))
+            assertFalse(manifestJson.contains(""""edgeId": "edge_011""""))
+            assertTrue(File(sessionDir, "screen_00000_screen_a.xml").readText().contains("""expansion-status="complete""""))
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun resumeReExpand_drops_prior_outbound_edges_and_expands_fresh() = runBlocking {
+        val tempDir = Files.createTempDirectory("deep-crawl-reexpand").toFile()
+        try {
+            val sessionDir = File(tempDir, "session-1000").apply { mkdirs() }
+            val openB = fakeElement("Open B", 0)
+            writeSavedScreenXml(
+                dir = sessionDir,
+                screenId = "screen_00000",
+                screenName = "Screen A",
+                depth = 0,
+                expansionStatus = ScreenExpansionStatus.COMPLETE,
+                isRoot = true,
+                elements = listOf(openB),
+                edgesByElement = mapOf(
+                    openB.toLinkKey() to EdgeXmlView(
+                        edgeId = "edge_000",
+                        status = CrawlEdgeStatus.CAPTURED,
+                        childScreenId = "screen_00001",
+                        childScreenName = "Old Screen B",
+                    )
+                ),
+            )
+            writeSavedScreenXml(
+                dir = sessionDir,
+                screenId = "screen_00001",
+                screenName = "Old Screen B",
+                depth = 1,
+                expansionStatus = ScreenExpansionStatus.COMPLETE,
+                isRoot = false,
+                elements = emptyList(),
+                parent = ParentEdgeRef(
+                    screenId = "screen_00000",
+                    triggerLabel = "Open B",
+                    triggerResourceId = openB.resourceId,
+                ),
+            )
+            val host = FakeHost(
+                entryScreenId = "A",
+                screens = mapOf(
+                    "A" to fakeScreen(
+                        id = "A",
+                        screenName = "Screen A",
+                        elements = listOf(openB),
+                        transitions = mapOf("Open B" to "B"),
+                    ),
+                    "B" to fakeScreen(
+                        id = "B",
+                        screenName = "Screen B",
+                        elements = emptyList(),
+                        transitions = emptyMap(),
+                    ),
+                ),
+            )
+
+            val outcome = coordinator(
+                host = host,
+                tempDir = tempDir,
+                timeProvider = { 1_000L },
+            ).crawl(
+                initialRoot = host.captureCurrentRootSnapshot("com.example.target")!!,
+                eventClassName = "ScreenA",
+                intent = CrawlStartIntent.RESUME,
+                resumeMode = ResumeMode.ReExpand("screen_00000"),
+            )
+
+            val summary = (outcome as DeepCrawlCoordinator.DeepCrawlOutcome.Completed).summary
+            val manifestJson = summary.manifestFile.readText()
+            assertEquals(3, summary.capturedScreenCount)
+            assertFalse(manifestJson.contains(""""edgeId": "edge_000""""))
+            assertTrue(manifestJson.contains(""""edgeId": "edge_001""""))
+            assertFalse(File(sessionDir, "screen_00000_screen_a.xml").readText().contains("""id="edge_000""""))
         } finally {
             tempDir.deleteRecursively()
         }
@@ -566,6 +706,181 @@ class DeepCrawlCoordinatorTest {
             assertTrue(manifestJson.contains(""""screenName": "Google""""))
             assertTrue(manifestJson.contains(""""packageName": "$externalPackageName""""))
             assertTrue(manifestJson.contains(""""expectedPackageName": "$externalPackageName""""))
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun externalPackageDecision_continue_marks_originating_edge_with_explicit_approval() = runBlocking {
+        val tempDir = Files.createTempDirectory("deep-crawl-external-approval-continue").toFile()
+        val externalPackageName = "com.google.android.googlequicksearchbox"
+        try {
+            val host = object : FakeHost(
+                entryScreenId = "A",
+                screens = mapOf(
+                    "A" to fakeScreen(
+                        id = "A",
+                        screenName = "Screen A",
+                        elements = listOf(fakeElement("Open Google", 0)),
+                        transitions = mapOf("Open Google" to "G"),
+                    ),
+                    "G" to fakeScreen(
+                        id = "G",
+                        screenName = "Google",
+                        packageName = externalPackageName,
+                        elements = emptyList(),
+                        transitions = emptyMap(),
+                    ),
+                ),
+            ) {
+                override suspend fun awaitPauseDecision(
+                    reason: PauseReason,
+                    snapshot: PauseProgressSnapshot,
+                    externalPackageContext: ExternalPackageDecisionContext?,
+                ): PauseDecision = PauseDecision.CONTINUE
+            }
+
+            val outcome = coordinator(host, tempDir).crawl(
+                initialRoot = host.captureCurrentRootSnapshot("com.example.target")!!,
+                eventClassName = "ScreenA",
+            )
+
+            val summary = (outcome as DeepCrawlCoordinator.DeepCrawlOutcome.Completed).summary
+            val rootXml = summary.rootFiles.xmlFile.readText()
+            assertTrue(
+                "root XML should mark the originating edge approval=explicit after CONTINUE:\n$rootXml",
+                rootXml.contains("approval=\"explicit\""),
+            )
+            assertTrue(
+                "root XML should preserve the external destination package after CONTINUE:\n$rootXml",
+                rootXml.contains("external-package=\"$externalPackageName\""),
+            )
+
+            val loaded = SavedCrawlLoader.load(summary.rootFiles.xmlFile.parentFile!!)
+            assertNotNull(loaded)
+            assertTrue(
+                "Saved-state load should surface the approved external package: ${loaded!!.allowedPackages}",
+                externalPackageName in loaded.allowedPackages,
+            )
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun externalPackageDecision_skip_does_not_mark_edge_with_approval() = runBlocking {
+        val tempDir = Files.createTempDirectory("deep-crawl-external-approval-skip").toFile()
+        val externalPackageName = "com.google.android.googlequicksearchbox"
+        try {
+            val host = object : FakeHost(
+                entryScreenId = "A",
+                screens = mapOf(
+                    "A" to fakeScreen(
+                        id = "A",
+                        screenName = "Screen A",
+                        elements = listOf(fakeElement("Open Google", 0)),
+                        transitions = mapOf("Open Google" to "G"),
+                    ),
+                    "G" to fakeScreen(
+                        id = "G",
+                        screenName = "Google",
+                        packageName = externalPackageName,
+                        elements = emptyList(),
+                        transitions = emptyMap(),
+                    ),
+                ),
+            ) {
+                override suspend fun awaitPauseDecision(
+                    reason: PauseReason,
+                    snapshot: PauseProgressSnapshot,
+                    externalPackageContext: ExternalPackageDecisionContext?,
+                ): PauseDecision = PauseDecision.SKIP_EDGE
+            }
+
+            val outcome = coordinator(host, tempDir).crawl(
+                initialRoot = host.captureCurrentRootSnapshot("com.example.target")!!,
+                eventClassName = "ScreenA",
+            )
+
+            val summary = (outcome as DeepCrawlCoordinator.DeepCrawlOutcome.Completed).summary
+            val rootXml = summary.rootFiles.xmlFile.readText()
+            assertTrue(
+                "root XML should record the skip outcome:\n$rootXml",
+                rootXml.contains("status=\"skipped_external_package\""),
+            )
+            assertTrue(
+                "root XML should preserve the skipped external destination package:\n$rootXml",
+                rootXml.contains("external-package=\"$externalPackageName\""),
+            )
+            assertFalse(
+                "SKIP must not stamp the originating edge with any approval marker:\n$rootXml",
+                rootXml.contains("approval=\""),
+            )
+
+            val loaded = SavedCrawlLoader.load(summary.rootFiles.xmlFile.parentFile!!)
+            assertNotNull(loaded)
+            assertFalse(
+                "SKIP must not contribute the external package to the allowed set: ${loaded!!.allowedPackages}",
+                externalPackageName in loaded.allowedPackages,
+            )
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun revokedApprovalOnExternalPackageEdge_is_excluded_on_load() = runBlocking {
+        val tempDir = Files.createTempDirectory("deep-crawl-external-approval-revoke").toFile()
+        val externalPackageName = "com.google.android.googlequicksearchbox"
+        try {
+            val host = object : FakeHost(
+                entryScreenId = "A",
+                screens = mapOf(
+                    "A" to fakeScreen(
+                        id = "A",
+                        screenName = "Screen A",
+                        elements = listOf(fakeElement("Open Google", 0)),
+                        transitions = mapOf("Open Google" to "G"),
+                    ),
+                    "G" to fakeScreen(
+                        id = "G",
+                        screenName = "Google",
+                        packageName = externalPackageName,
+                        elements = emptyList(),
+                        transitions = emptyMap(),
+                    ),
+                ),
+            ) {
+                override suspend fun awaitPauseDecision(
+                    reason: PauseReason,
+                    snapshot: PauseProgressSnapshot,
+                    externalPackageContext: ExternalPackageDecisionContext?,
+                ): PauseDecision = PauseDecision.CONTINUE
+            }
+
+            val outcome = coordinator(host, tempDir).crawl(
+                initialRoot = host.captureCurrentRootSnapshot("com.example.target")!!,
+                eventClassName = "ScreenA",
+            )
+
+            val summary = (outcome as DeepCrawlCoordinator.DeepCrawlOutcome.Completed).summary
+            val rootXmlFile = summary.rootFiles.xmlFile
+            val originalXml = rootXmlFile.readText()
+            assertTrue(originalXml.contains("approval=\"explicit\""))
+
+            // Simulate the picker's revoke action by flipping the XML attribute on disk.
+            rootXmlFile.writeText(
+                originalXml.replace("approval=\"explicit\"", "approval=\"revoked\""),
+                Charsets.UTF_8,
+            )
+
+            val loaded = SavedCrawlLoader.load(rootXmlFile.parentFile!!)
+            assertNotNull(loaded)
+            assertFalse(
+                "Revoked approval must not seed the allowed set: ${loaded!!.allowedPackages}",
+                externalPackageName in loaded.allowedPackages,
+            )
         } finally {
             tempDir.deleteRecursively()
         }
@@ -1380,7 +1695,7 @@ class DeepCrawlCoordinatorTest {
 
             assertTrue(crawlLogText.contains("child_destination_settle_result"))
             assertTrue(crawlLogText.contains("triggerLabel=\"Open B\""))
-            assertTrue(crawlLogText.contains("sampleCount=10"))
+            assertTrue(crawlLogText.contains("sampleCount=3"))
             assertTrue(crawlLogText.contains("stopReason=fixed_dwell_exhausted"))
             assertTrue(crawlLogText.contains("sameFingerprintAsPrevious=true"))
         } finally {
@@ -1801,6 +2116,10 @@ class DeepCrawlCoordinatorTest {
 
             val summary = (outcome as DeepCrawlCoordinator.DeepCrawlOutcome.Completed).summary
             val manifestJson = summary.manifestFile.readText()
+            val rootXml = summary.rootFiles.xmlFile.readText()
+            val googleExternalPackageCount = rootXml
+                .split("external-package=\"$googlePackageName\"")
+                .size - 1
 
             assertEquals(
                 listOf(
@@ -1819,6 +2138,11 @@ class DeepCrawlCoordinatorTest {
             assertTrue(manifestJson.contains(""""screenName": "Chrome""""))
             assertTrue(manifestJson.contains(""""packageName": "$googlePackageName""""))
             assertTrue(manifestJson.contains(""""packageName": "$chromePackageName""""))
+            assertEquals(
+                "Both the initially approved Google edge and the later already-allowed Google edge should be stamped in root XML:\n$rootXml",
+                2,
+                googleExternalPackageCount,
+            )
         } finally {
             tempDir.deleteRecursively()
         }
@@ -2455,6 +2779,228 @@ class DeepCrawlCoordinatorTest {
         }
     }
 
+    @Test
+    fun perScreenXml_emits_crawl_block_and_edges_after_completed_run() = runBlocking {
+        val tempDir = Files.createTempDirectory("deep-crawl-per-screen-xml").toFile()
+        try {
+            val host = FakeHost(
+                entryScreenId = "A",
+                screens = mapOf(
+                    "A" to fakeScreen(
+                        id = "A",
+                        screenName = "Screen A",
+                        elements = listOf(fakeElement("Open B", 0)),
+                        transitions = mapOf("Open B" to "B"),
+                    ),
+                    "B" to fakeScreen(
+                        id = "B",
+                        screenName = "Screen B",
+                        elements = emptyList(),
+                        transitions = emptyMap(),
+                    ),
+                ),
+            )
+
+            val outcome = coordinator(host, tempDir).crawl(
+                initialRoot = host.captureCurrentRootSnapshot("com.example.target")!!,
+                eventClassName = "ScreenA",
+            )
+            val summary = (outcome as DeepCrawlCoordinator.DeepCrawlOutcome.Completed).summary
+
+            val rootXml = summary.rootFiles.xmlFile.readText()
+            assertTrue(
+                "root XML should carry a <crawl> block:\n$rootXml",
+                rootXml.contains("<crawl schema=\"v1\""),
+            )
+            assertTrue(
+                "root XML should be marked is-root and complete:\n$rootXml",
+                rootXml.contains("is-root=\"true\"") &&
+                    rootXml.contains("expansion-status=\"complete\""),
+            )
+            assertTrue(
+                "root XML should carry run-level session-id:\n$rootXml",
+                rootXml.contains("session-id=\""),
+            )
+            assertTrue(
+                "root XML should emit a captured edge for the only element:\n$rootXml",
+                rootXml.contains("<edge id=\"edge_000\" status=\"captured\"") &&
+                    rootXml.contains("child-screen-id=\"screen_00001\""),
+            )
+
+            val parentDir = summary.rootFiles.xmlFile.parentFile
+                ?: error("root XML missing parent dir")
+            val childXmlFile = parentDir.listFiles()
+                ?.firstOrNull { it.name.startsWith("screen_00001_") && it.name.endsWith(".xml") }
+                ?: error("child XML file should exist under ${parentDir.absolutePath}")
+            val childXml = childXmlFile.readText()
+            assertTrue(
+                "child XML should carry a <crawl> block:\n$childXml",
+                childXml.contains("<crawl schema=\"v1\""),
+            )
+            assertTrue(
+                "child XML should be non-root:\n$childXml",
+                childXml.contains("is-root=\"false\"") &&
+                    childXml.contains("expansion-status=\"complete\""),
+            )
+            assertTrue(
+                "child XML should reference its parent screen:\n$childXml",
+                childXml.contains("<parent screen-id=\"screen_00000\""),
+            )
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun perScreenXml_emits_skipped_blacklist_edge() = runBlocking {
+        val tempDir = Files.createTempDirectory("deep-crawl-per-screen-skipped").toFile()
+        try {
+            val host = FakeHost(
+                entryScreenId = "A",
+                screens = mapOf(
+                    "A" to fakeScreen(
+                        id = "A",
+                        screenName = "Screen A",
+                        elements = listOf(
+                            fakeElement("Open B", 0),
+                            fakeElement("Skip Me", 1, editable = true),
+                        ),
+                        transitions = mapOf("Open B" to "B"),
+                    ),
+                    "B" to fakeScreen(
+                        id = "B",
+                        screenName = "Screen B",
+                        elements = emptyList(),
+                        transitions = emptyMap(),
+                    ),
+                ),
+            )
+
+            val outcome = coordinator(
+                host,
+                tempDir,
+                blacklist = CrawlBlacklist(skipCheckable = false),
+            ).crawl(
+                initialRoot = host.captureCurrentRootSnapshot("com.example.target")!!,
+                eventClassName = "ScreenA",
+            )
+            val summary = (outcome as DeepCrawlCoordinator.DeepCrawlOutcome.Completed).summary
+            val rootXml = summary.rootFiles.xmlFile.readText()
+            assertTrue(
+                "root XML should record a blacklisted skip edge:\n$rootXml",
+                rootXml.contains("status=\"skipped_blacklist\""),
+            )
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun nameFreeze_rescan_of_child_screen_passes_captured_name_as_preferred() = runBlocking {
+        val tempDir = Files.createTempDirectory("deep-crawl-name-freeze").toFile()
+        try {
+            val host = FakeHost(
+                entryScreenId = "A",
+                screens = mapOf(
+                    "A" to fakeScreen(
+                        id = "A",
+                        screenName = "Screen A",
+                        elements = listOf(fakeElement("Open B", 0)),
+                        transitions = mapOf("Open B" to "B"),
+                    ),
+                    "B" to fakeScreen(
+                        id = "B",
+                        screenName = "Screen B",
+                        elements = emptyList(),
+                        transitions = emptyMap(),
+                    ),
+                ),
+            )
+            val scanCalls = mutableListOf<Pair<String, String?>>()
+            val outcome = coordinator(
+                host,
+                tempDir,
+                onScanCall = { screenId, preferredName -> scanCalls += screenId to preferredName },
+            ).crawl(
+                initialRoot = host.captureCurrentRootSnapshot("com.example.target")!!,
+                eventClassName = "ScreenA",
+            )
+
+            outcome as DeepCrawlCoordinator.DeepCrawlOutcome.Completed
+            val bCalls = scanCalls.filter { (id, _) -> id == "B" }
+            assertEquals(
+                "Screen B should be scanned for first capture and for prepareScreenForExpansion rescan: $scanCalls",
+                2,
+                bCalls.size,
+            )
+            assertEquals(
+                "First capture of B must not pass a preferred name (canonical name chosen now).",
+                null,
+                bCalls[0].second,
+            )
+            assertEquals(
+                "Rescan of B for expansion must freeze the name with the previously-captured value.",
+                "Screen B",
+                bCalls[1].second,
+            )
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun nameFreeze_keeps_screen_fingerprint_stable_across_capture_and_rescan() = runBlocking {
+        val tempDir = Files.createTempDirectory("deep-crawl-name-freeze-fp").toFile()
+        try {
+            val host = FakeHost(
+                entryScreenId = "A",
+                screens = mapOf(
+                    "A" to fakeScreen(
+                        id = "A",
+                        screenName = "Screen A",
+                        elements = listOf(fakeElement("Open B", 0)),
+                        transitions = mapOf("Open B" to "B"),
+                    ),
+                    "B" to fakeScreen(
+                        id = "B",
+                        screenName = "Screen B",
+                        elements = listOf(fakeElement("Open C", 0)),
+                        transitions = mapOf("Open C" to "C"),
+                    ),
+                    "C" to fakeScreen(
+                        id = "C",
+                        screenName = "Screen C",
+                        elements = emptyList(),
+                        transitions = emptyMap(),
+                    ),
+                ),
+            )
+
+            val outcome = coordinator(host, tempDir).crawl(
+                initialRoot = host.captureCurrentRootSnapshot("com.example.target")!!,
+                eventClassName = "ScreenA",
+            )
+
+            outcome as DeepCrawlCoordinator.DeepCrawlOutcome.Completed
+            // BFS reached Screen C through B; if rescan of B had drifted the name, the
+            // replay validation in prepareScreenForExpansion would have failed and C
+            // would never have been enqueued / captured.
+            assertEquals(3, outcome.summary.capturedScreenCount)
+            assertEquals(2, outcome.summary.maxDepthReached)
+            val manifestJson = outcome.summary.manifestFile.readText()
+            assertTrue(
+                "Screen B should be present with its captured name:\n$manifestJson",
+                manifestJson.contains(""""screenName": "Screen B""""),
+            )
+            assertTrue(
+                "Screen C should be present with its captured name:\n$manifestJson",
+                manifestJson.contains(""""screenName": "Screen C""""),
+            )
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
     private fun coordinator(
         host: FakeHost,
         tempDir: File,
@@ -2462,6 +3008,7 @@ class DeepCrawlCoordinatorTest {
         pauseConfig: PauseCheckpointConfig = PauseCheckpointConfig(),
         timeProvider: () -> Long = { System.currentTimeMillis() },
         useRealScan: Boolean = false,
+        onScanCall: ((screenId: String, preferredName: String?) -> Unit)? = null,
     ): DeepCrawlCoordinator {
         var postClickSettleTimeMs = 0L
         var entryRestoreSettleTimeMs = 0L
@@ -2469,8 +3016,8 @@ class DeepCrawlCoordinatorTest {
             selectedApp = selectedApp(),
             host = host,
             loadBlacklist = { blacklist },
-            createSession = {
-                val sessionDir = File(tempDir, "session-$it").apply { mkdirs() }
+            createSession = { startedAt, _ ->
+                val sessionDir = File(tempDir, "session-$startedAt").apply { mkdirs() }
                 CrawlSessionDirectory(
                     sessionId = sessionDir.name,
                     directory = sessionDir,
@@ -2481,8 +3028,10 @@ class DeepCrawlCoordinatorTest {
                 )
             },
             pauseConfig = pauseConfig,
-            scanScreenOverride = if (useRealScan) null else { _, initialRoot, _, _ ->
-                host.snapshotForRoot(initialRoot)
+            scanScreenOverride = if (useRealScan) null else { _, initialRoot, _, _, preferredName ->
+                val screenId = initialRoot.viewIdResourceName?.substringAfterLast('/')
+                if (screenId != null) onScanCall?.invoke(screenId, preferredName)
+                host.snapshotForRoot(initialRoot, preferredName = preferredName)
             },
             timeProvider = timeProvider,
             postClickSettleTimeProvider = {
@@ -2556,6 +3105,57 @@ class DeepCrawlCoordinatorTest {
             childIndexPath = listOf(index),
             editable = editable,
             firstSeenStep = 0,
+        )
+    }
+
+    private fun writeSavedScreenXml(
+        dir: File,
+        screenId: String,
+        screenName: String,
+        depth: Int,
+        expansionStatus: ScreenExpansionStatus,
+        isRoot: Boolean,
+        elements: List<PressableElement>,
+        edgesByElement: Map<PressableElementLinkKey, EdgeXmlView> = emptyMap(),
+        parent: ParentEdgeRef? = null,
+    ) {
+        val snapshot = ScreenSnapshot(
+            screenName = screenName,
+            packageName = "com.example.target",
+            elements = elements,
+            xmlDump = "",
+            scrollStepCount = 1,
+        )
+        val crawlState = ScreenCrawlState(
+            screenId = screenId,
+            depth = depth,
+            expansionStatus = expansionStatus,
+            isRoot = isRoot,
+            screenIdentity = ScreenIdentityFields(
+                packageName = ScreenNaming.normalizeIdentityToken("com.example.target"),
+                title = ScreenNaming.normalizeIdentityToken(screenName),
+                hints = emptyList(),
+            ),
+            parent = parent,
+            route = CrawlRoute(),
+            runLevel = if (isRoot) {
+                RunLevelState(
+                    sessionId = "session-1000",
+                    startedAt = 1_000L,
+                    finishedAt = null,
+                    status = CrawlRunStatus.IN_PROGRESS,
+                    maxDepthReached = depth,
+                )
+            } else {
+                null
+            },
+            edgesByElement = edgesByElement,
+        )
+        val baseName = "${screenId}_${ScreenNaming.toFileBase(screenName)}"
+        File(dir, "$baseName.html").writeText("<html></html>", Charsets.UTF_8)
+        File(dir, "$baseName.xml").writeText(
+            AccessibilityXmlSerializer.serialize(snapshot, crawlState),
+            Charsets.UTF_8,
         )
     }
 
@@ -2760,11 +3360,16 @@ class DeepCrawlCoordinatorTest {
             pendingDelayedTransition = null
         }
 
-        fun snapshotForRoot(root: AccessibilityNodeSnapshot): ScreenSnapshot {
+        fun snapshotForRoot(
+            root: AccessibilityNodeSnapshot,
+            preferredName: String? = null,
+        ): ScreenSnapshot {
             val screenId = root.viewIdResourceName?.substringAfterLast('/') ?: error("Missing fake screen id.")
             val screen = screens.getValue(screenId)
+            preferredNameByScreenId[screenId] = preferredName
+            val effectiveName = preferredName?.takeIf { it.isNotBlank() } ?: screen.screenName
             return ScreenSnapshot(
-                screenName = screen.screenName,
+                screenName = effectiveName,
                 packageName = screen.packageName,
                 elements = screen.elements,
                 xmlDump = """<screen id="$screenId" package="${screen.packageName}" />""",
@@ -2778,6 +3383,8 @@ class DeepCrawlCoordinatorTest {
                 scrollStepCount = 1,
             )
         }
+
+        val preferredNameByScreenId: MutableMap<String, String?> = mutableMapOf()
 
         private fun rootFor(
             screenId: String,

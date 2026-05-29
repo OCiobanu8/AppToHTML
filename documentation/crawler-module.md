@@ -88,6 +88,11 @@ skipped traversal outcomes.
 11. The user can continue or stop and save for checkpoint pauses; external-package boundaries can be continued or skipped.
 12. AppToHTML is brought back to the foreground when the crawl completes or aborts.
 
+External-package boundary handling stamps the originating edge XML with the
+observed destination package. This keeps skipped, approved, captured, linked,
+and already-allowed cross-package edges auditable from the per-screen XML even
+when manifest JSON remains unchanged.
+
 ## Settling behavior
 
 Scroll viewport settling and clicked-destination settling solve different

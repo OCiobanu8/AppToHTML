@@ -84,11 +84,13 @@ object ScreenNaming {
         eventClassName: String?,
         selectedApp: SelectedAppRef,
         root: AccessibilityNodeSnapshot? = null,
+        preferredName: String? = null,
     ): String {
         return analyzeScreenName(
             eventClassName = eventClassName,
             selectedApp = selectedApp,
             root = root,
+            preferredName = preferredName,
         ).chosenName
     }
 
@@ -141,7 +143,23 @@ object ScreenNaming {
         eventClassName: String?,
         selectedApp: SelectedAppRef,
         root: AccessibilityNodeSnapshot? = null,
+        preferredName: String? = null,
     ): ScreenNameDebugInfo {
+        val frozenName = preferredName?.trim()?.takeIf { it.isNotBlank() }
+        if (frozenName != null) {
+            return debugInfo(
+                chosenName = frozenName,
+                chosenStrategy = "preferred_name",
+                chosenScore = null,
+                eventClassName = eventClassName,
+                eventClassCandidate = null,
+                textCandidates = emptyList(),
+                resourceIdCandidate = null,
+                root = root,
+                packageName = root?.packageName ?: selectedApp.packageName,
+            )
+        }
+
         val eventName = eventClassName
             ?.takeIf(::isUsefulWindowClassName)
             ?.substringAfterLast('.')
@@ -556,7 +574,7 @@ object ScreenNaming {
             .lowercase(Locale.US)
     }
 
-    private fun normalizeIdentityToken(value: String?): String {
+    internal fun normalizeIdentityToken(value: String?): String {
         return value
             .orEmpty()
             .trim()

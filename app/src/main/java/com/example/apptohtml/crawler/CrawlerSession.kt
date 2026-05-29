@@ -39,7 +39,27 @@ object CrawlerSession {
     }
 
     @Synchronized
-    fun startCapture(context: Context, selectedApp: SelectedAppRef) {
+    fun startCapture(
+        context: Context,
+        selectedApp: SelectedAppRef,
+        crawlStartIntent: CrawlStartIntent = CrawlStartIntent.RESUME,
+        resumeMode: ResumeMode = ResumeMode.ContinueAuto,
+    ) {
+        startCrawl(
+            context = context,
+            selectedApp = selectedApp,
+            crawlStartIntent = crawlStartIntent,
+            resumeMode = resumeMode,
+        )
+    }
+
+    @Synchronized
+    fun startCrawl(
+        context: Context,
+        selectedApp: SelectedAppRef,
+        crawlStartIntent: CrawlStartIntent = CrawlStartIntent.RESUME,
+        resumeMode: ResumeMode = ResumeMode.ContinueAuto,
+    ) {
         timeoutJob?.cancel()
         appContext = context.applicationContext
 
@@ -53,8 +73,13 @@ object CrawlerSession {
             requestId = requestId,
             selectedApp = selectedApp,
             alreadyRunning = alreadyRunning,
+            crawlStartIntent = crawlStartIntent,
+            resumeMode = resumeMode,
         )
-        DiagnosticLogger.log("Starting deep crawl for ${selectedApp.packageName}; requestId=$requestId")
+        DiagnosticLogger.log(
+            "Starting deep crawl for ${selectedApp.packageName}; requestId=$requestId " +
+                "intent=${crawlStartIntent.name.lowercase()} resumeMode=${resumeMode.toSessionLogString()}"
+        )
 
         val launchResult = AppLaunchHelper.launchSelectedApp(
             context = context,
@@ -322,4 +347,10 @@ object CrawlerSession {
             DiagnosticLogger.log(message)
         }
     }
+}
+
+private fun ResumeMode.toSessionLogString(): String = when (this) {
+    ResumeMode.ContinueAuto -> "continue_auto"
+    is ResumeMode.ResumeFromScreen -> "resume_from_screen:$screenId"
+    is ResumeMode.ReExpand -> "re_expand:$screenId"
 }

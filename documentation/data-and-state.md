@@ -65,6 +65,8 @@ The accessibility service keeps short-lived runtime facts such as:
   - scroll-step count
   - per-step node tree snapshots
   - safety-relevant flags such as `checkable` and `editable`
+  - crawl edge metadata, including structured `external-package` values for
+    cross-package destinations
 
 ### Crawl manifest
 
