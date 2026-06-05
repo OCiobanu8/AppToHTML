@@ -56,6 +56,8 @@ The accessibility service keeps short-lived runtime facts such as:
 
 - One merged HTML file per captured screen.
 - Focused on pressable elements and user-readable labels.
+- Each button `<a>` carries a `fingerprint="..."` attribute (the element's
+  `ElementFingerprint`) for inspection and cross-referencing with the XML.
 
 ### XML output
 
@@ -65,6 +67,9 @@ The accessibility service keeps short-lived runtime facts such as:
   - scroll-step count
   - per-step node tree snapshots
   - safety-relevant flags such as `checkable` and `editable`
+  - a `fingerprint="..."` attribute on the merged `<element>` and on every
+    pressable `<node>` (raw scroll-step trees and the synthetic merged tree);
+    inspection-only, identity is recomputed from fields on load
   - crawl edge metadata, including structured `external-package` values for
     cross-package destinations
 

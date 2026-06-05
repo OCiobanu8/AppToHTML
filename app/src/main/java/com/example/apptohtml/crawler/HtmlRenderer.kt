@@ -74,8 +74,9 @@ $elementMarkup
         val resourceId = escapeAttribute(element.resourceId.orEmpty())
         val className = escapeAttribute(element.className.orEmpty())
         val bounds = escapeAttribute(element.bounds)
+        val fingerprint = escapeAttribute(ElementFingerprint.of(element).encoded)
         val label = escape(element.label)
-        return """<a href="$resolvedHref" data-resource-id="$resourceId" data-class-name="$className" data-bounds="$bounds">$label</a>"""
+        return """<a href="$resolvedHref" data-resource-id="$resourceId" data-class-name="$className" data-bounds="$bounds" fingerprint="$fingerprint">$label</a>"""
     }
 
     private fun escape(input: String): String = buildString(input.length) {

@@ -1,15 +1,18 @@
 package com.example.apptohtml.crawler
 
 internal object ReplayFingerprintCodec {
-    private const val ELEMENT_FIELD_COUNT = 7
+    private const val ELEMENT_FIELD_COUNT = 6
 
+    // Field order MUST match ElementFingerprint.encoded (resourceId, label, className, isListItem,
+    // checkable, editable) — the logical replay fingerprint produced by
+    // ScrollScanCoordinator.buildElementFingerprint is encoded that way, and this codec only
+    // serializes/round-trips that exact string through XML. `checked` is not part of identity.
     data class ElementFields(
-        val label: String,
         val resourceId: String,
+        val label: String,
         val className: String,
         val isListItem: String,
         val checkable: String,
-        val checked: String,
         val editable: String,
     )
 
@@ -21,12 +24,11 @@ internal object ReplayFingerprintCodec {
     fun encode(rootClass: String, elements: List<ElementFields>): String {
         val encodedElements = elements.joinToString("||") { e ->
             listOf(
-                e.label,
                 e.resourceId,
+                e.label,
                 e.className,
                 e.isListItem,
                 e.checkable,
-                e.checked,
                 e.editable,
             ).joinToString("|")
         }
@@ -55,13 +57,12 @@ internal object ReplayFingerprintCodec {
             if (index + ELEMENT_FIELD_COUNT > tokens.size) return null
             val fields = tokens.subList(index, index + ELEMENT_FIELD_COUNT)
             elements += ElementFields(
-                label = fields[0],
-                resourceId = fields[1],
+                resourceId = fields[0],
+                label = fields[1],
                 className = fields[2],
                 isListItem = fields[3],
                 checkable = fields[4],
-                checked = fields[5],
-                editable = fields[6],
+                editable = fields[5],
             )
             index += ELEMENT_FIELD_COUNT
             if (index < tokens.size) {

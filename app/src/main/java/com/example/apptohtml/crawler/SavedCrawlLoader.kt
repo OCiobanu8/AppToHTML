@@ -130,6 +130,9 @@ object SavedCrawlLoader {
                     childScreenName = edgeView.childScreenName,
                     approval = edgeView.approval,
                     externalPackage = edgeView.externalPackage,
+                    isListItem = element.isListItem,
+                    checkable = element.checkable,
+                    editable = element.editable,
                 )
                 CrawlRunTracker.parseEdgeSequence(edgeView.edgeId)?.let { seq ->
                     if (seq > maxEdgeSeq) maxEdgeSeq = seq

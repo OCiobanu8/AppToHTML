@@ -113,7 +113,7 @@ object AccessibilityTreeSnapshotter {
         }
     }
 
-    private fun resolveElementLabel(node: AccessibilityNodeSnapshot): String {
+    internal fun resolveElementLabel(node: AccessibilityNodeSnapshot): String {
         directLabel(node)?.let { return it }
         findNestedTitleLabel(node.children)?.let { return it }
         findNestedTextLabel(node.children)?.let { return it }
@@ -156,12 +156,22 @@ object AccessibilityTreeSnapshotter {
 
     private fun isInsideListLikeContainer(ancestorChain: List<AccessibilityNodeSnapshot>): Boolean {
         return ancestorChain.any { ancestor ->
-            val className = ancestor.className.orEmpty()
-            className.contains("RecyclerView") ||
-                className.contains("ListView") ||
-                className.contains("GridView") ||
-                (ancestor.scrollable && className.endsWith("LinearLayout"))
+            isListLikeContainerClass(ancestor.className, ancestor.scrollable)
         }
+    }
+
+    /**
+     * Whether a container node counts as "list-like" for the purpose of marking its descendants as
+     * list items. Shared with the live click-replay path ([AppToHtmlAccessibilityService]) so the
+     * snapshot-time and replay-time `isListItem` flags — and therefore the [ElementFingerprint] —
+     * are computed identically.
+     */
+    internal fun isListLikeContainerClass(className: String?, scrollable: Boolean): Boolean {
+        val name = className.orEmpty()
+        return name.contains("RecyclerView") ||
+            name.contains("ListView") ||
+            name.contains("GridView") ||
+            (scrollable && name.endsWith("LinearLayout"))
     }
 
     private fun collectScrollableCandidates(

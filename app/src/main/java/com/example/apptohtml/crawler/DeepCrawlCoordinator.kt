@@ -1840,12 +1840,7 @@ internal class DeepCrawlCoordinator(
     }
 
     private fun matchesElement(edge: CrawlEdgeRecord, element: PressableElement): Boolean {
-        return edge.label == element.label &&
-            edge.resourceId == element.resourceId &&
-            edge.bounds == element.bounds &&
-            edge.className == element.className &&
-            edge.childIndexPath == element.childIndexPath &&
-            edge.firstSeenStep == element.firstSeenStep
+        return ElementFingerprint.of(edge) == ElementFingerprint.of(element)
     }
 
     private fun entryScreenResetFailureMessage(outcome: EntryScreenResetOutcome): String {

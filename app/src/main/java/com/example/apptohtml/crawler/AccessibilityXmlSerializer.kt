@@ -236,7 +236,6 @@ object AccessibilityXmlSerializer {
             builder.append(""" class="${escape(element.className)}"""")
             builder.append(""" list-item="${escape(element.isListItem)}"""")
             builder.append(""" checkable="${escape(element.checkable)}"""")
-            builder.append(""" checked="${escape(element.checked)}"""")
             builder.append(""" editable="${escape(element.editable)}"""")
             builder.append(" />")
             builder.append('\n')
@@ -246,7 +245,12 @@ object AccessibilityXmlSerializer {
         builder.append('\n')
     }
 
-    private fun appendNode(builder: StringBuilder, node: AccessibilityNodeSnapshot, depth: Int) {
+    private fun appendNode(
+        builder: StringBuilder,
+        node: AccessibilityNodeSnapshot,
+        depth: Int,
+        ancestors: List<AccessibilityNodeSnapshot> = emptyList(),
+    ) {
         val indent = "  ".repeat(depth)
         builder.append(indent)
         builder.append("<node")
@@ -264,6 +268,9 @@ object AccessibilityXmlSerializer {
         builder.append(""" enabled="${node.enabled}"""")
         builder.append(""" visible-to-user="${node.visibleToUser}"""")
         builder.append(""" bounds="${escape(node.bounds)}"""")
+        if (node.visibleToUser && (node.clickable || node.supportsClickAction)) {
+            builder.append(""" fingerprint="${escape(nodeFingerprint(node, ancestors))}"""")
+        }
         if (node.synthetic) {
             builder.append(""" synthetic="true"""")
         }
@@ -287,12 +294,35 @@ object AccessibilityXmlSerializer {
 
         builder.append(">")
         builder.append('\n')
+        val childAncestors = ancestors + node
         node.children.forEach { child ->
-            appendNode(builder, child, depth + 1)
+            appendNode(builder, child, depth + 1, childAncestors)
         }
         builder.append(indent)
         builder.append("</node>")
         builder.append('\n')
+    }
+
+    /**
+     * Fingerprint for a raw/synthetic `<node>` — only meaningful for pressable nodes. Reuses the
+     * exact label resolution and list-item predicate that `collectPressableElements` uses, so the
+     * node-level `fingerprint` equals the merged `<element>` fingerprint for the same button.
+     */
+    private fun nodeFingerprint(
+        node: AccessibilityNodeSnapshot,
+        ancestors: List<AccessibilityNodeSnapshot>,
+    ): String {
+        val isListItem = ancestors.any { ancestor ->
+            AccessibilityTreeSnapshotter.isListLikeContainerClass(ancestor.className, ancestor.scrollable)
+        }
+        return ElementFingerprint.ofFields(
+            label = AccessibilityTreeSnapshotter.resolveElementLabel(node),
+            resourceId = node.viewIdResourceName,
+            className = node.className,
+            isListItem = isListItem,
+            checkable = node.checkable,
+            editable = node.editable,
+        ).encoded
     }
 
     private fun appendMergedElements(
@@ -326,6 +356,7 @@ object AccessibilityXmlSerializer {
             builder.append(""" checked="${element.checked}"""")
             builder.append(""" editable="${element.editable}"""")
             builder.append(""" first-seen-step="${element.firstSeenStep}"""")
+            builder.append(""" fingerprint="${escape(ElementFingerprint.of(element).encoded)}"""")
             val edge = edgesByElement?.get(element.toLinkKey())
             if (edge == null) {
                 builder.append(" />")

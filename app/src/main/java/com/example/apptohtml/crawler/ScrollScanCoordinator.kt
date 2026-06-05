@@ -309,15 +309,8 @@ internal class ScrollScanCoordinator(
         )
     }
 
-    private fun mergedElementFingerprint(element: PressableElement): String {
-        return listOf(
-            element.label,
-            element.resourceId.orEmpty(),
-            element.className.orEmpty(),
-            element.isListItem.toString(),
-            element.checkable.toString(),
-            element.editable.toString(),
-        ).joinToString("|")
+    private fun mergedElementFingerprint(element: PressableElement): ElementFingerprint {
+        return ElementFingerprint.of(element)
     }
 
     private fun buildViewportFingerprint(
@@ -357,18 +350,11 @@ internal class ScrollScanCoordinator(
         element: PressableElement,
         includeBounds: Boolean,
     ): String {
-        return buildList {
-            add(element.label)
-            add(element.resourceId.orEmpty())
-            add(element.className.orEmpty())
-            add(element.isListItem.toString())
-            add(element.checkable.toString())
-            add(element.checked.toString())
-            add(element.editable.toString())
-            if (includeBounds) {
-                add(element.bounds)
-            }
-        }.joinToString("|")
+        val base = ElementFingerprint.of(element).encoded
+        // The geometry-sensitive variant keeps bounds as a trailing field for loop detection only;
+        // the logical variant is the canonical replay fingerprint and must stay byte-identical to
+        // ReplayFingerprintCodec's per-element encoding.
+        return if (includeBounds) "$base|${element.bounds}" else base
     }
 
     private fun looksLikeEntryBackAffordance(element: PressableElement): Boolean {
@@ -585,7 +571,7 @@ internal class ScrollScanAccumulator(
         preferredName = preferredName,
     )
     private val packageName = initialRoot.packageName ?: selectedApp.packageName
-    private val mergedElements = LinkedHashMap<MergedElementKey, PressableElement>()
+    private val mergedElements = LinkedHashMap<ElementFingerprint, PressableElement>()
     private val stepSnapshots = mutableListOf<ScrollCaptureStep>()
 
     val stepCount: Int
@@ -641,25 +627,7 @@ internal class ScrollScanAccumulator(
         )
     }
 
-    private fun toMergedKey(element: PressableElement): MergedElementKey {
-        return MergedElementKey(
-            label = element.label,
-            resourceId = element.resourceId,
-            className = element.className,
-            isListItem = element.isListItem,
-            checkable = element.checkable,
-            checked = element.checked,
-            editable = element.editable,
-        )
+    private fun toMergedKey(element: PressableElement): ElementFingerprint {
+        return ElementFingerprint.of(element)
     }
-
-    private data class MergedElementKey(
-        val label: String,
-        val resourceId: String?,
-        val className: String?,
-        val isListItem: Boolean,
-        val checkable: Boolean,
-        val checked: Boolean,
-        val editable: Boolean,
-    )
 }

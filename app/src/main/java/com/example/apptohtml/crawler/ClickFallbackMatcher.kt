@@ -1,30 +1,15 @@
 package com.example.apptohtml.crawler
 
-import kotlin.math.abs
-
+/**
+ * Re-locates a previously seen element among the live clickable candidates during replay, when the
+ * recorded `childIndexPath` no longer resolves.
+ *
+ * Identity is purely semantic: a candidate is eligible iff its [ElementFingerprint] equals the
+ * target's. There is no geometry — no bounds, no tolerance — so a candidate matches regardless of
+ * where it has moved on screen, and never matches merely because it shares a generic resource id
+ * (the label is part of the fingerprint).
+ */
 internal object ClickFallbackMatcher {
-    const val DEFAULT_BOUNDS_TOLERANCE_PX = 24
-
-    private val BOUNDS_REGEX = Regex("\\[(\\d+),(\\d+)]\\[(\\d+),(\\d+)]")
-
-    data class Bounds(
-        val left: Int,
-        val top: Int,
-        val right: Int,
-        val bottom: Int,
-    ) {
-        companion object {
-            fun parse(value: String): Bounds? {
-                val match = BOUNDS_REGEX.matchEntire(value) ?: return null
-                return Bounds(
-                    left = match.groupValues[1].toInt(),
-                    top = match.groupValues[2].toInt(),
-                    right = match.groupValues[3].toInt(),
-                    bottom = match.groupValues[4].toInt(),
-                )
-            }
-        }
-    }
 
     data class Candidate<T>(
         val handle: T,
@@ -32,29 +17,18 @@ internal object ClickFallbackMatcher {
         val enabled: Boolean,
         val clickable: Boolean,
         val supportsClickAction: Boolean,
-        val resolvedLabel: String?,
-        val resourceId: String?,
-        val className: String?,
-        val bounds: Bounds?,
-        val checkable: Boolean,
-        val checked: Boolean,
+        val fingerprint: ElementFingerprint,
         val depth: Int,
     )
 
     data class Target(
-        val label: String,
-        val resourceId: String?,
-        val className: String?,
-        val bounds: String,
-        val checkable: Boolean,
-        val checked: Boolean,
+        val fingerprint: ElementFingerprint,
     )
 
     enum class EligibilityReason {
         RESOURCE_ID_MATCH,
         LABEL_MATCH,
-        CLASS_PLUS_BOUNDS_MATCH,
-        BOUNDS_ICON_MATCH,
+        CLASS_MATCH,
     }
 
     data class Match<T>(
@@ -66,57 +40,35 @@ internal object ClickFallbackMatcher {
     fun <T> selectMatches(
         candidates: List<Candidate<T>>,
         target: Target,
-        boundsTolerancePx: Int = DEFAULT_BOUNDS_TOLERANCE_PX,
     ): List<Match<T>> {
-        val targetBounds = Bounds.parse(target.bounds)
         return candidates.mapNotNull { candidate ->
-            evaluate(candidate, target, targetBounds, boundsTolerancePx)
+            evaluate(candidate, target)
         }.sortedByDescending { it.rankScore }
     }
 
     private fun <T> evaluate(
         candidate: Candidate<T>,
         target: Target,
-        targetBounds: Bounds?,
-        boundsTolerancePx: Int,
     ): Match<T>? {
         if (!candidate.visible || !candidate.enabled) return null
         if (!candidate.clickable && !candidate.supportsClickAction) return null
+        if (candidate.fingerprint != target.fingerprint) return null
 
-        val resourceIdMatch = !target.resourceId.isNullOrBlank() &&
-            !candidate.resourceId.isNullOrBlank() &&
-            candidate.resourceId == target.resourceId
-
-        val labelMatch = target.label.isNotBlank() &&
-            !candidate.resolvedLabel.isNullOrBlank() &&
-            candidate.resolvedLabel == target.label
-
-        val classMatch = !target.className.isNullOrBlank() &&
-            !candidate.className.isNullOrBlank() &&
-            candidate.className == target.className
-
-        val boundsCompatible = targetBounds != null &&
-            candidate.bounds != null &&
-            isBoundsCompatible(candidate.bounds, targetBounds, boundsTolerancePx)
-
-        val classPlusBounds = classMatch && boundsCompatible
-        val boundsIconMatch = target.label.isBlank() && boundsCompatible
+        val hasResourceId = target.fingerprint.resourceId != null
+        val hasLabel = target.fingerprint.label.isNotBlank()
 
         val eligibilityReason = when {
-            resourceIdMatch -> EligibilityReason.RESOURCE_ID_MATCH
-            labelMatch -> EligibilityReason.LABEL_MATCH
-            classPlusBounds -> EligibilityReason.CLASS_PLUS_BOUNDS_MATCH
-            boundsIconMatch -> EligibilityReason.BOUNDS_ICON_MATCH
-            else -> return null
+            hasResourceId -> EligibilityReason.RESOURCE_ID_MATCH
+            hasLabel -> EligibilityReason.LABEL_MATCH
+            else -> EligibilityReason.CLASS_MATCH
         }
 
+        // All eligible candidates share the target fingerprint, so the resourceId/label terms are
+        // constant across them; depth is the real tie-breaker (shallower wins). The absolute score
+        // still communicates match strength in diagnostics.
         var rankScore = 0
-        if (resourceIdMatch) rankScore += 1_000
-        if (labelMatch) rankScore += 700
-        if (classMatch) rankScore += 300
-        if (boundsCompatible) rankScore += 200
-        if (candidate.checkable == target.checkable) rankScore += 75
-        if (candidate.checked == target.checked) rankScore += 25
+        if (hasResourceId) rankScore += 1_000
+        if (hasLabel) rankScore += 700
         rankScore += (100 - candidate.depth)
 
         return Match(
@@ -124,16 +76,5 @@ internal object ClickFallbackMatcher {
             eligibilityReason = eligibilityReason,
             rankScore = rankScore,
         )
-    }
-
-    private fun isBoundsCompatible(
-        candidate: Bounds,
-        target: Bounds,
-        tolerancePx: Int,
-    ): Boolean {
-        return abs(candidate.left - target.left) <= tolerancePx &&
-            abs(candidate.top - target.top) <= tolerancePx &&
-            abs(candidate.right - target.right) <= tolerancePx &&
-            abs(candidate.bottom - target.bottom) <= tolerancePx
     }
 }

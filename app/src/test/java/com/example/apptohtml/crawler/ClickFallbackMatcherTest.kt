@@ -1,289 +1,194 @@
 package com.example.apptohtml.crawler
 
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class ClickFallbackMatcherTest {
+
     @Test
-    fun doesNotMatchUnrelatedCarrierRowForNetworkInternet() {
-        val target = ClickFallbackMatcher.Target(
+    fun doesNotMatchUnrelatedRowWithDifferentLabel() {
+        val target = target(
             label = "Network & internet",
             resourceId = "com.android.settings:id/title",
             className = "android.widget.TextView",
-            bounds = "[64,256][1000,360]",
-            checkable = false,
-            checked = false,
         )
-        val unrelatedCandidate = candidate(
+        // Shares the generic .../title resource id but has a different label -> different fingerprint.
+        val unrelated = candidate(
             handle = "tmobileRow",
-            resolvedLabel = "T-Mobile",
-            resourceId = "com.android.settings:id/carrier_name",
-            className = "android.widget.TextView",
-            bounds = ClickFallbackMatcher.Bounds(64, 1024, 1000, 1128),
+            fingerprint = fingerprint(
+                label = "T-Mobile",
+                resourceId = "com.android.settings:id/title",
+                className = "android.widget.TextView",
+            ),
             depth = 7,
         )
 
-        val matches = ClickFallbackMatcher.selectMatches(
-            candidates = listOf(unrelatedCandidate),
-            target = target,
-        )
+        val matches = ClickFallbackMatcher.selectMatches(listOf(unrelated), target)
 
         assertTrue(matches.isEmpty())
     }
 
     @Test
-    fun matchesSameLabelAfterPathShift() {
-        val target = ClickFallbackMatcher.Target(
+    fun matchesSameElementRegardlessOfPosition() {
+        val target = target(
             label = "Display",
             resourceId = "com.android.settings:id/title",
             className = "android.widget.TextView",
-            bounds = "[64,512][1000,616]",
-            checkable = false,
-            checked = false,
         )
-        val shiftedCandidate = candidate(
-            handle = "shiftedDisplay",
-            resolvedLabel = "Display",
-            resourceId = "com.android.settings:id/title",
-            className = "android.widget.TextView",
-            bounds = ClickFallbackMatcher.Bounds(64, 612, 1000, 716),
+        val display = candidate(
+            handle = "display",
+            fingerprint = fingerprint(
+                label = "Display",
+                resourceId = "com.android.settings:id/title",
+                className = "android.widget.TextView",
+            ),
             depth = 5,
         )
-        val unrelatedCandidate = candidate(
-            handle = "soundRow",
-            resolvedLabel = "Sound",
-            resourceId = "com.android.settings:id/title",
-            className = "android.widget.TextView",
-            bounds = ClickFallbackMatcher.Bounds(64, 800, 1000, 904),
+        // Same generic resource id, different label -> NOT a match (semantic identity is stricter
+        // than the old resourceId-only match).
+        val sound = candidate(
+            handle = "sound",
+            fingerprint = fingerprint(
+                label = "Sound",
+                resourceId = "com.android.settings:id/title",
+                className = "android.widget.TextView",
+            ),
             depth = 5,
         )
 
-        val matches = ClickFallbackMatcher.selectMatches(
-            candidates = listOf(unrelatedCandidate, shiftedCandidate),
-            target = target,
-        )
+        val matches = ClickFallbackMatcher.selectMatches(listOf(sound, display), target)
 
-        assertEquals(2, matches.size)
-        assertEquals("shiftedDisplay", matches.first().candidate.handle)
+        assertEquals(1, matches.size)
+        assertEquals("display", matches.first().candidate.handle)
         assertEquals(ClickFallbackMatcher.EligibilityReason.RESOURCE_ID_MATCH, matches.first().eligibilityReason)
     }
 
     @Test
-    fun matchesIconOnlyByStrongBoundsAndClass() {
-        val target = ClickFallbackMatcher.Target(
-            label = "",
-            resourceId = null,
-            className = "android.widget.ImageView",
-            bounds = "[900,128][996,224]",
-            checkable = false,
-            checked = false,
-        )
-        val iconCandidate = candidate(
+    fun matchesUnlabeledIconByClassFingerprint() {
+        val target = target(label = "", resourceId = null, className = "android.widget.ImageView")
+        val icon = candidate(
             handle = "icon",
-            resolvedLabel = null,
-            resourceId = null,
-            className = "android.widget.ImageView",
-            bounds = ClickFallbackMatcher.Bounds(905, 130, 999, 222),
+            fingerprint = fingerprint(label = "", resourceId = null, className = "android.widget.ImageView"),
             depth = 4,
         )
 
-        val matches = ClickFallbackMatcher.selectMatches(
-            candidates = listOf(iconCandidate),
-            target = target,
-        )
+        val matches = ClickFallbackMatcher.selectMatches(listOf(icon), target)
 
         assertEquals(1, matches.size)
-        val match = matches.first()
-        assertEquals(ClickFallbackMatcher.EligibilityReason.CLASS_PLUS_BOUNDS_MATCH, match.eligibilityReason)
+        assertEquals(ClickFallbackMatcher.EligibilityReason.CLASS_MATCH, matches.first().eligibilityReason)
     }
 
     @Test
-    fun matchesUnlabeledIconByBoundsAloneEvenWithoutClassMatch() {
-        val target = ClickFallbackMatcher.Target(
-            label = "",
-            resourceId = null,
-            className = null,
-            bounds = "[900,128][996,224]",
-            checkable = false,
-            checked = false,
-        )
-        val iconCandidate = candidate(
+    fun doesNotMatchUnlabeledIconWithDifferentClass() {
+        // Without bounds, a differing class is a differing fingerprint -> no match (stricter than
+        // the old bounds-alone icon match).
+        val target = target(label = "", resourceId = null, className = "android.widget.ImageView")
+        val icon = candidate(
             handle = "icon",
-            resolvedLabel = null,
-            resourceId = null,
-            className = "android.view.View",
-            bounds = ClickFallbackMatcher.Bounds(905, 130, 999, 222),
+            fingerprint = fingerprint(label = "", resourceId = null, className = "android.view.View"),
             depth = 4,
         )
 
-        val matches = ClickFallbackMatcher.selectMatches(
-            candidates = listOf(iconCandidate),
-            target = target,
-        )
-
-        assertEquals(1, matches.size)
-        assertEquals(ClickFallbackMatcher.EligibilityReason.BOUNDS_ICON_MATCH, matches.first().eligibilityReason)
-    }
-
-    @Test
-    fun rejectsClassOnlyAndCheckStateOnly() {
-        val target = ClickFallbackMatcher.Target(
-            label = "Wi-Fi",
-            resourceId = "com.android.settings:id/title",
-            className = "android.widget.Switch",
-            bounds = "[64,512][1000,616]",
-            checkable = true,
-            checked = true,
-        )
-        val classOnly = candidate(
-            handle = "classOnly",
-            resolvedLabel = "Different",
-            resourceId = "com.android.settings:id/other",
-            className = "android.widget.Switch",
-            bounds = ClickFallbackMatcher.Bounds(64, 1200, 1000, 1304),
-            checkable = true,
-            checked = true,
-            depth = 6,
-        )
-        val checkStateOnly = candidate(
-            handle = "checkStateOnly",
-            resolvedLabel = "Different",
-            resourceId = null,
-            className = "android.widget.TextView",
-            bounds = ClickFallbackMatcher.Bounds(64, 1400, 1000, 1504),
-            checkable = true,
-            checked = true,
-            depth = 7,
-        )
-
-        val matches = ClickFallbackMatcher.selectMatches(
-            candidates = listOf(classOnly, checkStateOnly),
-            target = target,
-        )
+        val matches = ClickFallbackMatcher.selectMatches(listOf(icon), target)
 
         assertTrue(matches.isEmpty())
+    }
+
+    @Test
+    fun usesLabelMatchReasonWhenNoResourceId() {
+        val target = target(label = "Save", resourceId = null, className = "android.widget.Button")
+        val save = candidate(
+            handle = "save",
+            fingerprint = fingerprint(label = "Save", resourceId = null, className = "android.widget.Button"),
+            depth = 3,
+        )
+
+        val matches = ClickFallbackMatcher.selectMatches(listOf(save), target)
+
+        assertEquals(1, matches.size)
+        assertEquals(ClickFallbackMatcher.EligibilityReason.LABEL_MATCH, matches.first().eligibilityReason)
     }
 
     @Test
     fun rejectsInvisibleDisabledOrNonClickableCandidates() {
-        val target = ClickFallbackMatcher.Target(
+        val fp = fingerprint(
             label = "Display",
             resourceId = "com.android.settings:id/title",
             className = "android.widget.TextView",
-            bounds = "[64,512][1000,616]",
-            checkable = false,
-            checked = false,
         )
-        val invisible = candidate(
-            handle = "invisible",
-            visible = false,
-            resolvedLabel = "Display",
-            resourceId = "com.android.settings:id/title",
-            className = "android.widget.TextView",
-            bounds = ClickFallbackMatcher.Bounds(64, 512, 1000, 616),
-            depth = 4,
-        )
-        val disabled = candidate(
-            handle = "disabled",
-            enabled = false,
-            resolvedLabel = "Display",
-            resourceId = "com.android.settings:id/title",
-            className = "android.widget.TextView",
-            bounds = ClickFallbackMatcher.Bounds(64, 512, 1000, 616),
-            depth = 4,
-        )
+        val target = ClickFallbackMatcher.Target(fp)
+        val invisible = candidate(handle = "invisible", fingerprint = fp, visible = false, depth = 4)
+        val disabled = candidate(handle = "disabled", fingerprint = fp, enabled = false, depth = 4)
         val unclickable = candidate(
             handle = "unclickable",
+            fingerprint = fp,
             clickable = false,
             supportsClickAction = false,
-            resolvedLabel = "Display",
-            resourceId = "com.android.settings:id/title",
-            className = "android.widget.TextView",
-            bounds = ClickFallbackMatcher.Bounds(64, 512, 1000, 616),
             depth = 4,
         )
 
-        val matches = ClickFallbackMatcher.selectMatches(
-            candidates = listOf(invisible, disabled, unclickable),
-            target = target,
-        )
+        val matches = ClickFallbackMatcher.selectMatches(listOf(invisible, disabled, unclickable), target)
 
         assertTrue(matches.isEmpty())
     }
 
     @Test
-    fun ranksDeeperResolvedCandidatesLowerThanShallowAfterEligibility() {
-        val target = ClickFallbackMatcher.Target(
+    fun ranksShallowerCandidatesAboveDeeperAmongEqualFingerprints() {
+        val fp = fingerprint(
             label = "Display",
             resourceId = "com.android.settings:id/title",
             className = "android.widget.TextView",
-            bounds = "[64,512][1000,616]",
-            checkable = false,
-            checked = false,
         )
-        val shallow = candidate(
-            handle = "shallow",
-            resolvedLabel = "Display",
-            resourceId = "com.android.settings:id/title",
-            className = "android.widget.TextView",
-            bounds = ClickFallbackMatcher.Bounds(64, 512, 1000, 616),
-            depth = 3,
-        )
-        val deep = candidate(
-            handle = "deep",
-            resolvedLabel = "Display",
-            resourceId = "com.android.settings:id/title",
-            className = "android.widget.TextView",
-            bounds = ClickFallbackMatcher.Bounds(64, 512, 1000, 616),
-            depth = 9,
-        )
+        val target = ClickFallbackMatcher.Target(fp)
+        val shallow = candidate(handle = "shallow", fingerprint = fp, depth = 3)
+        val deep = candidate(handle = "deep", fingerprint = fp, depth = 9)
 
-        val matches = ClickFallbackMatcher.selectMatches(
-            candidates = listOf(deep, shallow),
-            target = target,
-        )
+        val matches = ClickFallbackMatcher.selectMatches(listOf(deep, shallow), target)
 
         assertEquals(2, matches.size)
         assertEquals("shallow", matches.first().candidate.handle)
         assertEquals("deep", matches.last().candidate.handle)
     }
 
-    @Test
-    fun parsesAndIgnoresInvalidBoundsStrings() {
-        assertNull(ClickFallbackMatcher.Bounds.parse("invalid"))
-        assertNotNull(ClickFallbackMatcher.Bounds.parse("[0,0][10,10]"))
-    }
+    private fun fingerprint(
+        label: String = "",
+        resourceId: String? = null,
+        className: String? = null,
+        isListItem: Boolean = false,
+        checkable: Boolean = false,
+        editable: Boolean = false,
+    ): ElementFingerprint = ElementFingerprint.ofFields(
+        label = label,
+        resourceId = resourceId,
+        className = className,
+        isListItem = isListItem,
+        checkable = checkable,
+        editable = editable,
+    )
+
+    private fun target(
+        label: String,
+        resourceId: String?,
+        className: String?,
+    ): ClickFallbackMatcher.Target =
+        ClickFallbackMatcher.Target(fingerprint(label = label, resourceId = resourceId, className = className))
 
     private fun candidate(
         handle: String,
+        fingerprint: ElementFingerprint,
         visible: Boolean = true,
         enabled: Boolean = true,
         clickable: Boolean = true,
         supportsClickAction: Boolean = true,
-        resolvedLabel: String?,
-        resourceId: String?,
-        className: String?,
-        bounds: ClickFallbackMatcher.Bounds?,
-        checkable: Boolean = false,
-        checked: Boolean = false,
         depth: Int,
-    ): ClickFallbackMatcher.Candidate<String> {
-        return ClickFallbackMatcher.Candidate(
-            handle = handle,
-            visible = visible,
-            enabled = enabled,
-            clickable = clickable,
-            supportsClickAction = supportsClickAction,
-            resolvedLabel = resolvedLabel,
-            resourceId = resourceId,
-            className = className,
-            bounds = bounds,
-            checkable = checkable,
-            checked = checked,
-            depth = depth,
-        )
-    }
+    ): ClickFallbackMatcher.Candidate<String> = ClickFallbackMatcher.Candidate(
+        handle = handle,
+        visible = visible,
+        enabled = enabled,
+        clickable = clickable,
+        supportsClickAction = supportsClickAction,
+        fingerprint = fingerprint,
+        depth = depth,
+    )
 }
