@@ -120,8 +120,15 @@ internal class ScrollScanCoordinator(
 
         while (true) {
             val observedLogicalFingerprint = logicalEntryViewportFingerprint(currentRoot)
-            if (expectedEntryLogicalFingerprint != null &&
-                observedLogicalFingerprint == expectedEntryLogicalFingerprint
+            val entryFingerprintMatch = EntryScreenFingerprintMatcher.match(
+                expectedFingerprint = expectedEntryLogicalFingerprint,
+                observedRoot = currentRoot,
+                targetPackageName = targetPackageName,
+                observedFingerprint = observedLogicalFingerprint,
+            )
+            if (
+                expectedEntryLogicalFingerprint != null &&
+                entryFingerprintMatch.reason == EntryScreenFingerprintMatchReason.EXACT_FINGERPRINT_MATCH
             ) {
                 onProgress("Resetting to the first screen. Matched the captured logical entry screen.")
                 return entryScreenResetResult(
@@ -129,21 +136,31 @@ internal class ScrollScanCoordinator(
                     outcome = EntryScreenResetOutcome.MATCHED_EXPECTED_LOGICAL,
                     observedLogicalFingerprint = observedLogicalFingerprint,
                     expectedLogicalFingerprint = expectedEntryLogicalFingerprint,
+                    entryFingerprintMatch = entryFingerprintMatch,
                 )
             }
 
             if (!EntryScreenBackAffordanceDetector.hasVisibleInAppBackAffordance(currentRoot)) {
-                onProgress("Resetting to the first screen. No visible in-app back button was found.")
-                val outcome = if (expectedEntryLogicalFingerprint == null) {
-                    EntryScreenResetOutcome.NO_BACK_AFFORDANCE_ASSUMED_ENTRY
-                } else {
-                    EntryScreenResetOutcome.EXPECTED_LOGICAL_NOT_FOUND
+                val outcome = when {
+                    expectedEntryLogicalFingerprint == null ->
+                        EntryScreenResetOutcome.NO_BACK_AFFORDANCE_ASSUMED_ENTRY
+                    entryFingerprintMatch.compatible ->
+                        EntryScreenResetOutcome.MATCHED_COMPATIBLE_LOGICAL
+                    else -> EntryScreenResetOutcome.EXPECTED_LOGICAL_NOT_FOUND
                 }
+                onProgress(
+                    if (outcome == EntryScreenResetOutcome.MATCHED_COMPATIBLE_LOGICAL) {
+                        "Resetting to the first screen. Matched a compatible captured logical entry screen."
+                    } else {
+                        "Resetting to the first screen. No visible in-app back button was found."
+                    },
+                )
                 return entryScreenResetResult(
                     root = currentRoot,
                     outcome = outcome,
                     observedLogicalFingerprint = observedLogicalFingerprint,
                     expectedLogicalFingerprint = expectedEntryLogicalFingerprint,
+                    entryFingerprintMatch = entryFingerprintMatch,
                 )
             }
 
@@ -153,6 +170,7 @@ internal class ScrollScanCoordinator(
                     outcome = EntryScreenResetOutcome.MAX_ATTEMPTS_REACHED,
                     observedLogicalFingerprint = observedLogicalFingerprint,
                     expectedLogicalFingerprint = expectedEntryLogicalFingerprint,
+                    entryFingerprintMatch = entryFingerprintMatch,
                 )
             }
 
@@ -164,6 +182,7 @@ internal class ScrollScanCoordinator(
                     outcome = EntryScreenResetOutcome.BACK_ACTION_FAILED,
                     observedLogicalFingerprint = observedLogicalFingerprint,
                     expectedLogicalFingerprint = expectedEntryLogicalFingerprint,
+                    entryFingerprintMatch = entryFingerprintMatch,
                 )
             }
             backAttempts += 1
@@ -174,6 +193,7 @@ internal class ScrollScanCoordinator(
                     outcome = EntryScreenResetOutcome.LEFT_TARGET_APP,
                     observedLogicalFingerprint = observedLogicalFingerprint,
                     expectedLogicalFingerprint = expectedEntryLogicalFingerprint,
+                    entryFingerprintMatch = entryFingerprintMatch,
                 )
             if (nextRoot.packageName != targetPackageName) {
                 return entryScreenResetResult(
@@ -181,6 +201,7 @@ internal class ScrollScanCoordinator(
                     outcome = EntryScreenResetOutcome.LEFT_TARGET_APP,
                     observedLogicalFingerprint = observedLogicalFingerprint,
                     expectedLogicalFingerprint = expectedEntryLogicalFingerprint,
+                    entryFingerprintMatch = entryFingerprintMatch,
                 )
             }
 
@@ -257,6 +278,7 @@ internal class ScrollScanCoordinator(
         outcome: EntryScreenResetOutcome,
         observedLogicalFingerprint: String,
         expectedLogicalFingerprint: String?,
+        entryFingerprintMatch: EntryScreenFingerprintMatch? = null,
     ): EntryScreenResetResult {
         val matchedExpectedLogical = expectedLogicalFingerprint != null &&
             observedLogicalFingerprint == expectedLogicalFingerprint
@@ -267,7 +289,15 @@ internal class ScrollScanCoordinator(
             expectedLogicalFingerprint = expectedLogicalFingerprint,
             matchedExpectedLogical = matchedExpectedLogical,
             verifiedForReplay = outcome == EntryScreenResetOutcome.MATCHED_EXPECTED_LOGICAL ||
+                outcome == EntryScreenResetOutcome.MATCHED_COMPATIBLE_LOGICAL ||
                 outcome == EntryScreenResetOutcome.NO_BACK_AFFORDANCE_ASSUMED_ENTRY,
+            entryFingerprintMatchReason = entryFingerprintMatch?.reason,
+            entryFingerprintOverlapCount = entryFingerprintMatch?.overlapCount ?: 0,
+            entryFingerprintExpectedCount = entryFingerprintMatch?.expectedIdentityCount ?: 0,
+            entryFingerprintObservedCount = entryFingerprintMatch?.observedIdentityCount ?: 0,
+            entryFingerprintExpectedCoverage = entryFingerprintMatch?.expectedCoverage ?: 0.0,
+            entryFingerprintObservedCoverage = entryFingerprintMatch?.observedCoverage ?: 0.0,
+            entryFingerprintDiceSimilarity = entryFingerprintMatch?.diceSimilarity ?: 0.0,
         )
     }
 
@@ -412,10 +442,18 @@ internal data class EntryScreenResetResult(
     val expectedLogicalFingerprint: String?,
     val matchedExpectedLogical: Boolean,
     val verifiedForReplay: Boolean,
+    val entryFingerprintMatchReason: EntryScreenFingerprintMatchReason?,
+    val entryFingerprintOverlapCount: Int,
+    val entryFingerprintExpectedCount: Int,
+    val entryFingerprintObservedCount: Int,
+    val entryFingerprintExpectedCoverage: Double,
+    val entryFingerprintObservedCoverage: Double,
+    val entryFingerprintDiceSimilarity: Double,
 )
 
 internal enum class EntryScreenResetOutcome {
     MATCHED_EXPECTED_LOGICAL,
+    MATCHED_COMPATIBLE_LOGICAL,
     NO_BACK_AFFORDANCE_ASSUMED_ENTRY,
     EXPECTED_LOGICAL_NOT_FOUND,
     BACK_ACTION_FAILED,

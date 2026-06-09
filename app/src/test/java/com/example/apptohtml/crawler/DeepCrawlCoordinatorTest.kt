@@ -550,6 +550,74 @@ class DeepCrawlCoordinatorTest {
     }
 
     @Test
+    fun bfsTraversal_logs_compatible_entry_fingerprint_details() = runBlocking {
+        val tempDir = Files.createTempDirectory("deep-crawl-compatible-entry-log").toFile()
+        val openB = fakeElement("Open B", 0)
+        val openC = fakeElement("Open C", 1)
+        val storage = fakeElement("Storage", 2)
+        try {
+            val host = FakeHost(
+                entryScreenId = "A",
+                screens = mapOf(
+                    "A" to fakeScreen(
+                        id = "A",
+                        screenName = "Screen A",
+                        elements = listOf(openB, openC),
+                        transitions = mapOf(
+                            "Open B" to "B",
+                            "Open C" to "C",
+                        ),
+                        captureVariants = listOf(
+                            fakeScreenVariant(elements = listOf(openB, openC)),
+                            fakeScreenVariant(elements = listOf(openB, openC)),
+                            fakeScreenVariant(elements = listOf(openB, openC)),
+                            fakeScreenVariant(elements = listOf(openB, openC, storage)),
+                        ),
+                    ),
+                    "B" to fakeScreen(
+                        id = "B",
+                        screenName = "Screen B",
+                        elements = emptyList(),
+                        transitions = emptyMap(),
+                    ),
+                    "C" to fakeScreen(
+                        id = "C",
+                        screenName = "Screen C",
+                        elements = emptyList(),
+                        transitions = emptyMap(),
+                    ),
+                ),
+            )
+
+            val outcome = coordinator(host, tempDir).crawl(
+                initialRoot = host.captureCurrentRootSnapshot("com.example.target")!!,
+                eventClassName = "ScreenA",
+            )
+
+            val summary = (outcome as DeepCrawlCoordinator.DeepCrawlOutcome.Completed).summary
+            val crawlLogText = File(summary.manifestFile.parentFile, "crawl.log").readText()
+            val entryRestoreLogText = crawlLogText.lineSequence()
+                .filter { it.contains("entry_restore") }
+                .joinToString("\n")
+
+            assertEquals(1, summary.capturedScreenCount)
+            assertTrue(entryRestoreLogText, crawlLogText.contains("outcome=matched_compatible_logical"))
+            assertTrue(crawlLogText.contains("matchedExpectedLogical=false"))
+            assertTrue(crawlLogText.contains("matchedCompatibleLogical=true"))
+            assertTrue(crawlLogText.contains("entryFingerprintMatchReason=actual_enriches_expected_identities"))
+            assertTrue(crawlLogText.contains("entryFingerprintExpectedCount=2"))
+            assertTrue(crawlLogText.contains("entryFingerprintObservedCount=3"))
+            assertTrue(crawlLogText.contains("entryFingerprintOverlapCount=2"))
+            assertTrue(crawlLogText.contains("entryFingerprintExpectedCoverage=1.000"))
+            assertTrue(crawlLogText.contains("entryFingerprintObservedCoverage=0.667"))
+            assertTrue(crawlLogText.contains("entryFingerprintDiceSimilarity=0.800"))
+            assertTrue(crawlLogText.contains("verifiedForReplay=true"))
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
     fun bfsTraversal_writes_crawl_log_with_frontier_and_link_entries() = runBlocking {
         val tempDir = Files.createTempDirectory("deep-crawl-log").toFile()
         try {

@@ -281,6 +281,7 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
     private fun entryScreenResetFailureMessage(outcome: EntryScreenResetOutcome): String {
         return when (outcome) {
             EntryScreenResetOutcome.MATCHED_EXPECTED_LOGICAL,
+            EntryScreenResetOutcome.MATCHED_COMPATIBLE_LOGICAL,
             EntryScreenResetOutcome.NO_BACK_AFFORDANCE_ASSUMED_ENTRY ->
                 "Reset to the first screen succeeded and was reported as a failure unexpectedly."
 
