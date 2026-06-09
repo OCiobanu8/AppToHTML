@@ -140,13 +140,14 @@ so the source of every assumed-entry decision is auditable.
 ## Click fallback eligibility
 
 `ClickFallbackMatcher` evaluates fallback candidates after path-based clicking
-diverges. It accepts only candidates that match the intended element on at
-least one of: exact non-blank resource ID, exact non-blank resolved label,
-exact class name plus compatible bounds, or strong bounds compatibility for
-unlabeled icon-like controls. Class-only or check-state-only matches are
-rejected. Checkable, depth, and tie-breaker signals are used only to rank
-already-eligible candidates, never to make a candidate eligible. Fallback
-attempts and rejection reasons are logged for diagnosis.
+diverges. Identity is purely semantic: a candidate is eligible only when its
+`ElementFingerprint` exactly equals the intended element's. The fingerprint
+carries no geometry, so a candidate matches regardless of where it has moved on
+screen, and it never matches merely because it shares a generic resource ID —
+the label is part of the fingerprint. The eligibility reason is reported as
+`RESOURCE_ID_MATCH`, `LABEL_MATCH`, or `CLASS_MATCH` for diagnostics, and depth
+is used only to rank already-eligible candidates. Fallback attempts and
+rejection reasons are logged for diagnosis.
 
 ## Route replay step validation
 
@@ -182,19 +183,33 @@ When investigating a failed or oscillating crawl, inspect the following
 - `external_boundary_restore_result` for external-package Continue compatibility
   decisions
 
-## Merge strategy
+## Element identity (`ElementFingerprint`)
 
-Pressable elements are deduplicated by:
+A single `ElementFingerprint` is the one definition of "the same control" across
+the whole crawler: scroll-scan dedup, viewport/loop-detection fingerprints, the
+persisted replay fingerprint, crawl-edge equality, and the live click-replay
+matcher. It is purely semantic — no pixel bounds and no structural index path —
+so identity survives scroll offsets and re-scans.
 
-- label
-- resource ID
-- class name
+A fingerprint is composed of:
+
+- resource ID (blank → none)
+- label, normalized: trimmed, lower-cased, trailing count/badge stripped, so
+  `Messages (3)` ≡ `Messages (5)` ≡ `messages`
+- class name (blank → none)
 - list-item flag
-- `checkable`
+- `checkable` (the control's type/affordance)
 - `editable`
 
-This keeps the merged screen focused on unique controls rather than viewport
-positions.
+`checked` is intentionally excluded — a toggle is the same control whether on or
+off — so two controls that differ only by `checked` merge into one.
+
+The fingerprint string is also surfaced as a `fingerprint="..."` attribute on the
+merged `<element>` and every pressable `<node>` in the per-screen XML (including
+the synthetic `_merged_accessibility.xml` tree), and on each `<a>` in the exported
+HTML. Those attributes are for inspection only; identity is always recomputed
+from fields. Absolute `bounds` / `data-bounds` remain in the artifacts for
+layout, ordering, and export, but are no longer part of identity.
 
 ## Known tradeoffs
 

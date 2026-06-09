@@ -492,6 +492,12 @@ data class CrawlEdgeRecord(
     val childScreenName: String? = null,
     val approval: CrawlEdgeApproval = CrawlEdgeApproval.NONE,
     val externalPackage: String? = null,
+    // Identity fields carried from the originating PressableElement so an edge can be compared to
+    // an element via ElementFingerprint. Not separately serialized — the parent <element> persists
+    // list-item/checkable/editable, from which edges are rebuilt on load.
+    val isListItem: Boolean = false,
+    val checkable: Boolean = false,
+    val editable: Boolean = false,
 )
 
 data class ScreenIdentityFields(

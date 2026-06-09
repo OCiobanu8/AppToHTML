@@ -135,27 +135,9 @@ class ScrollScanCoordinatorTest {
     }
 
     @Test
-    fun rewindToEntryScreen_requires_expected_logical_match_when_expected_is_supplied() = runBlocking {
-        val homeRoot = rootSnapshot(
-            elements = listOf(
-                pressableNode(
-                    label = "Home Search",
-                    resourceId = "com.example.target:id/home_search",
-                    bounds = "[0,0][100,50]",
-                    childIndex = 0,
-                ),
-            ),
-        )
-        val otherEntryRoot = rootSnapshot(
-            elements = listOf(
-                pressableNode(
-                    label = "Network",
-                    resourceId = "com.example.target:id/network",
-                    bounds = "[0,0][100,50]",
-                    childIndex = 0,
-                ),
-            ),
-        )
+    fun rewindToEntryScreen_rejects_unrelated_no_back_entry_when_expected_supplied() = runBlocking {
+        val homeRoot = settingsRoot("Home Search")
+        val otherEntryRoot = settingsRoot("Network")
         val expectedFingerprint = coordinator.logicalEntryViewportFingerprint(otherEntryRoot)
         var backAttempts = 0
 
@@ -176,6 +158,203 @@ class ScrollScanCoordinatorTest {
         assertEquals(expectedFingerprint, result.expectedLogicalFingerprint)
         assertFalse(result.matchedExpectedLogical)
         assertFalse(result.verifiedForReplay)
+        assertEquals(EntryScreenFingerprintMatchReason.UNRELATED_ENTRY_IDENTITIES, result.entryFingerprintMatchReason)
+        assertEquals(1, result.entryFingerprintExpectedCount)
+        assertEquals(1, result.entryFingerprintObservedCount)
+        assertEquals(0, result.entryFingerprintOverlapCount)
+    }
+
+    @Test
+    fun rewindToEntryScreen_accepts_expected_entry_when_observed_adds_pressable() = runBlocking {
+        val expectedRoot = settingsRoot(
+            "Apps",
+            "Connected devices",
+            "Display and touch",
+            "Google",
+            "Modes",
+            "Network and internet",
+            "Notifications",
+            "Sound and vibration",
+            "Wallpaper and style",
+        )
+        val observedRoot = settingsRoot(
+            "Apps",
+            "Connected devices",
+            "Display and touch",
+            "Google",
+            "Modes",
+            "Network and internet",
+            "Notifications",
+            "Sound and vibration",
+            "Storage",
+            "Wallpaper and style",
+        )
+        val expectedFingerprint = coordinator.logicalEntryViewportFingerprint(expectedRoot)
+        var backAttempts = 0
+
+        val result = coordinator.rewindToEntryScreen(
+            initialRoot = observedRoot,
+            targetPackageName = "com.example.target",
+            expectedEntryLogicalFingerprint = expectedFingerprint,
+            tryBack = {
+                backAttempts += 1
+                true
+            },
+            captureCurrentRoot = { null },
+        )
+
+        assertEquals(0, backAttempts)
+        assertEquals(EntryScreenResetOutcome.MATCHED_COMPATIBLE_LOGICAL, result.outcome)
+        assertFalse(result.matchedExpectedLogical)
+        assertTrue(result.verifiedForReplay)
+        assertEquals(
+            EntryScreenFingerprintMatchReason.ACTUAL_ENRICHES_EXPECTED_IDENTITIES,
+            result.entryFingerprintMatchReason,
+        )
+        assertEquals(9, result.entryFingerprintExpectedCount)
+        assertEquals(10, result.entryFingerprintObservedCount)
+        assertEquals(9, result.entryFingerprintOverlapCount)
+        assertDoubleEquals(18.0 / 19.0, result.entryFingerprintDiceSimilarity)
+    }
+
+    @Test
+    fun rewindToEntryScreen_accepts_expected_entry_when_extra_pressable_displaces_one_expected_pressable() =
+        runBlocking {
+            val expectedRoot = settingsRoot(
+                "Apps",
+                "Connected devices",
+                "Display and touch",
+                "Google",
+                "Modes",
+                "Network and internet",
+                "Notifications",
+                "Sound and vibration",
+                "Wallpaper and style",
+            )
+            val observedRoot = settingsRoot(
+                "Apps",
+                "Connected devices",
+                "Display and touch",
+                "Google",
+                "Modes",
+                "Network and internet",
+                "Notifications",
+                "Sound and vibration",
+                "Storage",
+            )
+            val expectedFingerprint = coordinator.logicalEntryViewportFingerprint(expectedRoot)
+
+            val result = coordinator.rewindToEntryScreen(
+                initialRoot = observedRoot,
+                targetPackageName = "com.example.target",
+                expectedEntryLogicalFingerprint = expectedFingerprint,
+                tryBack = { true },
+                captureCurrentRoot = { null },
+            )
+
+            assertEquals(EntryScreenResetOutcome.MATCHED_COMPATIBLE_LOGICAL, result.outcome)
+            assertFalse(result.matchedExpectedLogical)
+            assertTrue(result.verifiedForReplay)
+            assertEquals(
+                EntryScreenFingerprintMatchReason.IDENTITY_OVERLAP_THRESHOLD_MET,
+                result.entryFingerprintMatchReason,
+            )
+            assertEquals(9, result.entryFingerprintExpectedCount)
+            assertEquals(9, result.entryFingerprintObservedCount)
+            assertEquals(8, result.entryFingerprintOverlapCount)
+            assertDoubleEquals(8.0 / 9.0, result.entryFingerprintDiceSimilarity)
+        }
+
+    @Test
+    fun rewindToEntryScreen_accepts_sparse_entry_when_percentage_similarity_is_high() = runBlocking {
+        val expectedRoot = settingsRoot("Apps", "Google")
+        val observedRoot = settingsRoot("Apps", "Google", "Storage")
+        val expectedFingerprint = coordinator.logicalEntryViewportFingerprint(expectedRoot)
+
+        val result = coordinator.rewindToEntryScreen(
+            initialRoot = observedRoot,
+            targetPackageName = "com.example.target",
+            expectedEntryLogicalFingerprint = expectedFingerprint,
+            tryBack = { true },
+            captureCurrentRoot = { null },
+        )
+
+        assertEquals(EntryScreenResetOutcome.MATCHED_COMPATIBLE_LOGICAL, result.outcome)
+        assertFalse(result.matchedExpectedLogical)
+        assertTrue(result.verifiedForReplay)
+        assertEquals(
+            EntryScreenFingerprintMatchReason.ACTUAL_ENRICHES_EXPECTED_IDENTITIES,
+            result.entryFingerprintMatchReason,
+        )
+        assertEquals(2, result.entryFingerprintExpectedCount)
+        assertEquals(3, result.entryFingerprintObservedCount)
+        assertEquals(2, result.entryFingerprintOverlapCount)
+        assertDoubleEquals(0.8, result.entryFingerprintDiceSimilarity)
+    }
+
+    @Test
+    fun rewindToEntryScreen_rejects_below_percentage_threshold() = runBlocking {
+        val expectedRoot = settingsRoot("Apps", "Connected devices", "Display", "Google")
+        val observedRoot = settingsRoot("Apps", "Storage", "Battery", "Security")
+        val expectedFingerprint = coordinator.logicalEntryViewportFingerprint(expectedRoot)
+
+        val result = coordinator.rewindToEntryScreen(
+            initialRoot = observedRoot,
+            targetPackageName = "com.example.target",
+            expectedEntryLogicalFingerprint = expectedFingerprint,
+            tryBack = { true },
+            captureCurrentRoot = { null },
+        )
+
+        assertEquals(EntryScreenResetOutcome.EXPECTED_LOGICAL_NOT_FOUND, result.outcome)
+        assertFalse(result.matchedExpectedLogical)
+        assertFalse(result.verifiedForReplay)
+        assertEquals(EntryScreenFingerprintMatchReason.IDENTITY_OVERLAP_TOO_LOW, result.entryFingerprintMatchReason)
+        assertEquals(4, result.entryFingerprintExpectedCount)
+        assertEquals(4, result.entryFingerprintObservedCount)
+        assertEquals(1, result.entryFingerprintOverlapCount)
+        assertDoubleEquals(0.25, result.entryFingerprintDiceSimilarity)
+    }
+
+    @Test
+    fun rewindToEntryScreen_rejects_single_generic_overlap_when_similarity_is_low() = runBlocking {
+        val expectedRoot = settingsRoot("Done", "Cancel", "Share", "More")
+        val observedRoot = settingsRoot("Done", "Storage", "Battery", "Security")
+        val expectedFingerprint = coordinator.logicalEntryViewportFingerprint(expectedRoot)
+
+        val result = coordinator.rewindToEntryScreen(
+            initialRoot = observedRoot,
+            targetPackageName = "com.example.target",
+            expectedEntryLogicalFingerprint = expectedFingerprint,
+            tryBack = { true },
+            captureCurrentRoot = { null },
+        )
+
+        assertEquals(EntryScreenResetOutcome.EXPECTED_LOGICAL_NOT_FOUND, result.outcome)
+        assertFalse(result.verifiedForReplay)
+        assertEquals(EntryScreenFingerprintMatchReason.IDENTITY_OVERLAP_TOO_LOW, result.entryFingerprintMatchReason)
+        assertEquals(1, result.entryFingerprintOverlapCount)
+        assertDoubleEquals(0.25, result.entryFingerprintDiceSimilarity)
+    }
+
+    @Test
+    fun logicalEntryViewportFingerprint_exact_match_still_fast_path() = runBlocking {
+        val homeRoot = settingsRoot("Apps", "Google", "Notifications")
+        val expectedFingerprint = coordinator.logicalEntryViewportFingerprint(homeRoot)
+
+        val result = coordinator.rewindToEntryScreen(
+            initialRoot = homeRoot,
+            targetPackageName = "com.example.target",
+            expectedEntryLogicalFingerprint = expectedFingerprint,
+            tryBack = { true },
+            captureCurrentRoot = { null },
+        )
+
+        assertEquals(EntryScreenResetOutcome.MATCHED_EXPECTED_LOGICAL, result.outcome)
+        assertEquals(expectedFingerprint, result.observedLogicalFingerprint)
+        assertTrue(result.matchedExpectedLogical)
+        assertTrue(result.verifiedForReplay)
+        assertEquals(EntryScreenFingerprintMatchReason.EXACT_FINGERPRINT_MATCH, result.entryFingerprintMatchReason)
     }
 
     @Test
@@ -298,6 +477,26 @@ class ScrollScanCoordinatorTest {
         )
 
         assertFalse(EntryScreenBackAffordanceDetector.hasVisibleInAppBackAffordance(root))
+    }
+
+    private fun settingsRoot(vararg labels: String): AccessibilityNodeSnapshot {
+        return rootSnapshot(
+            elements = labels.mapIndexed { index, label ->
+                pressableNode(
+                    label = label,
+                    resourceId = "com.example.target:id/${label.lowercase().replace(' ', '_')}",
+                    bounds = "[0,${index * 100}][600,${index * 100 + 80}]",
+                    childIndex = index,
+                )
+            },
+        )
+    }
+
+    private fun assertDoubleEquals(
+        expected: Double,
+        actual: Double,
+    ) {
+        assertEquals(expected, actual, 0.0001)
     }
 
     private fun rootSnapshot(

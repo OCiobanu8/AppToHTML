@@ -5,6 +5,7 @@ import com.example.apptohtml.model.SelectedAppRef
 import kotlinx.coroutines.CancellationException
 import java.io.File
 import java.util.ArrayDeque
+import java.util.Locale
 
 internal class DeepCrawlCoordinator(
     private val selectedApp: SelectedAppRef,
@@ -1840,17 +1841,13 @@ internal class DeepCrawlCoordinator(
     }
 
     private fun matchesElement(edge: CrawlEdgeRecord, element: PressableElement): Boolean {
-        return edge.label == element.label &&
-            edge.resourceId == element.resourceId &&
-            edge.bounds == element.bounds &&
-            edge.className == element.className &&
-            edge.childIndexPath == element.childIndexPath &&
-            edge.firstSeenStep == element.firstSeenStep
+        return ElementFingerprint.of(edge) == ElementFingerprint.of(element)
     }
 
     private fun entryScreenResetFailureMessage(outcome: EntryScreenResetOutcome): String {
         return when (outcome) {
             EntryScreenResetOutcome.MATCHED_EXPECTED_LOGICAL,
+            EntryScreenResetOutcome.MATCHED_COMPATIBLE_LOGICAL,
             EntryScreenResetOutcome.NO_BACK_AFFORDANCE_ASSUMED_ENTRY ->
                 "Reset to the first screen succeeded and was reported as a failure unexpectedly."
 
@@ -1875,7 +1872,19 @@ internal class DeepCrawlCoordinator(
             "expectedLogicalFingerprintPresent=${result.expectedLogicalFingerprint != null} " +
             "expectedLogicalFingerprint=${quote(result.expectedLogicalFingerprint.orEmpty())} " +
             "matchedExpectedLogical=${result.matchedExpectedLogical} " +
+            "matchedCompatibleLogical=${result.outcome == EntryScreenResetOutcome.MATCHED_COMPATIBLE_LOGICAL} " +
+            "entryFingerprintMatchReason=${result.entryFingerprintMatchReason?.name?.lowercase().orEmpty()} " +
+            "entryFingerprintExpectedCount=${result.entryFingerprintExpectedCount} " +
+            "entryFingerprintObservedCount=${result.entryFingerprintObservedCount} " +
+            "entryFingerprintOverlapCount=${result.entryFingerprintOverlapCount} " +
+            "entryFingerprintExpectedCoverage=${formatEntryFingerprintMetric(result.entryFingerprintExpectedCoverage)} " +
+            "entryFingerprintObservedCoverage=${formatEntryFingerprintMetric(result.entryFingerprintObservedCoverage)} " +
+            "entryFingerprintDiceSimilarity=${formatEntryFingerprintMetric(result.entryFingerprintDiceSimilarity)} " +
             "verifiedForReplay=${result.verifiedForReplay}"
+    }
+
+    private fun formatEntryFingerprintMetric(value: Double): String {
+        return String.format(Locale.US, "%.3f", value)
     }
 
     private fun screenIdFor(sequenceNumber: Int): String {

@@ -96,6 +96,9 @@ class CrawlRunTracker private constructor(
             childScreenName = childScreenName,
             approval = approval,
             externalPackage = externalPackage,
+            isListItem = element.isListItem,
+            checkable = element.checkable,
+            editable = element.editable,
         )
         return edgeId
     }

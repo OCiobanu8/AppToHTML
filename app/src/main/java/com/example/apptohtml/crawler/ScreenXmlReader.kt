@@ -202,12 +202,11 @@ object ScreenXmlReader {
         val rootClass = element.getAttribute("root-class")
         val elements = childElements(element, "element").map { child ->
             ReplayFingerprintCodec.ElementFields(
-                label = child.getAttribute("label"),
                 resourceId = child.getAttribute("resource-id"),
+                label = child.getAttribute("label"),
                 className = child.getAttribute("class"),
                 isListItem = child.getAttribute("list-item"),
                 checkable = child.getAttribute("checkable"),
-                checked = child.getAttribute("checked"),
                 editable = child.getAttribute("editable"),
             )
         }

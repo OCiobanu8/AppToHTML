@@ -173,7 +173,12 @@ class AccessibilityXmlSerializerTest {
 
         val xml = AccessibilityXmlSerializer.serialize(snapshot, crawlState)
 
-        assertTrue(xml.contains("first-seen-step=\"0\" />"))
+        // first-seen-step is now followed by the fingerprint attribute, then self-closes.
+        assertTrue(
+            xml.contains(
+                "first-seen-step=\"0\" fingerprint=\"com.example.target:id/open|open|android.widget.Button|false|false|false\" />"
+            )
+        )
         assertFalse(xml.contains("<edge"))
         assertFalse(xml.contains("</element>"))
     }
@@ -241,7 +246,6 @@ class AccessibilityXmlSerializerTest {
                 className = "android.widget.Button",
                 isListItem = "false",
                 checkable = "false",
-                checked = "false",
                 editable = "false",
             ),
             ReplayFingerprintCodec.ElementFields(
@@ -250,7 +254,6 @@ class AccessibilityXmlSerializerTest {
                 className = "android.widget.Button",
                 isListItem = "false",
                 checkable = "false",
-                checked = "false",
                 editable = "false",
             ),
         )
@@ -275,6 +278,96 @@ class AccessibilityXmlSerializerTest {
     fun replayFingerprintCodec_returns_null_for_malformed_input() {
         assertNull(ReplayFingerprintCodec.decode("no-separator"))
     }
+
+    @Test
+    fun merged_element_carries_fingerprint_attribute() {
+        val element = pressable(label = "Open", resourceId = "com.example.target:id/open")
+        val snapshot = ScreenSnapshot(
+            screenName = "Home",
+            packageName = "com.example.target",
+            elements = listOf(element),
+            xmlDump = "",
+            scrollStepCount = 1,
+        )
+
+        val xml = AccessibilityXmlSerializer.serialize(snapshot)
+
+        assertTrue(xml.contains("""fingerprint="${ElementFingerprint.of(element).encoded}""""))
+    }
+
+    @Test
+    fun pressable_node_and_merged_element_share_one_fingerprint_and_non_pressable_nodes_have_none() {
+        val expected = ElementFingerprint.ofFields(
+            label = "Open",
+            resourceId = "com.example.target:id/open",
+            className = "android.widget.Button",
+            isListItem = false,
+            checkable = false,
+            editable = false,
+        ).encoded
+
+        val button = node(
+            className = "android.widget.Button",
+            resourceId = "com.example.target:id/open",
+            text = "Open",
+            clickable = true,
+            childIndexPath = listOf(0),
+        )
+        val container = node(
+            className = "android.widget.FrameLayout",
+            resourceId = null,
+            text = null,
+            clickable = false,
+            children = listOf(button),
+        )
+
+        // serialize(screenName, packageName, root) is the synthetic _merged_accessibility.xml path.
+        val nodeXml = AccessibilityXmlSerializer.serialize(
+            screenName = "Home",
+            packageName = "com.example.target",
+            root = container,
+        )
+        val elementXml = AccessibilityXmlSerializer.serialize(
+            ScreenSnapshot(
+                screenName = "Home",
+                packageName = "com.example.target",
+                elements = listOf(
+                    pressable(label = "Open", resourceId = "com.example.target:id/open"),
+                ),
+                xmlDump = "",
+                scrollStepCount = 1,
+            )
+        )
+
+        // The pressable node carries the fingerprint; the non-pressable container does not (exactly one).
+        assertTrue(nodeXml.contains("""fingerprint="$expected""""))
+        assertEquals(1, nodeXml.split("fingerprint=").size - 1)
+        // Same button -> byte-identical fingerprint in the merged <element>.
+        assertTrue(elementXml.contains("""fingerprint="$expected""""))
+    }
+
+    private fun node(
+        className: String?,
+        resourceId: String?,
+        text: String?,
+        clickable: Boolean,
+        children: List<AccessibilityNodeSnapshot> = emptyList(),
+        childIndexPath: List<Int> = emptyList(),
+    ): AccessibilityNodeSnapshot = AccessibilityNodeSnapshot(
+        className = className,
+        packageName = "com.example.target",
+        viewIdResourceName = resourceId,
+        text = text,
+        contentDescription = null,
+        clickable = clickable,
+        supportsClickAction = clickable,
+        scrollable = false,
+        enabled = true,
+        visibleToUser = true,
+        bounds = "[0,0][100,100]",
+        children = children,
+        childIndexPath = childIndexPath,
+    )
 
     private fun pressable(
         label: String,
@@ -321,7 +414,6 @@ class AccessibilityXmlSerializerTest {
                         className = "android.widget.Button",
                         isListItem = "false",
                         checkable = "false",
-                        checked = "false",
                         editable = "false",
                     )
                 ),

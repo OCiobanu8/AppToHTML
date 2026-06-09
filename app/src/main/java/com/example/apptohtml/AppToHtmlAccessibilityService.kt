@@ -21,6 +21,7 @@ import com.example.apptohtml.crawler.CrawlSessionDirectory
 import com.example.apptohtml.crawler.CrawlerPhase
 import com.example.apptohtml.crawler.CrawlerSession
 import com.example.apptohtml.crawler.DeepCrawlCoordinator
+import com.example.apptohtml.crawler.ElementFingerprint
 import com.example.apptohtml.crawler.EntryScreenResetOutcome
 import com.example.apptohtml.crawler.ExternalPackageDecisionContext
 import com.example.apptohtml.crawler.PathReplayResolver
@@ -58,7 +59,6 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
         private const val captureDebounceMillis = 350L
         private const val scrollSettleDelayMillis = 350L
         private const val maxBackNavigationAttempts = 3
-        private const val clickBoundsTolerancePx = 24
     }
 
     override fun onServiceConnected() {
@@ -281,6 +281,7 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
     private fun entryScreenResetFailureMessage(outcome: EntryScreenResetOutcome): String {
         return when (outcome) {
             EntryScreenResetOutcome.MATCHED_EXPECTED_LOGICAL,
+            EntryScreenResetOutcome.MATCHED_COMPATIBLE_LOGICAL,
             EntryScreenResetOutcome.NO_BACK_AFFORDANCE_ASSUMED_ENTRY ->
                 "Reset to the first screen succeeded and was reported as a failure unexpectedly."
 
@@ -513,7 +514,6 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
         val matches = ClickFallbackMatcher.selectMatches(
             candidates = allCandidates.map { it.candidate },
             target = target,
-            boundsTolerancePx = clickBoundsTolerancePx,
         )
         val fallbackCandidates = matches.map { match -> match.candidate.handle }
         activeCrawlLogger?.info(
@@ -553,12 +553,7 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
 
     private fun clickFallbackTargetFor(element: PressableElement): ClickFallbackMatcher.Target {
         return ClickFallbackMatcher.Target(
-            label = element.label,
-            resourceId = element.resourceId,
-            className = element.className,
-            bounds = element.bounds,
-            checkable = element.checkable,
-            checked = element.checked,
+            fingerprint = ElementFingerprint.of(element),
         )
     }
 
@@ -670,11 +665,15 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
     ): List<LiveClickCandidate> {
         val candidates = mutableListOf<LiveClickCandidate>()
 
-        fun walk(node: AccessibilityNodeInfo, depth: Int) {
+        fun walk(node: AccessibilityNodeInfo, depth: Int, ancestors: List<AccessibilityNodeInfo>) {
             val supportsClick = node.actionList.any { it.id == AccessibilityNodeInfo.ACTION_CLICK }
             if (node.isVisibleToUser && node.isEnabled && (node.isClickable || supportsClick)) {
-                val bounds = Rect()
-                node.getBoundsInScreen(bounds)
+                val isListItem = ancestors.any { ancestor ->
+                    AccessibilityTreeSnapshotter.isListLikeContainerClass(
+                        className = ancestor.className?.toString(),
+                        scrollable = ancestor.isScrollable,
+                    )
+                }
                 candidates += LiveClickCandidate(
                     node = node,
                     candidate = ClickFallbackMatcher.Candidate(
@@ -683,30 +682,46 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
                         enabled = node.isEnabled,
                         clickable = node.isClickable,
                         supportsClickAction = supportsClick,
-                        resolvedLabel = resolveLiveLabel(node),
-                        resourceId = node.viewIdResourceName,
-                        className = node.className?.toString(),
-                        bounds = ClickFallbackMatcher.Bounds(
-                            left = bounds.left,
-                            top = bounds.top,
-                            right = bounds.right,
-                            bottom = bounds.bottom,
+                        fingerprint = ElementFingerprint.ofFields(
+                            label = resolveLiveElementLabel(node),
+                            resourceId = node.viewIdResourceName,
+                            className = node.className?.toString(),
+                            isListItem = isListItem,
+                            checkable = node.isCheckable,
+                            editable = node.isEditable,
                         ),
-                        checkable = node.isCheckable,
-                        checked = isNodeChecked(node),
                         depth = depth,
                     ),
                 )
             }
+            val nextAncestors = ancestors + node
             repeat(node.childCount) { index ->
                 node.getChild(index)?.let { child ->
-                    walk(child, depth + 1)
+                    walk(child, depth + 1, nextAncestors)
                 }
             }
         }
 
-        walk(root, depth = 0)
+        walk(root, depth = 0, ancestors = emptyList())
         return candidates
+    }
+
+    /**
+     * Live-tree equivalent of [AccessibilityTreeSnapshotter]'s `resolveElementLabel`: text →
+     * content description → nested title/text → `ScreenNaming.chooseElementLabel` fallback
+     * (resource-id segment, then a bounds-derived placeholder). Kept byte-identical to the snapshot
+     * path so the live [ElementFingerprint] equals the recorded one.
+     */
+    private fun resolveLiveElementLabel(node: AccessibilityNodeInfo): String {
+        resolveLiveLabel(node)?.takeIf { it.isNotBlank() }?.let { return it }
+        val bounds = Rect()
+        node.getBoundsInScreen(bounds)
+        return ScreenNaming.chooseElementLabel(
+            text = null,
+            contentDescription = null,
+            viewIdResourceName = node.viewIdResourceName,
+            bounds = bounds.toShortString(),
+        )
     }
 
     private fun scrollableCandidateScore(node: AccessibilityNodeInfo, depth: Int): Int {
@@ -763,9 +778,6 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
         }
         return null
     }
-
-    @Suppress("DEPRECATION")
-    private fun isNodeChecked(node: AccessibilityNodeInfo): Boolean = node.isChecked
 
     private fun describeNode(node: AccessibilityNodeInfo): String {
         val bounds = Rect()
