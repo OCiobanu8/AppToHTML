@@ -25,3 +25,15 @@ full_crash.log
 *.db
 .beads-credential-key
 .beads/proxieddb/
+
+# spear-cli build outputs (rebuilt locally by scripts/setup-spear.sh)
+tools/spear-cli/dist/
+tools/spear-cli/node_modules/
+
+# SPEAR runtime + bulky evidence — reproducible, keep out of git
+.spear/*/state.json
+.spear/*/rounds/
+.spear/*/output/
+.spear/*/workspace/
+.spear/*/evidence/
+.spear/*/grader/

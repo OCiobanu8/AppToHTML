@@ -2,6 +2,16 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Inherited context (SPEAR factory tiers)
+
+Every agent run inherits the four factory tiers, broad → narrow. Imported **directly** (not
+chained) so each loads exactly once:
+
+@factory/COMPANY.md
+@factory/FUNCTION.md
+@factory/PRODUCT.md
+@factory/SURFACE.md
+
 ## Development Philosophy
 
 This service is not deployed in production. There are no backward compatibility requirements — make the best long-term architectural decisions without being constrained by existing interfaces or data formats.

@@ -3,6 +3,16 @@
 This file provides guidance to Codex and other coding agents when working with
 code in this repository.
 
+## Inherited context (SPEAR factory tiers)
+
+Every agent run inherits the four factory tiers, broad → narrow. They are imported
+**directly** (not chained) so each loads exactly once:
+
+@factory/COMPANY.md
+@factory/FUNCTION.md
+@factory/PRODUCT.md
+@factory/SURFACE.md
+
 ## Development Philosophy
 
 This service is not deployed in production. There are no backward compatibility
