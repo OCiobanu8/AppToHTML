@@ -65,11 +65,32 @@ bd close a2h-bmw            # Done!
   memory.
 - 🔎 **Lost?** Run `bd prime` — it prints the full command reference and how to wrap up a session.
 
-### A quick note on sharing
+### How beads are shared (the sync model)
 
-Your beads live in a local database first. They sync to teammates **over git** (they ride along
-on the git remote, separately from your code). If you're unsure whether/when to push beads,
-**ask** — don't force-push anything.
+Think of the beads database as **"git, but for your to-do list."** Every contributor has their
+own full local copy — and it behaves exactly like a git repo of code:
+
+- **`bd ready` / `bd show` / `bd list` read only *your local copy*.** They're instant and work
+  offline. They are **not** a live view of the server.
+- **Your changes stay on your machine until you sync.** `bd create`, `bd close`, `bd update` —
+  all local until published.
+- **Sync = push + pull, just like git.** Pushing publishes *your* changes; pulling fetches
+  *teammates'* beads and merges them into your local copy. (Under the hood they ride on a special
+  git ref, `refs/dolt/data`, separate from your code commits — the beads are **not** part of a
+  PR's diff.)
+
+So a teammate sees your closed bead **only after they pull** — and you see theirs only after you
+pull. Same as `git log` not showing a commit until you fetch it. Merging a PR does **not** change
+any bead's status; issue state travels on the sync channel, not in your code merge.
+
+**Good news:** this repo installed git hooks that **piggyback the beads sync onto your normal
+`git pull` / `git push`**, so in everyday git workflow it mostly stays in sync on its own.
+
+**Rules of thumb:**
+- **Pull before you start** so `bd ready` reflects the latest team state.
+- If two people edit beads at once, Dolt **merges** them like git (conflicts are possible and
+  resolved the git way).
+- Unsure whether to push beads? **Ask** — don't force anything.
 
 ---
 
