@@ -1,0 +1,32 @@
+# Common
+.DS_Store
+*.swp
+*~
+
+# Editor
+.vscode/
+.idea/
+
+# Node (only if a future TS CLI lands)
+node_modules/
+dist/
+
+# SPEAR runtime: state + per-round artifacts are gitignored.
+# Spec files (SCOPE/PLAN/ASSESS/RESOLVE.md) under .spear/<slug>/ are tracked.
+.spear/*/state.json
+.spear/*/rounds/
+.spear/*/output/
+.spear/*/workspace/node_modules/
+.spear/*/*.tmp.*
+
+# Test artifacts
+test-project/
+/tmp/
+
+# Logs / packaging
+*.log
+*.tgz
+
+# Env
+.env
+.env.local
