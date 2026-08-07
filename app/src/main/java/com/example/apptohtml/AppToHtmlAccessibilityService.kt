@@ -1,10 +1,18 @@
-package com.example.apptohtml
+﻿package com.example.apptohtml
 
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.AccessibilityServiceInfo
+import android.content.BroadcastReceiver
+import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
 import android.graphics.Rect
+import android.os.Handler
+import android.os.Looper
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
+import android.widget.Toast
+import androidx.core.content.ContextCompat
 import com.example.apptohtml.crawler.AccessibilityNodeSnapshot
 import com.example.apptohtml.crawler.AccessibilityTreeSnapshotter
 import com.example.apptohtml.crawler.AppLaunchHelper
@@ -21,13 +29,18 @@ import com.example.apptohtml.crawler.CrawlSessionDirectory
 import com.example.apptohtml.crawler.CrawlerPhase
 import com.example.apptohtml.crawler.CrawlerSession
 import com.example.apptohtml.crawler.DeepCrawlCoordinator
-import com.example.apptohtml.crawler.ElementFingerprint
 import com.example.apptohtml.crawler.EntryScreenResetOutcome
 import com.example.apptohtml.crawler.ExternalPackageDecisionContext
-import com.example.apptohtml.crawler.PathReplayResolver
+import com.example.apptohtml.crawler.LiveActionIds
+import com.example.apptohtml.crawler.LiveNodeActions
+import com.example.apptohtml.crawler.LiveNodeAttributes
 import com.example.apptohtml.crawler.PauseDecision
 import com.example.apptohtml.crawler.PauseProgressSnapshot
 import com.example.apptohtml.crawler.PauseReason
+import com.example.apptohtml.crawler.SnapshotCaptureCoordinator
+import com.example.apptohtml.crawler.SnapshotCaptureOutcome
+import com.example.apptohtml.crawler.SnapshotCaptureRequest
+import com.example.apptohtml.crawler.SnapshotRequestParser
 import com.example.apptohtml.crawler.PressableElementLinkKey
 import com.example.apptohtml.crawler.PressableElement
 import com.example.apptohtml.crawler.ScreenNaming
@@ -52,13 +65,61 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val waitingCaptureGenerationGate = WaitingCaptureGenerationGate()
     private var captureJob: Job? = null
+    private var snapshotJob: Job? = null
+    private var snapshotReceiver: BroadcastReceiver? = null
+    private val mainThreadHandler = Handler(Looper.getMainLooper())
     @Volatile
     private var activeCrawlLogger: CrawlLogger? = null
+
+    /**
+     * Deliberately `by lazy`, not an eager field or a companion constant.
+     * [AccessibilityNodeInfo.AccessibilityAction.ACTION_PAGE_DOWN] only exists from API 29, so
+     * resolving the action-id vocabulary eagerly would move a potential `NoSuchFieldError` on an
+     * API 24â€“28 device from "the first time a scroll is attempted" (where it lives today) to
+     * "service construction". Lazy keeps the pre-refactor timing.
+     */
+    private val liveNodeActions: LiveNodeActions<AccessibilityNodeInfo> by lazy {
+        LiveNodeActions(
+            childCount = { node -> node.childCount },
+            childAt = { node, index -> node.getChild(index) },
+            attributes = { node -> node.toLiveNodeAttributes() },
+            supportedActionIds = { node -> node.actionList.map { it.id }.toSet() },
+            performAction = { node, actionId -> node.performAction(actionId) },
+            actionIds = LiveActionIds(
+                scrollForward = AccessibilityNodeInfo.ACTION_SCROLL_FORWARD,
+                scrollBackward = AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD,
+                click = AccessibilityNodeInfo.ACTION_CLICK,
+                scrollDown = AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN.id,
+                scrollUp = AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_UP.id,
+                pageDown = AccessibilityNodeInfo.AccessibilityAction.ACTION_PAGE_DOWN.id,
+                pageUp = AccessibilityNodeInfo.AccessibilityAction.ACTION_PAGE_UP.id,
+            ),
+            logger = { activeCrawlLogger },
+        )
+    }
 
     companion object {
         private const val captureDebounceMillis = 350L
         private const val scrollSettleDelayMillis = 350L
         private const val maxBackNavigationAttempts = 3
+    }
+
+    private fun AccessibilityNodeInfo.toLiveNodeAttributes(): LiveNodeAttributes {
+        val bounds = Rect()
+        getBoundsInScreen(bounds)
+        return LiveNodeAttributes(
+            className = className?.toString(),
+            viewIdResourceName = viewIdResourceName,
+            text = text?.toString(),
+            contentDescription = contentDescription?.toString(),
+            boundsShortString = bounds.toShortString(),
+            visibleToUser = isVisibleToUser,
+            enabled = isEnabled,
+            scrollable = isScrollable,
+            clickable = isClickable,
+            checkable = isCheckable,
+            editable = isEditable,
+        )
     }
 
     override fun onServiceConnected() {
@@ -72,7 +133,137 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
                 AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS
             notificationTimeout = 100
         }
+        registerSnapshotReceiver()
         DiagnosticLogger.log("Accessibility capability connected")
+    }
+
+    /**
+     * Registered at runtime in **every** build variant. Runtime receivers are exempt from the
+     * Android 8 implicit-broadcast restrictions, and the service process is alive whenever the
+     * accessibility service is enabled, so `am broadcast` reaches it.
+     *
+     * This is an unauthenticated exported surface that can dump the foreground app's accessibility
+     * tree to disk. That is a deliberate, accepted trade for a local development tool; gating it
+     * before any production release is tracked separately as bead `a2h-oo0`.
+     */
+    private fun registerSnapshotReceiver() {
+        if (snapshotReceiver != null) {
+            return
+        }
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                val safeIntent = intent ?: return
+                if (safeIntent.action != SnapshotRequestParser.ACTION_CAPTURE_SCREEN) {
+                    return
+                }
+                onSnapshotRequested(safeIntent)
+            }
+        }
+        snapshotReceiver = receiver
+        ContextCompat.registerReceiver(
+            this,
+            receiver,
+            IntentFilter(SnapshotRequestParser.ACTION_CAPTURE_SCREEN),
+            ContextCompat.RECEIVER_EXPORTED,
+        )
+        DiagnosticLogger.log("Snapshot broadcast receiver registered")
+    }
+
+    private fun onSnapshotRequested(intent: Intent) {
+        val request = SnapshotRequestParser.parse(
+            token = intent.getStringExtra(SnapshotRequestParser.EXTRA_TOKEN),
+            name = intent.getStringExtra(SnapshotRequestParser.EXTRA_NAME),
+            scrollBoolean = if (intent.hasExtra(SnapshotRequestParser.EXTRA_SCROLL)) {
+                runCatching { intent.getBooleanExtra(SnapshotRequestParser.EXTRA_SCROLL, true) }.getOrNull()
+            } else {
+                null
+            },
+            scrollString = runCatching {
+                intent.getStringExtra(SnapshotRequestParser.EXTRA_SCROLL)
+            }.getOrNull(),
+        )
+
+        // The receiver itself does no work and does not use goAsync(): ordered-broadcast results
+        // are capped around 10 s and a long scrollable screen exceeds that. Completion is signalled
+        // by the .done marker on disk instead.
+        snapshotJob?.cancel()
+        snapshotJob = serviceScope.launch {
+            runSnapshotCapture(request)
+        }
+    }
+
+    private suspend fun runSnapshotCapture(request: SnapshotCaptureRequest) {
+        val foreground = rootInActiveWindow?.packageName?.toString()
+        CrawlerSession.snapshotCaptureStarted(foreground)
+
+        val coordinator = SnapshotCaptureCoordinator(
+            host = object : SnapshotCaptureCoordinator.Host {
+                override fun currentCrawlPhase(): CrawlerPhase = CrawlerSession.currentState().phase
+
+                override fun foregroundPackageName(): String? =
+                    rootInActiveWindow?.packageName?.toString()
+
+                override fun appLabelFor(packageName: String): String = runCatching {
+                    val info = packageManager.getApplicationInfo(packageName, 0)
+                    packageManager.getApplicationLabel(info).toString()
+                }.getOrDefault(packageName)
+
+                override suspend fun captureCurrentRootSnapshot(
+                    expectedPackageName: String?,
+                ): AccessibilityNodeSnapshot? =
+                    this@AppToHtmlAccessibilityService.captureCurrentRootSnapshot(expectedPackageName)
+
+                override fun scrollForward(childIndexPath: List<Int>): Boolean {
+                    val liveRoot = rootInActiveWindow ?: return false
+                    return liveNodeActions.performScroll(
+                        liveRoot,
+                        childIndexPath,
+                        AccessibilityNodeInfo.ACTION_SCROLL_FORWARD,
+                    )
+                }
+
+                override fun scrollBackward(childIndexPath: List<Int>): Boolean {
+                    val liveRoot = rootInActiveWindow ?: return false
+                    return liveNodeActions.performScroll(
+                        liveRoot,
+                        childIndexPath,
+                        AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD,
+                    )
+                }
+
+                override fun baseDirectory(): File =
+                    getExternalFilesDir(null) ?: filesDir
+
+                override fun publishProgress(message: String) {
+                    DiagnosticLogger.log("snapshot_progress $message")
+                }
+            },
+        )
+
+        when (val outcome = coordinator.capture(request)) {
+            is SnapshotCaptureOutcome.Captured -> {
+                CrawlerSession.snapshotCaptured(outcome.result)
+                showSnapshotToast(
+                    "Captured '${outcome.result.screenName}' (${outcome.result.elementCount} elements)"
+                )
+            }
+
+            is SnapshotCaptureOutcome.Rejected -> {
+                CrawlerSession.snapshotFailed(foreground, outcome.reason.wireValue)
+                showSnapshotToast("Snapshot rejected: ${outcome.reason.wireValue}")
+            }
+
+            is SnapshotCaptureOutcome.Failed -> {
+                CrawlerSession.snapshotFailed(foreground, outcome.reason)
+                showSnapshotToast("Snapshot failed: ${outcome.reason}")
+            }
+        }
+    }
+
+    private fun showSnapshotToast(message: String) {
+        mainThreadHandler.post {
+            Toast.makeText(this, message, Toast.LENGTH_SHORT).show()
+        }
     }
 
     override fun onAccessibilityEvent(event: AccessibilityEvent?) {
@@ -110,6 +301,11 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
     }
 
     override fun onDestroy() {
+        snapshotReceiver?.let { receiver ->
+            runCatching { unregisterReceiver(receiver) }
+            snapshotReceiver = null
+        }
+        snapshotJob?.cancel()
         captureJob?.cancel()
         serviceScope.cancel()
         super.onDestroy()
@@ -161,17 +357,25 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
 
                     override fun scrollForward(childIndexPath: List<Int>): Boolean {
                         val liveRoot = rootInActiveWindow ?: return false
-                        return performScroll(liveRoot, childIndexPath, AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+                        return liveNodeActions.performScroll(
+                            liveRoot,
+                            childIndexPath,
+                            AccessibilityNodeInfo.ACTION_SCROLL_FORWARD,
+                        )
                     }
 
                     override fun scrollBackward(childIndexPath: List<Int>): Boolean {
                         val liveRoot = rootInActiveWindow ?: return false
-                        return performScroll(liveRoot, childIndexPath, AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)
+                        return liveNodeActions.performScroll(
+                            liveRoot,
+                            childIndexPath,
+                            AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD,
+                        )
                     }
 
                     override fun click(element: PressableElement): Boolean {
                         val liveRoot = rootInActiveWindow ?: return false
-                        return performClick(liveRoot, element)
+                        return liveNodeActions.performClick(liveRoot, element)
                     }
 
                     override fun performGlobalBack(): Boolean {
@@ -342,11 +546,11 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
             initialRoot = initialRoot,
             tryScrollForward = { path ->
                 val liveRoot = rootInActiveWindow ?: return@scan false
-                performScroll(liveRoot, path, AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+                liveNodeActions.performScroll(liveRoot, path, AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
             },
             tryScrollBackward = { path ->
                 val liveRoot = rootInActiveWindow ?: return@scan false
-                performScroll(liveRoot, path, AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)
+                liveNodeActions.performScroll(liveRoot, path, AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)
             },
             captureCurrentRoot = {
                 captureCurrentRootSnapshot(capturePackageName)
@@ -368,7 +572,7 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
             initialRoot = currentRoot,
             tryScrollBackward = { path ->
                 val liveRoot = rootInActiveWindow ?: return@rewindToTop false
-                performScroll(liveRoot, path, AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)
+                liveNodeActions.performScroll(liveRoot, path, AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)
             },
             captureCurrentRoot = {
                 captureCurrentRootSnapshot(targetPackageName)
@@ -451,364 +655,6 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
         return AccessibilityTreeSnapshotter.captureRootSnapshot(liveRoot)
     }
 
-    private fun performScroll(
-        root: AccessibilityNodeInfo,
-        childIndexPath: List<Int>,
-        action: Int,
-    ): Boolean {
-        val pathResolution = resolvePathNodes(root, childIndexPath)
-        logPathDivergenceIfNeeded(action, pathResolution)
-        val pathNodes = pathResolution.usableNodes()
-        activeCrawlLogger?.info(
-            "live_action_start type=${actionName(action)} intendedChildIndexPath=$childIndexPath " +
-                "resolvedNodeCount=${pathNodes.size} resolvedPathDepth=${pathResolution.resolvedDepth} " +
-                "pathResolutionStatus=${pathResolution.status.name.lowercase()} candidateSource=path"
-        )
-        if (attemptActionOnCandidates(pathNodes.asReversed(), action, "path")) {
-            return true
-        }
-
-        val fallbackCandidates = collectScrollableCandidates(root)
-            .filterNot { candidate -> pathNodes.any { it === candidate } }
-        activeCrawlLogger?.info(
-            "live_action_fallback type=${actionName(action)} intendedChildIndexPath=$childIndexPath " +
-                "fallbackCandidateCount=${fallbackCandidates.size}"
-        )
-        if (attemptActionOnCandidates(fallbackCandidates, action, "fallback")) {
-            return true
-        }
-
-        activeCrawlLogger?.warn(
-            "live_action_failed type=${actionName(action)} intendedChildIndexPath=$childIndexPath " +
-                "resolvedNodeCount=${pathNodes.size} fallbackCandidateCount=${fallbackCandidates.size} " +
-                "pathResolutionStatus=${pathResolution.status.name.lowercase()}"
-        )
-        DiagnosticLogger.log(
-            "Scroll action ${actionName(action)} failed for path=$childIndexPath; no candidate accepted the gesture."
-        )
-        return false
-    }
-
-    private fun performClick(
-        root: AccessibilityNodeInfo,
-        element: PressableElement,
-    ): Boolean {
-        val pathResolution = resolvePathNodes(root, element.childIndexPath)
-        logPathDivergenceIfNeeded(AccessibilityNodeInfo.ACTION_CLICK, pathResolution)
-        val pathNodes = pathResolution.usableNodes()
-            .filter { node -> node.isVisibleToUser && node.isEnabled }
-        activeCrawlLogger?.info(
-            "live_action_start type=ACTION_CLICK intendedChildIndexPath=${element.childIndexPath} " +
-                "resolvedNodeCount=${pathNodes.size} resolvedPathDepth=${pathResolution.resolvedDepth} " +
-                "pathResolutionStatus=${pathResolution.status.name.lowercase()} candidateSource=path " +
-                "label=${quoteForLog(element.label)} resourceId=${quoteForLog(element.resourceId.orEmpty())} " +
-                "className=${quoteForLog(element.className.orEmpty())} bounds=${quoteForLog(element.bounds)}"
-        )
-        if (attemptActionOnCandidates(pathNodes.asReversed(), AccessibilityNodeInfo.ACTION_CLICK, "path")) {
-            return true
-        }
-
-        val target = clickFallbackTargetFor(element)
-        val allCandidates = collectClickFallbackCandidates(root)
-            .filterNot { entry -> pathNodes.any { it === entry.node } }
-        val matches = ClickFallbackMatcher.selectMatches(
-            candidates = allCandidates.map { it.candidate },
-            target = target,
-        )
-        val fallbackCandidates = matches.map { match -> match.candidate.handle }
-        activeCrawlLogger?.info(
-            "live_action_fallback type=ACTION_CLICK intendedChildIndexPath=${element.childIndexPath} " +
-                "fallbackCandidateCount=${fallbackCandidates.size} totalLiveCandidateCount=${allCandidates.size} " +
-                "label=${quoteForLog(element.label)} eligibilityReasons=${quoteForLog(formatEligibilityReasons(matches))} " +
-                "topRankScore=${matches.firstOrNull()?.rankScore ?: 0}"
-        )
-        if (attemptActionOnCandidates(fallbackCandidates, AccessibilityNodeInfo.ACTION_CLICK, "fallback")) {
-            return true
-        }
-
-        activeCrawlLogger?.warn(
-            "live_action_failed type=ACTION_CLICK intendedChildIndexPath=${element.childIndexPath} " +
-                "resolvedNodeCount=${pathNodes.size} fallbackCandidateCount=${fallbackCandidates.size} " +
-                "totalLiveCandidateCount=${allCandidates.size} " +
-                "pathResolutionStatus=${pathResolution.status.name.lowercase()} label=${quoteForLog(element.label)}"
-        )
-        DiagnosticLogger.log(
-            "Click action failed for '${element.label}' with path=${element.childIndexPath}; no candidate accepted the gesture."
-        )
-        return false
-    }
-
-    private fun formatEligibilityReasons(
-        matches: List<ClickFallbackMatcher.Match<AccessibilityNodeInfo>>,
-    ): String {
-        if (matches.isEmpty()) {
-            return ""
-        }
-        return matches
-            .groupingBy { it.eligibilityReason.name.lowercase() }
-            .eachCount()
-            .entries
-            .joinToString(",") { (reason, count) -> "$reason:$count" }
-    }
-
-    private fun clickFallbackTargetFor(element: PressableElement): ClickFallbackMatcher.Target {
-        return ClickFallbackMatcher.Target(
-            fingerprint = ElementFingerprint.of(element),
-        )
-    }
-
-    private fun resolvePathNodes(
-        root: AccessibilityNodeInfo,
-        childIndexPath: List<Int>,
-    ): PathReplayResolver.Resolution<AccessibilityNodeInfo> {
-        return PathReplayResolver.resolve(
-            root = root,
-            childIndexPath = childIndexPath,
-            childCount = { node -> node.childCount },
-            childAt = { node, index -> node.getChild(index) },
-        )
-    }
-
-    private fun logPathDivergenceIfNeeded(
-        action: Int,
-        resolution: PathReplayResolver.Resolution<AccessibilityNodeInfo>,
-    ) {
-        if (resolution.status == PathReplayResolver.ResolutionStatus.FULL) {
-            return
-        }
-
-        activeCrawlLogger?.warn(
-            "live_action_path_diverged type=${actionName(action)} intendedChildIndexPath=${resolution.intendedPath} " +
-                "resolvedDepth=${resolution.resolvedDepth} failingChildIndex=${resolution.failingChildIndex} " +
-                "availableChildCount=${resolution.availableChildCount} status=${resolution.status.name.lowercase()}"
-        )
-        DiagnosticLogger.log(
-            "Accessibility path replay diverged for ${actionName(action)} path=${resolution.intendedPath} " +
-                "resolvedDepth=${resolution.resolvedDepth} failingChildIndex=${resolution.failingChildIndex} " +
-                "availableChildCount=${resolution.availableChildCount}."
-        )
-    }
-
-    private fun attemptActionOnCandidates(
-        candidates: List<AccessibilityNodeInfo>,
-        requestedAction: Int,
-        source: String,
-    ): Boolean {
-        candidates.forEach { candidate ->
-            val actionIds = preferredActionIds(candidate, requestedAction)
-            actionIds.forEach { actionId ->
-                val success = candidate.performAction(actionId)
-                activeCrawlLogger?.info(
-                    "live_action_attempt requestedAction=${actionName(requestedAction)} source=$source " +
-                        "candidate=${quoteForLog(describeNode(candidate))} actionId=${actionName(actionId)} success=$success"
-                )
-                DiagnosticLogger.log(
-                    "Tried ${actionName(actionId)} on ${describeNode(candidate)} from $source candidate; success=$success"
-                )
-                if (success) {
-                    return true
-                }
-            }
-        }
-        return false
-    }
-
-    private fun preferredActionIds(
-        node: AccessibilityNodeInfo,
-        requestedAction: Int,
-    ): List<Int> {
-        val supported = node.actionList.map { it.id }.toSet()
-        val preferred = when (requestedAction) {
-            AccessibilityNodeInfo.ACTION_SCROLL_FORWARD -> listOf(
-                AccessibilityNodeInfo.ACTION_SCROLL_FORWARD,
-                AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN.id,
-                AccessibilityNodeInfo.AccessibilityAction.ACTION_PAGE_DOWN.id,
-            )
-
-            AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD -> listOf(
-                AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD,
-                AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_UP.id,
-                AccessibilityNodeInfo.AccessibilityAction.ACTION_PAGE_UP.id,
-            )
-
-            AccessibilityNodeInfo.ACTION_CLICK -> listOf(
-                AccessibilityNodeInfo.ACTION_CLICK,
-            )
-
-            else -> listOf(requestedAction)
-        }
-
-        val preferredSupported = preferred.filter { actionId -> actionId in supported }
-        return (preferredSupported + preferred.filterNot { it in preferredSupported }).distinct()
-    }
-
-    private fun collectScrollableCandidates(root: AccessibilityNodeInfo): List<AccessibilityNodeInfo> {
-        val candidates = mutableListOf<LiveCandidate>()
-
-        fun walk(node: AccessibilityNodeInfo, depth: Int) {
-            if (node.isVisibleToUser && node.isScrollable) {
-                candidates += LiveCandidate(node = node, score = scrollableCandidateScore(node, depth))
-            }
-            repeat(node.childCount) { index ->
-                node.getChild(index)?.let { child ->
-                    walk(child, depth + 1)
-                }
-            }
-        }
-
-        walk(root, depth = 0)
-        return candidates.sortedByDescending { it.score }.map { it.node }
-    }
-
-    private fun collectClickFallbackCandidates(
-        root: AccessibilityNodeInfo,
-    ): List<LiveClickCandidate> {
-        val candidates = mutableListOf<LiveClickCandidate>()
-
-        fun walk(node: AccessibilityNodeInfo, depth: Int, ancestors: List<AccessibilityNodeInfo>) {
-            val supportsClick = node.actionList.any { it.id == AccessibilityNodeInfo.ACTION_CLICK }
-            if (node.isVisibleToUser && node.isEnabled && (node.isClickable || supportsClick)) {
-                val isListItem = ancestors.any { ancestor ->
-                    AccessibilityTreeSnapshotter.isListLikeContainerClass(
-                        className = ancestor.className?.toString(),
-                        scrollable = ancestor.isScrollable,
-                    )
-                }
-                candidates += LiveClickCandidate(
-                    node = node,
-                    candidate = ClickFallbackMatcher.Candidate(
-                        handle = node,
-                        visible = node.isVisibleToUser,
-                        enabled = node.isEnabled,
-                        clickable = node.isClickable,
-                        supportsClickAction = supportsClick,
-                        fingerprint = ElementFingerprint.ofFields(
-                            label = resolveLiveElementLabel(node),
-                            resourceId = node.viewIdResourceName,
-                            className = node.className?.toString(),
-                            isListItem = isListItem,
-                            checkable = node.isCheckable,
-                            editable = node.isEditable,
-                        ),
-                        depth = depth,
-                    ),
-                )
-            }
-            val nextAncestors = ancestors + node
-            repeat(node.childCount) { index ->
-                node.getChild(index)?.let { child ->
-                    walk(child, depth + 1, nextAncestors)
-                }
-            }
-        }
-
-        walk(root, depth = 0, ancestors = emptyList())
-        return candidates
-    }
-
-    /**
-     * Live-tree equivalent of [AccessibilityTreeSnapshotter]'s `resolveElementLabel`: text →
-     * content description → nested title/text → `ScreenNaming.chooseElementLabel` fallback
-     * (resource-id segment, then a bounds-derived placeholder). Kept byte-identical to the snapshot
-     * path so the live [ElementFingerprint] equals the recorded one.
-     */
-    private fun resolveLiveElementLabel(node: AccessibilityNodeInfo): String {
-        resolveLiveLabel(node)?.takeIf { it.isNotBlank() }?.let { return it }
-        val bounds = Rect()
-        node.getBoundsInScreen(bounds)
-        return ScreenNaming.chooseElementLabel(
-            text = null,
-            contentDescription = null,
-            viewIdResourceName = node.viewIdResourceName,
-            bounds = bounds.toShortString(),
-        )
-    }
-
-    private fun scrollableCandidateScore(node: AccessibilityNodeInfo, depth: Int): Int {
-        val className = node.className?.toString().orEmpty()
-        val classScore = when {
-            className.contains("RecyclerView") -> 600
-            className.contains("ListView") -> 575
-            className.contains("GridView") -> 550
-            className.contains("NestedScrollView") -> 525
-            className.contains("ScrollView") -> 500
-            className.endsWith("LinearLayout") -> 350
-            else -> 250
-        }
-        return classScore + depth
-    }
-
-    private fun resolveLiveLabel(node: AccessibilityNodeInfo): String? {
-        val directText = node.text?.toString()?.trim().orEmpty()
-        if (directText.isNotEmpty()) {
-            return directText
-        }
-
-        val directDescription = node.contentDescription?.toString()?.trim().orEmpty()
-        if (directDescription.isNotEmpty()) {
-            return directDescription
-        }
-
-        findNestedTitleLabel(node)?.let { return it }
-        return findNestedTextLabel(node)
-    }
-
-    private fun findNestedTitleLabel(node: AccessibilityNodeInfo): String? {
-        repeat(node.childCount) { index ->
-            val child = node.getChild(index) ?: return@repeat
-            if (child.viewIdResourceName?.substringAfterLast('/') == "title") {
-                val label = resolveLiveLabel(child)
-                if (!label.isNullOrBlank()) {
-                    return label
-                }
-            }
-            findNestedTitleLabel(child)?.let { return it }
-        }
-        return null
-    }
-
-    private fun findNestedTextLabel(node: AccessibilityNodeInfo): String? {
-        repeat(node.childCount) { index ->
-            val child = node.getChild(index) ?: return@repeat
-            val label = resolveLiveLabel(child)
-            if (!label.isNullOrBlank()) {
-                return label
-            }
-            findNestedTextLabel(child)?.let { return it }
-        }
-        return null
-    }
-
-    private fun describeNode(node: AccessibilityNodeInfo): String {
-        val bounds = Rect()
-        node.getBoundsInScreen(bounds)
-        return buildString {
-            append(node.className?.toString().orEmpty())
-            append('[')
-            append(node.viewIdResourceName.orEmpty())
-            append(']')
-            append('@')
-            append(bounds.toShortString())
-        }
-    }
-
-    private fun actionName(action: Int): String {
-        return when (action) {
-            AccessibilityNodeInfo.ACTION_SCROLL_FORWARD -> "ACTION_SCROLL_FORWARD"
-            AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD -> "ACTION_SCROLL_BACKWARD"
-            AccessibilityNodeInfo.ACTION_CLICK -> "ACTION_CLICK"
-            AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_DOWN.id -> "ACTION_SCROLL_DOWN"
-            AccessibilityNodeInfo.AccessibilityAction.ACTION_SCROLL_UP.id -> "ACTION_SCROLL_UP"
-            AccessibilityNodeInfo.AccessibilityAction.ACTION_PAGE_DOWN.id -> "ACTION_PAGE_DOWN"
-            AccessibilityNodeInfo.AccessibilityAction.ACTION_PAGE_UP.id -> "ACTION_PAGE_UP"
-            else -> "ACTION_$action"
-        }
-    }
-
-    private fun quoteForLog(value: String): String {
-        return "\"${value.replace("\"", "\\\"")}\""
-    }
-
     private fun buildSummary(
         session: CrawlSessionDirectory,
         tracker: CrawlRunTracker,
@@ -872,16 +718,6 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
             message = message,
         )
     }
-
-    private data class LiveCandidate(
-        val node: AccessibilityNodeInfo,
-        val score: Int,
-    )
-
-    private data class LiveClickCandidate(
-        val node: AccessibilityNodeInfo,
-        val candidate: ClickFallbackMatcher.Candidate<AccessibilityNodeInfo>,
-    )
 
     private class PartialCrawlAbortException(
         val summary: CrawlRunSummary,

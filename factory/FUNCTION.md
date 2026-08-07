@@ -11,6 +11,12 @@
   a live device belong to a separate, clearly-marked instrumented tier.
 - **Behavior changes are pinned red→green.** A fix ships with a test that demonstrably *fails*
   on the pre-fix code and passes after. A pin that was never red proves nothing.
+- **A refactor of *uncovered* code is pinned by characterization tests plus a mutation.** When
+  moving or reshaping code that has no existing coverage, "the suite is still green" proves
+  nothing — the suite never touched those lines. Write the characterization tests against
+  pre-refactor behavior first, and show at least one injected mutation turning them red before
+  trusting them. Uncovered code is the case where a green suite is most reassuring and least
+  informative.
 - **Prefer executable checks to inspection.** Any acceptance criterion that *can* be a
   test/build/lint check *must* be one; human inspection is the last resort.
 
