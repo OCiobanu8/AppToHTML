@@ -87,6 +87,52 @@ codebase is intentionally small, with most logic grouped by responsibility.
 - `AppToHtmlAccessibilityService` is the Android runtime entrypoint.
 - `CrawlerSession` is the in-memory workflow state holder shared with the UI.
 
+#### 4a. Live node actions
+
+**Main file**
+
+- `app/src/main/java/com/example/apptohtml/crawler/LiveNodeActions.kt`
+
+Scroll and click gestures against a *live* accessibility tree, extracted out of the service so
+both the crawl path and the snapshot path share one implementation and so the logic is unit
+testable. The tree arrives as lambdas (the shape `PathReplayResolver` uses) and the action id
+vocabulary (`LiveActionIds`) is injected rather than read from `AccessibilityNodeInfo`, because
+`AccessibilityAction.ACTION_PAGE_DOWN` and friends resolve through framework statics that are not
+available under the JVM unit-test runtime.
+
+Two ordering rules in here are load-bearing and pinned by tests: `preferredActionIds` **appends**
+preferred action ids the node never advertised rather than filtering them out (some views honor an
+action they do not list), and path candidates are attempted deepest-first while fallback candidates
+are attempted in score order.
+
+#### 4b. Single-screen snapshot path
+
+**Main files**
+
+- `app/src/main/java/com/example/apptohtml/crawler/SnapshotCaptureCoordinator.kt`
+- `app/src/main/java/com/example/apptohtml/crawler/SnapshotFileStore.kt`
+- `app/src/main/java/com/example/apptohtml/crawler/SnapshotCrawlState.kt`
+- `app/src/main/java/com/example/apptohtml/crawler/SnapshotModels.kt`
+
+**Responsibility**
+
+- Captures the currently-visible screen on a broadcast
+  (`com.example.apptohtml.CAPTURE_SCREEN`), without launching the target app, back-navigating to
+  its entry screen, or bringing AppToHTML to the foreground.
+- Rejects a capture while a crawl is active, and rejects our own UI or SystemUI in the foreground.
+- Writes crawl-shaped artifacts into `snapshots/`, a sibling of `crawl/`.
+
+**Boundary**
+
+- The no-launch / no-back-navigation guarantee is **structural**: `SnapshotCaptureCoordinator.Host`
+  exposes no method that could launch an app, press global back, or foreground this app. There is
+  nothing to call, so the guarantee does not depend on a reviewer noticing. A test pins the exact
+  member set, so adding one fails the build.
+- Snapshot progress is published on `CrawlerSession.snapshotState`, a flow **separate** from
+  `CrawlerUiState`. Folding it into `CrawlerPhase` would make the crawl state machine look busy and
+  would make the coordinator's own "reject while a crawl is active" guard reject valid captures.
+- The host-side trigger is the `capture-screen` skill under `.claude/skills/`.
+
 ### 5. Crawler domain logic
 
 **Main files**

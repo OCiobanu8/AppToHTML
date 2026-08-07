@@ -30,7 +30,50 @@ object CrawlerSession {
 
     val uiState: StateFlow<CrawlerUiState> = _uiState.asStateFlow()
 
+    /**
+     * Snapshot progress lives in its own flow. It must never be folded into [_uiState]: a snapshot
+     * that moved [CrawlerPhase] off a terminal value would make the snapshot coordinator's own
+     * "reject while a crawl is active" guard reject every subsequent capture.
+     */
+    private val _snapshotState = MutableStateFlow(SnapshotUiState())
+
+    val snapshotState: StateFlow<SnapshotUiState> = _snapshotState.asStateFlow()
+
     fun currentState(): CrawlerUiState = _uiState.value
+
+    internal fun snapshotCaptureStarted(packageName: String?) {
+        _snapshotState.value = SnapshotUiState(
+            status = SnapshotStatus.CAPTURING,
+            packageName = packageName,
+            message = "Capturing the visible screen.",
+        )
+    }
+
+    internal fun snapshotCaptured(result: SnapshotResult) {
+        _snapshotState.value = SnapshotUiState(
+            status = SnapshotStatus.CAPTURED,
+            screenName = result.screenName,
+            packageName = result.packageName,
+            directoryPath = result.directory.absolutePath,
+            elementCount = result.elementCount,
+            scrollStepCount = result.scrollStepCount,
+            message = "Captured '${result.screenName}' (${result.elementCount} elements).",
+        )
+        DiagnosticLogger.log(
+            "snapshot_captured package=${result.packageName} screen='${result.screenName}' " +
+                "elements=${result.elementCount} steps=${result.scrollStepCount} " +
+                "directory=${result.directory.absolutePath}"
+        )
+    }
+
+    internal fun snapshotFailed(packageName: String?, reason: String) {
+        _snapshotState.value = SnapshotUiState(
+            status = SnapshotStatus.FAILED,
+            packageName = packageName,
+            message = reason,
+        )
+        DiagnosticLogger.error("snapshot_failed package=${packageName.orEmpty()} reason=$reason")
+    }
 
     fun recordObservedPackage(packageName: String?) {
         if (!packageName.isNullOrBlank()) {

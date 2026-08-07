@@ -42,6 +42,7 @@ import com.example.apptohtml.crawler.CrawlerSession
 import com.example.apptohtml.crawler.PauseReason
 import com.example.apptohtml.crawler.ResumeMode
 import com.example.apptohtml.crawler.ScreenExpansionStatus
+import com.example.apptohtml.crawler.SnapshotStatus
 import com.example.apptohtml.model.SelectedAppRef
 import com.example.apptohtml.storage.AllowedPackage
 import com.example.apptohtml.storage.SelectedAppRepository
@@ -83,6 +84,7 @@ private fun AppToHtmlScreen(
     val context = LocalContext.current
     val selectedApp by repository.selectedAppFlow.collectAsState(initial = null)
     val crawlerState by CrawlerSession.uiState.collectAsState()
+    val snapshotState by CrawlerSession.snapshotState.collectAsState()
     val scope = rememberCoroutineScope()
     val savedCrawlRepository = remember { SavedCrawlRepository(context.applicationContext) }
 
@@ -361,6 +363,29 @@ private fun AppToHtmlScreen(
             }
 
             else -> Unit
+        }
+
+        // Snapshot results are reported separately from the crawl phases above: a snapshot is
+        // triggered by broadcast while this app is in the background, so this is purely a record of
+        // what the last capture did.
+        when (snapshotState.status) {
+            SnapshotStatus.CAPTURING -> {
+                Text("Snapshot: capturing ${snapshotState.packageName.orEmpty()}…")
+            }
+
+            SnapshotStatus.CAPTURED -> {
+                Text("Last snapshot: ${snapshotState.screenName} (${snapshotState.packageName})")
+                Text("Elements: ${snapshotState.elementCount}; scroll steps: ${snapshotState.scrollStepCount}")
+                snapshotState.directoryPath?.let { path ->
+                    Text("Saved to: $path")
+                }
+            }
+
+            SnapshotStatus.FAILED -> {
+                Text("Last snapshot failed: ${snapshotState.message.orEmpty()}")
+            }
+
+            SnapshotStatus.IDLE -> Unit
         }
 
         if (showPicker) {
