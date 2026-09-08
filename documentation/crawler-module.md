@@ -29,7 +29,8 @@ skipped traversal outcomes.
 - Restores the root entry screen and replays known routes before expanding a discovered screen.
 - Runs breadth-first traversal across safe pressable elements until the frontier is exhausted or the user stops.
 - Persists crawl progress incrementally, including `crawl-index.json`, `crawl-graph.json`, and `crawl-graph.html`.
-- Pauses the crawl for elapsed-time checkpoints, failed-edge checkpoints, and external-package boundaries.
+- Pauses the crawl for elapsed-time checkpoints and failed-edge checkpoints.
+- Skips any click that leaves the target app, automatically and without asking.
 
 ### `PauseCheckpointTracker`
 
@@ -81,17 +82,17 @@ skipped traversal outcomes.
 4. The deep crawl coordinator restores the entry screen and captures the root screen.
 5. Scroll scanning rewinds to the top of the current surface and merges unique elements.
 6. Safe elements are ordered deterministically and filtered through the blacklist.
-7. After each click, destination settling observes post-click roots before no-navigation checks, external-package pause handling, and child scanning.
+7. After each click, destination settling observes post-click roots before no-navigation checks, the external-package check, and child scanning.
 8. Eligible targets are replayed breadth-first until the frontier is exhausted.
 9. Manifest and graph artifacts are refreshed in app storage as progress is made.
-10. If a checkpoint or external-package boundary fires, the current state is saved before AppToHTML is brought back to the foreground.
-11. The user can continue or stop and save for checkpoint pauses; external-package boundaries can be continued or skipped.
+10. If a checkpoint fires, the current state is saved before AppToHTML is brought back to the foreground.
+11. The user can continue or stop and save for checkpoint pauses. External-package boundaries are never offered as a choice.
 12. AppToHTML is brought back to the foreground when the crawl completes or aborts.
 
 External-package boundary handling stamps the originating edge XML with the
-observed destination package. This keeps skipped, approved, captured, linked,
-and already-allowed cross-package edges auditable from the per-screen XML even
-when manifest JSON remains unchanged.
+observed destination package. `SKIPPED_EXTERNAL_PACKAGE` is now the only
+outcome a cross-package edge can reach, and the stamp keeps those skips
+auditable from the per-screen XML even when manifest JSON remains unchanged.
 
 ## Settling behavior
 
@@ -109,13 +110,15 @@ the best eligible sample is selected. This lets legitimate one-control screens
 settle successfully while allowing a transitional root, such as a toolbar-only
 or empty loading state, to be replaced by a richer later root.
 
-For external-package Continue, restore validation still requires the expected
-package. Destination identity is validated by compatibility over the settled
-expected and restored roots, not by exact raw fingerprint equality alone. Exact
-fingerprint matches pass, and compatible enrichment can pass when pressable
-identity and richness signals show that the restored root is the same
-destination with more loaded content. Incompatible same-package destinations
-still fail the edge.
+A click whose destination belongs to another package is never captured. The
+boundary can only be detected after the click, because accessibility does not
+expose a control's destination beforehand: the crawler clicks, observes the
+package change, marks the edge `SKIPPED_EXTERNAL_PACKAGE` with the destination
+package, and moves on. It is briefly standing in the foreign app at that point;
+the next edge's restore probe fails its package check and relaunches the target.
+
+The cost is accepted deliberately: cross-package subtrees -- sign-in handoffs,
+system pickers, payment sheets -- are permanently uncapturable.
 
 ## Entry restore as a verified replay prerequisite
 
@@ -180,8 +183,7 @@ When investigating a failed or oscillating crawl, inspect the following
   fallback selection
 - `replay_route_step_*` for expected and observed replay fingerprints at every
   intermediate route step
-- `external_boundary_restore_result` for external-package Continue compatibility
-  decisions
+- `edge_skipped_external_package` for a click that left the target app
 
 ## Element identity (`ElementFingerprint`)
 

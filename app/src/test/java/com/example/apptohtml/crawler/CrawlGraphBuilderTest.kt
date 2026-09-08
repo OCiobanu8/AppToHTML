@@ -56,7 +56,7 @@ class CrawlGraphBuilderTest {
                     childIndexPath = listOf(1),
                     firstSeenStep = 0,
                     status = CrawlEdgeStatus.SKIPPED_EXTERNAL_PACKAGE,
-                    message = "User chose to stay inside the app.",
+                    message = "Skipped external package 'com.example.other'.",
                 ),
             ),
         )
@@ -81,7 +81,7 @@ class CrawlGraphBuilderTest {
             graph.edges.map { it.status },
         )
         assertEquals(
-            listOf(null, "User chose to stay inside the app."),
+            listOf(null, "Skipped external package 'com.example.other'."),
             graph.edges.map { it.message },
         )
     }

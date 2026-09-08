@@ -77,7 +77,6 @@ class CrawlRunTracker private constructor(
         childScreenId: String? = null,
         message: String? = null,
         childScreenName: String? = null,
-        approval: CrawlEdgeApproval = CrawlEdgeApproval.NONE,
         externalPackage: String? = null,
     ): String {
         val edgeId = "edge_%03d".format(nextEdgeSequence++)
@@ -94,7 +93,6 @@ class CrawlRunTracker private constructor(
             status = status,
             message = message,
             childScreenName = childScreenName,
-            approval = approval,
             externalPackage = externalPackage,
             isListItem = element.isListItem,
             checkable = element.checkable,
@@ -120,7 +118,6 @@ class CrawlRunTracker private constructor(
         childScreenId: String? = null,
         childScreenName: String? = null,
         message: String? = null,
-        approval: CrawlEdgeApproval? = null,
         externalPackage: String? = null,
     ): CrawlEdgeRecord {
         val index = edges.indexOfFirst { it.edgeId == edgeId }
@@ -131,18 +128,8 @@ class CrawlRunTracker private constructor(
             childScreenId = childScreenId ?: existing.childScreenId,
             childScreenName = childScreenName ?: existing.childScreenName,
             message = message ?: existing.message,
-            approval = approval ?: existing.approval,
             externalPackage = externalPackage ?: existing.externalPackage,
         )
-        edges[index] = updated
-        return updated
-    }
-
-    fun setEdgeApproval(edgeId: String, approval: CrawlEdgeApproval): CrawlEdgeRecord {
-        val index = edges.indexOfFirst { it.edgeId == edgeId }
-        require(index >= 0) { "Edge not found: $edgeId" }
-        val existing = edges[index]
-        val updated = existing.copy(approval = approval)
         edges[index] = updated
         return updated
     }

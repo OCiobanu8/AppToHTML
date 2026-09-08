@@ -32,7 +32,6 @@ internal class DeepCrawlCoordinator(
     private val crashContext = CrawlCrashContext()
     private var crawlLogger: CrawlLogger? = null
     private var lastLoggedManifestStatus: CrawlRunStatus? = null
-    private val allowedPackageNames = linkedSetOf<String>()
 
     suspend fun crawl(
         initialRoot: AccessibilityNodeSnapshot,
@@ -80,11 +79,6 @@ internal class DeepCrawlCoordinator(
         host.setActiveCrawlLogger(logger)
         lastLoggedManifestStatus = null
         crashContext.reset()
-        allowedPackageNames.clear()
-        allowedPackageNames += selectedApp.packageName
-        if (loaded != null) {
-            allowedPackageNames += loaded.allowedPackages
-        }
         resolvedLinksByScreenId.clear()
         loaded?.resolvedLinks?.forEach { (parentId, links) ->
             resolvedLinksByScreenId[parentId] = links.toMutableMap()
@@ -128,8 +122,7 @@ internal class DeepCrawlCoordinator(
                 rememberScreen(rootScreenId, loadedRoot.screenName)
                 logger.info(
                     "crawl_resume_hydrated rootScreenId=$rootScreenId rootScreenName=${quote(loadedRoot.screenName)} " +
-                        "screensLoaded=${loaded.screens.size} edgesLoaded=${loaded.edges.size} " +
-                        "allowedPackagesLoaded=${quote(formatAllowedPackageNames())}"
+                        "screensLoaded=${loaded.screens.size} edgesLoaded=${loaded.edges.size}"
                 )
             } else {
                 rootSnapshot = scanCurrentScreen(
@@ -510,11 +503,10 @@ internal class DeepCrawlCoordinator(
                     snapshot = snapshot,
                     element = element,
                     entryScreenLogicalFingerprint = entryScreenLogicalFingerprint,
-                    expectedChildPackageName = null,
                     expectedTopFingerprint = topFingerprint,
                     usesEntryFingerprint = usesEntryFingerprint,
                 )
-                var activeChildRoot = openedChild.root
+                val activeChildRoot = openedChild.root
                 val beforeClickFingerprint = openedChild.beforeClickFingerprint
                 val currentPackageName = screenRecord.packageName
                 val childPackageName = activeChildRoot.packageName ?: currentPackageName
@@ -545,172 +537,32 @@ internal class DeepCrawlCoordinator(
                     return@forEachIndexed
                 }
 
-                val externalPackage = childPackageName.takeIf { it != currentPackageName }
-                if (externalPackage != null) {
+                if (childPackageName != selectedApp.packageName) {
+                    // The target-app boundary is uncrossable. Accessibility cannot reveal a
+                    // control's destination before the click, so the crossing is detected here,
+                    // after the fact: record the edge, decline to capture, and move on. The crawler
+                    // is briefly standing in the foreign app; the next edge's restore falls through
+                    // to a relaunch of the target because the package probe fails.
                     tracker.updateEdgeStatus(
                         edgeId = currentEdgeId,
-                        status = CrawlEdgeStatus.IN_PROGRESS,
-                        externalPackage = externalPackage,
+                        status = CrawlEdgeStatus.SKIPPED_EXTERNAL_PACKAGE,
+                        message = "Skipped external package '$childPackageName'.",
+                        externalPackage = childPackageName,
                     )
-                }
-
-                if (childPackageName !in allowedPackageNames) {
-                    val pauseSnapshot = pauseTracker.progressSnapshot(
-                        capturedScreenCount = tracker.capturedScreenCount(),
-                        capturedChildScreenCount = tracker.capturedChildScreenCount(),
-                    )
-                    val externalPackageContext = ExternalPackageDecisionContext(
-                        currentPackageName = currentPackageName,
-                        nextPackageName = childPackageName,
-                        parentScreenId = screenRecord.screenId,
-                        parentScreenName = screenRecord.screenName,
-                        triggerLabel = element.label,
-                    )
-                    saveManifest(session, tracker, CrawlRunStatus.IN_PROGRESS)
-                    crawlLogger?.warn(
-                        "crawl_pause reason=${PauseReason.EXTERNAL_PACKAGE_BOUNDARY.name.lowercase()} " +
-                            "currentScreenId=${screenRecord.screenId} currentScreenName=${quote(screenRecord.screenName)} " +
-                            "currentPackageName=${quote(currentPackageName)} nextPackageName=${quote(childPackageName)} " +
-                            "triggerLabel=${quote(element.label)} elapsedTimeMs=${pauseSnapshot.elapsedTimeMs} " +
-                            "capturedScreenCount=${pauseSnapshot.capturedScreenCount} " +
-                            "capturedChildScreenCount=${pauseSnapshot.capturedChildScreenCount} " +
-                            "failedEdgeCount=${pauseSnapshot.failedEdgeCount}"
-                    )
-                    when (
-                        val decision = host.awaitPauseDecision(
-                            reason = PauseReason.EXTERNAL_PACKAGE_BOUNDARY,
-                            snapshot = pauseSnapshot,
-                            externalPackageContext = externalPackageContext,
-                        )
-                    ) {
-                        PauseDecision.CONTINUE -> {
-                            allowedPackageNames += childPackageName
-                            tracker.updateEdgeStatus(
-                                edgeId = currentEdgeId,
-                                status = CrawlEdgeStatus.IN_PROGRESS,
-                                approval = CrawlEdgeApproval.EXPLICIT,
-                                externalPackage = childPackageName,
-                            )
-                            rewriteScreenXmlFor(tracker, snapshot, screenRecord.screenId, CrawlRunStatus.IN_PROGRESS)
-                            val allowedPackageSet = formatAllowedPackageNames()
-                            crawlLogger?.info(
-                                "crawl_pause_resolved reason=${PauseReason.EXTERNAL_PACKAGE_BOUNDARY.name.lowercase()} " +
-                                    "decision=${decision.name.lowercase()} currentScreenId=${screenRecord.screenId} " +
-                                    "nextPackageName=${quote(childPackageName)}"
-                            )
-                            crawlLogger?.info(
-                                "external_package_accepted parentScreenId=${screenRecord.screenId} " +
-                                    "parentScreenName=${quote(screenRecord.screenName)} triggerLabel=${quote(element.label)} " +
-                                    "currentPackageName=${quote(currentPackageName)} nextPackageName=${quote(childPackageName)} " +
-                                    "allowedPackageNames=${quote(allowedPackageSet)} " +
-                                    "expectedDestinationFingerprint=${quote(afterClickFingerprint)} " +
-                                    "settleStopReason=${openedChild.settleStopReason.name.lowercase()} " +
-                                    "settleElapsedMillis=${openedChild.settleElapsedMillis} settleSampleCount=${openedChild.sampleCount} " +
-                                    "destinationCompatible=pending compatibilityReason=deferred_until_restore " +
-                                    "selectedMetrics=${quote(formatDestinationMetrics(openedChild.selectedMetrics))}"
-                            )
-                            crawlLogger?.info(
-                                "external_boundary_restore_attempt parentScreenId=${screenRecord.screenId} " +
-                                    "parentScreenName=${quote(screenRecord.screenName)} triggerLabel=${quote(element.label)} " +
-                                    "currentPackageName=${quote(currentPackageName)} nextPackageName=${quote(childPackageName)} " +
-                                    "allowedPackageNames=${quote(allowedPackageSet)} " +
-                                    "expectedDestinationFingerprint=${quote(afterClickFingerprint)}"
-                            )
-                            val restoredChild = openChildFromScreen(
-                                tracker = tracker,
-                                screenRecord = screenRecord,
-                                snapshot = snapshot,
-                                element = element,
-                                entryScreenLogicalFingerprint = entryScreenLogicalFingerprint,
-                                expectedChildPackageName = childPackageName,
-                                expectedTopFingerprint = topFingerprint,
-                                usesEntryFingerprint = usesEntryFingerprint,
-                            )
-                            val restoredRoot = restoredChild.root
-                            val restoredPackageName = restoredRoot.packageName
-                            val restoredFingerprint = restoredChild.fingerprint
-                            val compatibility = destinationSettler.compatibility(
-                                expectedRoot = activeChildRoot,
-                                expectedFingerprint = afterClickFingerprint,
-                                expectedMetrics = openedChild.selectedMetrics,
-                                actualRoot = restoredRoot,
-                                actualFingerprint = restoredFingerprint,
-                                actualMetrics = restoredChild.selectedMetrics,
-                            )
-                            crawlLogger?.info(
-                                "external_boundary_restore_result parentScreenId=${screenRecord.screenId} " +
-                                    "parentScreenName=${quote(screenRecord.screenName)} triggerLabel=${quote(element.label)} " +
-                                    "currentPackageName=${quote(currentPackageName)} nextPackageName=${quote(childPackageName)} " +
-                                    "allowedPackageNames=${quote(allowedPackageSet)} " +
-                                    "expectedPackageName=${quote(childPackageName)} actualPackageName=${quote(restoredPackageName.orEmpty())} " +
-                                    "expectedDestinationFingerprint=${quote(afterClickFingerprint)} " +
-                                    "actualDestinationFingerprint=${quote(restoredFingerprint)} " +
-                                    "destinationFingerprintMatched=${restoredFingerprint == afterClickFingerprint} " +
-                                    "destinationCompatible=${compatibility.isCompatible} " +
-                                    "compatibilityReason=${compatibility.reason.name.lowercase()} " +
-                                    "settleStopReason=${restoredChild.settleStopReason.name.lowercase()} " +
-                                    "settleElapsedMillis=${restoredChild.settleElapsedMillis} settleSampleCount=${restoredChild.sampleCount} " +
-                                    "expectedSelectedMetrics=${quote(formatDestinationMetrics(openedChild.selectedMetrics))} " +
-                                    "actualSelectedMetrics=${quote(formatDestinationMetrics(restoredChild.selectedMetrics))}"
-                            )
-                            if (restoredPackageName != childPackageName || !compatibility.isCompatible) {
-                                failCurrentEdge(
-                                    parentScreenId = screenRecord.screenId,
-                                    element = element,
-                                    message = "Could not restore external package screen '${element.label}' after continue decision.",
-                                )
-                            }
-                            activeChildRoot = restoredRoot
-                        }
-
-                        PauseDecision.SKIP_EDGE -> {
-                            tracker.updateEdgeStatus(
-                                edgeId = currentEdgeId,
-                                status = CrawlEdgeStatus.SKIPPED_EXTERNAL_PACKAGE,
-                                message = "Skipped external package '$childPackageName'.",
-                                externalPackage = childPackageName,
-                            )
-                            crawlLogger?.info(
-                                "edge_skipped_external_package parentScreenId=${screenRecord.screenId} " +
-                                    "parentScreenName=${quote(screenRecord.screenName)} currentPackageName=${quote(currentPackageName)} " +
-                                    "nextPackageName=${quote(childPackageName)} element=${formatElement(element)}"
-                            )
-                            CaptureFileStore.rewriteScreenHtml(
-                                files = filesFor(screenRecord),
-                                snapshot = snapshot,
-                                resolvedChildLinks = resolvedLinksByScreenId
-                                    .getOrPut(screenRecord.screenId) { mutableMapOf() },
-                            )
-                            rewriteScreenXmlFor(tracker, snapshot, screenRecord.screenId, CrawlRunStatus.IN_PROGRESS)
-                            saveManifest(session, tracker, CrawlRunStatus.IN_PROGRESS)
-                            return@forEachIndexed
-                        }
-
-                        PauseDecision.STOP -> {
-                            crawlLogger?.warn(
-                                "crawl_pause_resolved reason=${PauseReason.EXTERNAL_PACKAGE_BOUNDARY.name.lowercase()} " +
-                                    "decision=${decision.name.lowercase()} currentScreenId=${screenRecord.screenId} " +
-                                    "nextPackageName=${quote(childPackageName)}"
-                            )
-                            abortPartialCapture(
-                                tracker = tracker,
-                                failedParentScreenId = screenRecord.screenId,
-                                session = session,
-                                rootSnapshot = rootSnapshot,
-                                rootFiles = rootFiles,
-                                message = stopMessageForPauseReason(PauseReason.EXTERNAL_PACKAGE_BOUNDARY),
-                            )
-                        }
-                    }
-                } else if (childPackageName != currentPackageName) {
                     crawlLogger?.info(
-                        "external_package_already_allowed parentScreenId=${screenRecord.screenId} " +
-                            "parentScreenName=${quote(screenRecord.screenName)} triggerLabel=${quote(element.label)} " +
-                            "currentPackageName=${quote(currentPackageName)} nextPackageName=${quote(childPackageName)} " +
-                            "allowedPackageNames=${quote(formatAllowedPackageNames())} " +
-                            "expectedDestinationFingerprint=${quote(afterClickFingerprint)} " +
-                            "actualDestinationFingerprint=${quote(afterClickFingerprint)}"
+                        "edge_skipped_external_package parentScreenId=${screenRecord.screenId} " +
+                            "parentScreenName=${quote(screenRecord.screenName)} currentPackageName=${quote(currentPackageName)} " +
+                            "nextPackageName=${quote(childPackageName)} element=${formatElement(element)}"
                     )
+                    CaptureFileStore.rewriteScreenHtml(
+                        files = filesFor(screenRecord),
+                        snapshot = snapshot,
+                        resolvedChildLinks = resolvedLinksByScreenId
+                            .getOrPut(screenRecord.screenId) { mutableMapOf() },
+                    )
+                    rewriteScreenXmlFor(tracker, snapshot, screenRecord.screenId, CrawlRunStatus.IN_PROGRESS)
+                    saveManifest(session, tracker, CrawlRunStatus.IN_PROGRESS)
+                    return@forEachIndexed
                 }
 
                 host.publishProgress("Mapping screen opened by '${element.label}'.")
@@ -977,12 +829,6 @@ internal class DeepCrawlCoordinator(
                     message = stopMessageForPauseReason(reason),
                 )
             }
-
-            PauseDecision.SKIP_EDGE -> {
-                throw IllegalStateException(
-                    "Pause decision SKIP_EDGE is not supported for ${reason.name.lowercase()} checkpoints."
-                )
-            }
         }
     }
 
@@ -1088,13 +934,12 @@ internal class DeepCrawlCoordinator(
         snapshot: ScreenSnapshot,
         element: PressableElement,
         entryScreenLogicalFingerprint: String,
-        expectedChildPackageName: String?,
         expectedTopFingerprint: String,
         usesEntryFingerprint: Boolean,
     ): OpenedChildDestination {
         crawlLogger?.info(
             "child_open_restore_attempt parentScreenId=${screenRecord.screenId} parentScreenName=${quote(screenRecord.screenName)} " +
-                "triggerLabel=${quote(element.label)} expectedPackageName=${quote(expectedChildPackageName.orEmpty())} " +
+                "triggerLabel=${quote(element.label)} " +
                 "expectedTopFingerprint=${quote(expectedTopFingerprint)}"
         )
         val liveScreenRoot = restoreLiveScreenForEdge(
@@ -1126,7 +971,7 @@ internal class DeepCrawlCoordinator(
         if (liveTopFingerprint != expectedTopFingerprint) {
             crawlLogger?.info(
                 "child_open_restore_result parentScreenId=${screenRecord.screenId} parentScreenName=${quote(screenRecord.screenName)} " +
-                    "triggerLabel=${quote(element.label)} expectedPackageName=${quote(expectedChildPackageName.orEmpty())} " +
+                    "triggerLabel=${quote(element.label)} " +
                     "destinationFingerprintMatched=false result=top_fingerprint_mismatch"
             )
             failCurrentEdge(
@@ -1174,14 +1019,13 @@ internal class DeepCrawlCoordinator(
         val openedChild = captureChildDestinationAfterClick(
             screenRecord = screenRecord,
             element = element,
-            expectedChildPackageName = expectedChildPackageName,
             beforeClickFingerprint = beforeClickFingerprint,
             expectedTopFingerprint = expectedTopFingerprint,
             usesEntryFingerprint = usesEntryFingerprint,
         )
         crawlLogger?.info(
             "child_open_restore_result parentScreenId=${screenRecord.screenId} parentScreenName=${quote(screenRecord.screenName)} " +
-                "triggerLabel=${quote(element.label)} expectedPackageName=${quote(expectedChildPackageName.orEmpty())} " +
+                "triggerLabel=${quote(element.label)} " +
                 "actualPackageName=${quote(openedChild.root.packageName.orEmpty())} " +
                 "destinationFingerprintMatched=${openedChild.fingerprint != beforeClickFingerprint} " +
                 "settleStopReason=${openedChild.settleStopReason.name.lowercase()} " +
@@ -1194,7 +1038,6 @@ internal class DeepCrawlCoordinator(
     private suspend fun captureChildDestinationAfterClick(
         screenRecord: CrawlScreenRecord,
         element: PressableElement,
-        expectedChildPackageName: String?,
         beforeClickFingerprint: String,
         expectedTopFingerprint: String,
         usesEntryFingerprint: Boolean,
@@ -1209,7 +1052,7 @@ internal class DeepCrawlCoordinator(
         val result = destinationSettler.settle(
             DestinationSettleRequest(
                 parentPackageName = screenRecord.packageName,
-                expectedPackageName = expectedChildPackageName,
+                expectedPackageName = null,
                 beforeClickFingerprint = beforeClickFingerprint,
                 topFingerprint = expectedTopFingerprint,
                 mode = DestinationSettleMode.DISCOVERY,
@@ -1224,7 +1067,7 @@ internal class DeepCrawlCoordinator(
         logChildDestinationSettleSamples(
             screenRecord = screenRecord,
             element = element,
-            expectedChildPackageName = expectedChildPackageName,
+            expectedChildPackageName = null,
             beforeClickFingerprint = beforeClickFingerprint,
             expectedTopFingerprint = expectedTopFingerprint,
             settleResult = result,
@@ -1823,7 +1666,6 @@ internal class DeepCrawlCoordinator(
                 childScreenId = edge.childScreenId,
                 childScreenName = edge.childScreenName,
                 message = edge.message,
-                approval = edge.approval,
                 externalPackage = edge.externalPackage,
             )
         }.toMap()
@@ -1969,9 +1811,6 @@ internal class DeepCrawlCoordinator(
 
             PauseReason.FAILED_EDGE_COUNT_EXCEEDED ->
                 "Deep crawl stopped after reaching the failed-edge checkpoint."
-
-            PauseReason.EXTERNAL_PACKAGE_BOUNDARY ->
-                "Deep crawl stopped at an external-package boundary."
         }
     }
 
@@ -2138,14 +1977,6 @@ internal class DeepCrawlCoordinator(
         return if (values.isEmpty()) "<empty>" else values.joinToString(prefix = "[", postfix = "]")
     }
 
-    private fun formatAllowedPackageNames(): String {
-        return if (allowedPackageNames.isEmpty()) {
-            "<empty>"
-        } else {
-            allowedPackageNames.joinToString(prefix = "[", postfix = "]")
-        }
-    }
-
     private fun formatDestinationMetrics(metrics: DestinationRichnessMetrics?): String {
         if (metrics == null) {
             return "<none>"
@@ -2214,7 +2045,6 @@ internal class DeepCrawlCoordinator(
         suspend fun awaitPauseDecision(
             reason: PauseReason,
             snapshot: PauseProgressSnapshot,
-            externalPackageContext: ExternalPackageDecisionContext? = null,
         ): PauseDecision
         fun publishProgress(message: String)
         fun setActiveCrawlLogger(logger: CrawlLogger?)

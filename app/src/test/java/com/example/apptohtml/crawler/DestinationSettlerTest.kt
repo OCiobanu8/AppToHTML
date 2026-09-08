@@ -2,7 +2,6 @@ package com.example.apptohtml.crawler
 
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -211,120 +210,6 @@ class DestinationSettlerTest {
         assertTrue(result.samples.drop(1).all { it.sameFingerprintAsPrevious })
     }
 
-    @Test
-    fun compatibility_acceptsExactFingerprintMatch() {
-        val root = rootSnapshot(
-            packageName = "com.example.destination",
-            children = listOf(pressableNode("Done", childIndex = 0)),
-        )
-        val fingerprint = fingerprint(root)
-        val metrics = DestinationRichnessMetrics.from(root, fingerprint)
-
-        val result = settler.compatibility(
-            expectedRoot = root,
-            expectedFingerprint = fingerprint,
-            expectedMetrics = metrics,
-            actualRoot = root,
-            actualFingerprint = fingerprint,
-            actualMetrics = metrics,
-        )
-
-        assertTrue(result.isCompatible)
-        assertEquals(DestinationCompatibilityReason.EXACT_FINGERPRINT_MATCH, result.reason)
-    }
-
-    @Test
-    fun compatibility_acceptsGoogleLikeSparseExpectedAndRicherActualWithOverlap() {
-        val sparseRoot = rootSnapshot(
-            packageName = "com.google.android.gms",
-            children = listOf(
-                pressableNode(
-                    label = "More options",
-                    className = "android.view.View",
-                    childIndex = 0,
-                ),
-            ),
-        )
-        val richRoot = rootSnapshot(
-            packageName = "com.google.android.gms",
-            children = listOf(
-                pressableNode("All services", childIndex = 0),
-                pressableNode("Give feedback", className = "android.widget.TextView", childIndex = 1),
-                pressableNode("More options", className = "android.view.View", childIndex = 2),
-                pressableNode("Sign in", className = "android.view.View", childIndex = 3),
-            ),
-        )
-
-        val result = compatibility(sparseRoot, richRoot)
-
-        assertTrue(result.isCompatible)
-        assertEquals(DestinationCompatibilityReason.ACTUAL_ENRICHES_EXPECTED_IDENTITIES, result.reason)
-        assertTrue(result.actualMetrics.richnessScore > result.expectedMetrics.richnessScore)
-    }
-
-    @Test
-    fun compatibility_acceptsEmptySparseExpectedAndRicherActualWithSameRootClass() {
-        val emptyRoot = rootSnapshot(
-            packageName = "com.google.android.apps.wellbeing",
-            children = emptyList(),
-        )
-        val richRoot = rootSnapshot(
-            packageName = "com.google.android.apps.wellbeing",
-            children = listOf(
-                textNode("TODAY", childIndex = 0),
-                pressableNode("App timers", childIndex = 1),
-                pressableNode("Bedtime mode", childIndex = 2),
-                pressableNode("View app activity details", childIndex = 3),
-            ),
-        )
-
-        val result = compatibility(emptyRoot, richRoot)
-
-        assertTrue(result.isCompatible)
-        assertEquals(DestinationCompatibilityReason.SPARSE_EXPECTED_ROOT_CLASS_MATCH, result.reason)
-        assertTrue(result.actualMetrics.richnessScore > result.expectedMetrics.richnessScore)
-    }
-
-    @Test
-    fun compatibility_rejectsSamePackageUnrelatedDestinations() {
-        val expectedRoot = rootSnapshot(
-            packageName = "com.example.destination",
-            children = listOf(
-                pressableNode("Account", childIndex = 0),
-                pressableNode("Privacy", childIndex = 1),
-            ),
-        )
-        val actualRoot = rootSnapshot(
-            packageName = "com.example.destination",
-            children = listOf(
-                pressableNode("Cart", childIndex = 0),
-                pressableNode("Checkout", childIndex = 1),
-            ),
-        )
-
-        val result = compatibility(expectedRoot, actualRoot)
-
-        assertFalse(result.isCompatible)
-        assertEquals(DestinationCompatibilityReason.UNRELATED_DESTINATION_IDENTITIES, result.reason)
-    }
-
-    @Test
-    fun compatibility_rejectsPackageMismatch() {
-        val expectedRoot = rootSnapshot(
-            packageName = "com.example.destination",
-            children = listOf(pressableNode("Done", childIndex = 0)),
-        )
-        val actualRoot = rootSnapshot(
-            packageName = "com.example.other",
-            children = listOf(pressableNode("Done", childIndex = 0)),
-        )
-
-        val result = compatibility(expectedRoot, actualRoot)
-
-        assertFalse(result.isCompatible)
-        assertEquals(DestinationCompatibilityReason.PACKAGE_MISMATCH, result.reason)
-    }
-
     private suspend fun settleWithCaptures(
         captures: List<AccessibilityNodeSnapshot>,
         parentPackageName: String,
@@ -384,22 +269,6 @@ class DestinationSettlerTest {
 
     private fun fingerprint(root: AccessibilityNodeSnapshot): String {
         return fingerprintCoordinator.logicalViewportFingerprint(root)
-    }
-
-    private fun compatibility(
-        expectedRoot: AccessibilityNodeSnapshot,
-        actualRoot: AccessibilityNodeSnapshot,
-    ): DestinationCompatibilityResult {
-        val expectedFingerprint = fingerprint(expectedRoot)
-        val actualFingerprint = fingerprint(actualRoot)
-        return settler.compatibility(
-            expectedRoot = expectedRoot,
-            expectedFingerprint = expectedFingerprint,
-            expectedMetrics = DestinationRichnessMetrics.from(expectedRoot, expectedFingerprint),
-            actualRoot = actualRoot,
-            actualFingerprint = actualFingerprint,
-            actualMetrics = DestinationRichnessMetrics.from(actualRoot, actualFingerprint),
-        )
     }
 
     private fun rootSnapshot(

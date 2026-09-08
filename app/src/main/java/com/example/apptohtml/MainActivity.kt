@@ -44,7 +44,6 @@ import com.example.apptohtml.crawler.ResumeMode
 import com.example.apptohtml.crawler.ScreenExpansionStatus
 import com.example.apptohtml.crawler.SnapshotStatus
 import com.example.apptohtml.model.SelectedAppRef
-import com.example.apptohtml.storage.AllowedPackage
 import com.example.apptohtml.storage.SelectedAppRepository
 import com.example.apptohtml.storage.SavedCrawlRepository
 import com.example.apptohtml.storage.SavedCrawlSnapshot
@@ -245,13 +244,6 @@ private fun AppToHtmlScreen(
                 )
             },
             onNewCrawl = { showNewCrawlConfirmation = true },
-            onRevokeApproval = { edgeId ->
-                selectedApp?.packageName?.let { packageName ->
-                    if (savedCrawlRepository.revokeApproval(packageName, edgeId)) {
-                        savedCrawlRepository.refresh()
-                    }
-                }
-            },
         )
         Text(crawlerState.statusMessage)
         if (!canStartCapture) {
@@ -285,17 +277,6 @@ private fun AppToHtmlScreen(
                 }
                 crawlerState.pausedCapturedChildScreenCount?.let { count ->
                     Text("Captured child screens so far: $count")
-                }
-                if (crawlerState.pauseReason == PauseReason.EXTERNAL_PACKAGE_BOUNDARY) {
-                    crawlerState.pauseCurrentPackageName?.let { packageName ->
-                        Text("Current package: $packageName")
-                    }
-                    crawlerState.pauseNextPackageName?.let { packageName ->
-                        Text("Next package: $packageName")
-                    }
-                    crawlerState.pauseTriggerLabel?.let { label ->
-                        Text("Trigger label: $label")
-                    }
                 }
             }
 
@@ -475,7 +456,6 @@ private fun SavedCrawlSection(
     onResumeFromScreen: (SelectedAppRef, String) -> Unit,
     onReExpandScreen: (SelectedAppRef, String) -> Unit,
     onNewCrawl: () -> Unit,
-    onRevokeApproval: (String) -> Unit,
 ) {
     HorizontalDivider()
     Text("Saved crawl", style = MaterialTheme.typography.titleMedium)
@@ -520,18 +500,6 @@ private fun SavedCrawlSection(
                 onResumeFromScreen = onResumeFromScreen,
                 onReExpandScreen = onReExpandScreen,
             )
-        }
-    }
-
-    if (snapshot.allowedPackages.isNotEmpty()) {
-        Text("Allowed external packages", style = MaterialTheme.typography.titleSmall)
-        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-            snapshot.allowedPackages.forEach { allowedPackage ->
-                AllowedPackageRow(
-                    allowedPackage = allowedPackage,
-                    onRevokeApproval = onRevokeApproval,
-                )
-            }
         }
     }
 }
@@ -598,38 +566,6 @@ private fun SavedScreenRow(
     }
 }
 
-@Composable
-private fun AllowedPackageRow(
-    allowedPackage: AllowedPackage,
-    onRevokeApproval: (String) -> Unit,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth(),
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(allowedPackage.packageName)
-            Text(
-                text = buildString {
-                    append("approved from ")
-                    append(allowedPackage.parentScreenName)
-                    allowedPackage.triggerLabel?.let { label ->
-                        append(" -> ")
-                        append(label)
-                    }
-                },
-                style = MaterialTheme.typography.bodySmall,
-            )
-        }
-        TextButton(
-            onClick = {
-                onRevokeApproval(allowedPackage.edgeId)
-            }
-        ) {
-            Text("Revoke")
-        }
-    }
-}
 
 private fun screenStatusText(status: ScreenExpansionStatus): String {
     return when (status) {
@@ -643,7 +579,6 @@ private fun screenStatusText(status: ScreenExpansionStatus): String {
 private fun PauseDecisionDialog(crawlerState: com.example.apptohtml.crawler.CrawlerUiState) {
     val requestId = crawlerState.requestId ?: return
     val decisionId = crawlerState.pauseDecisionId ?: return
-    val isExternalPackagePause = crawlerState.pauseReason == PauseReason.EXTERNAL_PACKAGE_BOUNDARY
 
     AlertDialog(
         onDismissRequest = {},
@@ -663,17 +598,6 @@ private fun PauseDecisionDialog(crawlerState: com.example.apptohtml.crawler.Craw
                 crawlerState.pausedCapturedChildScreenCount?.let { count ->
                     Text("Captured child screens so far: $count")
                 }
-                if (isExternalPackagePause) {
-                    crawlerState.pauseCurrentPackageName?.let { packageName ->
-                        Text("Current package: $packageName")
-                    }
-                    crawlerState.pauseNextPackageName?.let { packageName ->
-                        Text("Next package: $packageName")
-                    }
-                    crawlerState.pauseTriggerLabel?.let { label ->
-                        Text("Trigger label: $label")
-                    }
-                }
             }
         },
         confirmButton = {
@@ -685,38 +609,19 @@ private fun PauseDecisionDialog(crawlerState: com.example.apptohtml.crawler.Craw
                     )
                 }
             ) {
-                Text(
-                    if (isExternalPackagePause) {
-                        "Continue outside package"
-                    } else {
-                        "Continue"
-                    }
-                )
+                Text("Continue")
             }
         },
         dismissButton = {
             TextButton(
                 onClick = {
-                    if (isExternalPackagePause) {
-                        CrawlerSession.skipExternalEdge(
-                            requestId = requestId,
-                            decisionId = decisionId,
-                        )
-                    } else {
-                        CrawlerSession.stopAndSave(
-                            requestId = requestId,
-                            decisionId = decisionId,
-                        )
-                    }
+                    CrawlerSession.stopAndSave(
+                        requestId = requestId,
+                        decisionId = decisionId,
+                    )
                 }
             ) {
-                Text(
-                    if (isExternalPackagePause) {
-                        "Skip edge"
-                    } else {
-                        "Stop and save"
-                    }
-                )
+                Text("Stop and save")
             }
         },
     )
@@ -729,9 +634,6 @@ private fun pauseReasonText(reason: PauseReason?): String {
 
         PauseReason.FAILED_EDGE_COUNT_EXCEEDED ->
             "The crawl reached its failed-edge checkpoint and is waiting for your decision."
-
-        PauseReason.EXTERNAL_PACKAGE_BOUNDARY ->
-            "The crawl is about to continue into another package and needs your approval."
 
         null -> "The crawl is paused and waiting for your decision."
     }

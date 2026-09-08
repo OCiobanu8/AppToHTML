@@ -11,7 +11,6 @@ data class LoadedCrawlState(
     val nextScreenSequence: Int,
     val nextEdgeSequence: Int,
     val runLevel: RunLevelState?,
-    val allowedPackages: Set<String>,
     val resolvedLinks: Map<String, Map<PressableElementLinkKey, String>>,
 )
 
@@ -98,7 +97,6 @@ object SavedCrawlLoader {
             }
         }
 
-        val allowedPackages = mutableSetOf<String>()
         for (loaded in loadedList) {
             val parentScreenId = loaded.payload.head.screenId
             val elements = loaded.payload.elements
@@ -128,7 +126,6 @@ object SavedCrawlLoader {
                     status = normalizedStatus,
                     message = normalizedMessage,
                     childScreenName = edgeView.childScreenName,
-                    approval = edgeView.approval,
                     externalPackage = edgeView.externalPackage,
                     isListItem = element.isListItem,
                     checkable = element.checkable,
@@ -136,15 +133,6 @@ object SavedCrawlLoader {
                 )
                 CrawlRunTracker.parseEdgeSequence(edgeView.edgeId)?.let { seq ->
                     if (seq > maxEdgeSeq) maxEdgeSeq = seq
-                }
-                if (edgeView.approval == CrawlEdgeApproval.EXPLICIT) {
-                    val childId = edgeView.childScreenId
-                    val approvedPackage = edgeView.externalPackage
-                        ?.takeIf { it.isNotBlank() }
-                        ?: childId?.let { screensById[it]?.packageName }
-                    if (!approvedPackage.isNullOrBlank()) {
-                        allowedPackages += approvedPackage
-                    }
                 }
                 if (edgeView.status == CrawlEdgeStatus.CAPTURED ||
                     edgeView.status == CrawlEdgeStatus.LINKED_EXISTING
@@ -167,7 +155,6 @@ object SavedCrawlLoader {
             nextScreenSequence = maxScreenSeq + 1,
             nextEdgeSequence = maxEdgeSeq + 1,
             runLevel = runLevel,
-            allowedPackages = allowedPackages,
             resolvedLinks = resolvedLinks,
         )
     }

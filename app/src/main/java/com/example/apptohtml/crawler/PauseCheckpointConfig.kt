@@ -10,7 +10,6 @@ data class PauseCheckpointConfig(
 enum class PauseReason {
     ELAPSED_TIME_EXCEEDED,
     FAILED_EDGE_COUNT_EXCEEDED,
-    EXTERNAL_PACKAGE_BOUNDARY,
 }
 
 data class PauseProgressSnapshot(
@@ -20,16 +19,7 @@ data class PauseProgressSnapshot(
     val failedEdgeCount: Int,
 )
 
-data class ExternalPackageDecisionContext(
-    val currentPackageName: String,
-    val nextPackageName: String,
-    val parentScreenId: String,
-    val parentScreenName: String,
-    val triggerLabel: String,
-)
-
 enum class PauseDecision {
     CONTINUE,
     STOP,
-    SKIP_EDGE,
 }

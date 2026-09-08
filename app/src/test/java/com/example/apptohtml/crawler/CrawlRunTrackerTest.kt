@@ -29,7 +29,6 @@ class CrawlRunTrackerTest {
         assertEquals("screen_00000", edge.parentScreenId)
         assertNull(edge.childScreenId)
         assertNull(edge.childScreenName)
-        assertEquals(CrawlEdgeApproval.NONE, edge.approval)
     }
 
     @Test
@@ -57,28 +56,6 @@ class CrawlRunTrackerTest {
         assertEquals(CrawlEdgeStatus.CAPTURED, edge.status)
         assertEquals("screen_00001", edge.childScreenId)
         assertEquals("Settings", edge.childScreenName)
-    }
-
-    @Test
-    fun updateEdgeStatus_can_set_approval_explicit() {
-        val tracker = CrawlRunTracker(
-            sessionId = "session",
-            packageName = "com.example.app",
-            startedAt = 1L,
-        )
-        val edgeId = tracker.addPendingEdge(
-            parentScreenId = "screen_00000",
-            element = sampleElement(),
-        )
-
-        tracker.updateEdgeStatus(
-            edgeId = edgeId,
-            status = CrawlEdgeStatus.CAPTURED,
-            childScreenId = "screen_00001",
-            approval = CrawlEdgeApproval.EXPLICIT,
-        )
-
-        assertEquals(CrawlEdgeApproval.EXPLICIT, tracker.findEdge(edgeId)!!.approval)
     }
 
     @Test
@@ -112,29 +89,6 @@ class CrawlRunTrackerTest {
         assertEquals(CrawlEdgeStatus.CAPTURED, edge!!.status)
         assertEquals("screen_00001", edge.childScreenId)
         assertEquals("com.external.app", edge.externalPackage)
-    }
-
-    @Test
-    fun setEdgeApproval_flips_to_revoked() {
-        val tracker = CrawlRunTracker(
-            sessionId = "session",
-            packageName = "com.example.app",
-            startedAt = 1L,
-        )
-        val edgeId = tracker.addPendingEdge(
-            parentScreenId = "screen_00000",
-            element = sampleElement(),
-        )
-        tracker.updateEdgeStatus(
-            edgeId = edgeId,
-            status = CrawlEdgeStatus.CAPTURED,
-            childScreenId = "screen_00001",
-            approval = CrawlEdgeApproval.EXPLICIT,
-        )
-
-        tracker.setEdgeApproval(edgeId, CrawlEdgeApproval.REVOKED)
-
-        assertEquals(CrawlEdgeApproval.REVOKED, tracker.findEdge(edgeId)!!.approval)
     }
 
     @Test
