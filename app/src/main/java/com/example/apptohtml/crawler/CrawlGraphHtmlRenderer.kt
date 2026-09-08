@@ -620,7 +620,7 @@ $statusFilters
                     linked_existing: { label: "Linked Existing", description: "Traversal returned to a previously discovered screen." },
                     skipped_blacklist: { label: "Skipped Blacklist", description: "Edge was skipped by safety rules." },
                     skipped_no_navigation: { label: "Skipped No Navigation", description: "Tap did not lead to a new screen." },
-                    skipped_external_package: { label: "Skipped External Package", description: "User chose to stay inside the selected app." },
+                    skipped_external_package: { label: "Skipped External Package", description: "Click left the selected app; the crawler never follows it." },
                     failed: { label: "Failed", description: "Traversal could not capture the child screen." }
                   };
                   var layout = {

@@ -29,9 +29,6 @@ data class CrawlerUiState(
     val pauseFailedEdgeCount: Int? = null,
     val pausedCapturedScreenCount: Int? = null,
     val pausedCapturedChildScreenCount: Int? = null,
-    val pauseCurrentPackageName: String? = null,
-    val pauseNextPackageName: String? = null,
-    val pauseTriggerLabel: String? = null,
     val screenName: String? = null,
     val htmlPath: String? = null,
     val xmlPath: String? = null,
@@ -78,9 +75,6 @@ data class CrawlerUiState(
         pauseFailedEdgeCount = null,
         pausedCapturedScreenCount = null,
         pausedCapturedChildScreenCount = null,
-        pauseCurrentPackageName = null,
-        pauseNextPackageName = null,
-        pauseTriggerLabel = null,
         screenName = null,
         htmlPath = null,
         xmlPath = null,
@@ -101,9 +95,6 @@ data class CrawlerUiState(
         pauseFailedEdgeCount = null,
         pausedCapturedScreenCount = null,
         pausedCapturedChildScreenCount = null,
-        pauseCurrentPackageName = null,
-        pauseNextPackageName = null,
-        pauseTriggerLabel = null,
         screenName = null,
         htmlPath = null,
         xmlPath = null,
@@ -129,9 +120,6 @@ data class CrawlerUiState(
         pauseFailedEdgeCount = null,
         pausedCapturedScreenCount = null,
         pausedCapturedChildScreenCount = null,
-        pauseCurrentPackageName = null,
-        pauseNextPackageName = null,
-        pauseTriggerLabel = null,
         failureMessage = null,
     )
 
@@ -139,7 +127,6 @@ data class CrawlerUiState(
         decisionId: Long,
         reason: PauseReason,
         snapshot: PauseProgressSnapshot,
-        externalPackageContext: ExternalPackageDecisionContext? = null,
     ): CrawlerUiState = copy(
         phase = CrawlerPhase.PAUSED_FOR_DECISION,
         statusMessage = pauseMessage(reason),
@@ -149,9 +136,6 @@ data class CrawlerUiState(
         pauseFailedEdgeCount = snapshot.failedEdgeCount,
         pausedCapturedScreenCount = snapshot.capturedScreenCount,
         pausedCapturedChildScreenCount = snapshot.capturedChildScreenCount,
-        pauseCurrentPackageName = externalPackageContext?.currentPackageName,
-        pauseNextPackageName = externalPackageContext?.nextPackageName,
-        pauseTriggerLabel = externalPackageContext?.triggerLabel,
         failureMessage = null,
     )
 
@@ -164,9 +148,6 @@ data class CrawlerUiState(
         pauseFailedEdgeCount = null,
         pausedCapturedScreenCount = null,
         pausedCapturedChildScreenCount = null,
-        pauseCurrentPackageName = null,
-        pauseNextPackageName = null,
-        pauseTriggerLabel = null,
         failureMessage = null,
     )
 
@@ -183,9 +164,6 @@ data class CrawlerUiState(
         pauseFailedEdgeCount = null,
         pausedCapturedScreenCount = null,
         pausedCapturedChildScreenCount = null,
-        pauseCurrentPackageName = null,
-        pauseNextPackageName = null,
-        pauseTriggerLabel = null,
         screenName = summary.rootScreenName,
         htmlPath = summary.rootFiles.htmlFile.absolutePath,
         xmlPath = summary.rootFiles.xmlFile.absolutePath,
@@ -211,9 +189,6 @@ data class CrawlerUiState(
         pauseFailedEdgeCount = null,
         pausedCapturedScreenCount = null,
         pausedCapturedChildScreenCount = null,
-        pauseCurrentPackageName = null,
-        pauseNextPackageName = null,
-        pauseTriggerLabel = null,
         screenName = summary.rootScreenName,
         htmlPath = summary.rootFiles.htmlFile.absolutePath,
         xmlPath = summary.rootFiles.xmlFile.absolutePath,
@@ -239,9 +214,6 @@ data class CrawlerUiState(
         pauseFailedEdgeCount = null,
         pausedCapturedScreenCount = null,
         pausedCapturedChildScreenCount = null,
-        pauseCurrentPackageName = null,
-        pauseNextPackageName = null,
-        pauseTriggerLabel = null,
         failureMessage = message,
         screenName = null,
         htmlPath = null,
@@ -269,9 +241,6 @@ data class CrawlerUiState(
 
             PauseReason.FAILED_EDGE_COUNT_EXCEEDED ->
                 "Deep crawl paused after reaching the failed-edge checkpoint."
-
-            PauseReason.EXTERNAL_PACKAGE_BOUNDARY ->
-                "Deep crawl paused before continuing into another package."
         }
     }
 }
@@ -442,12 +411,6 @@ enum class CrawlEdgeStatus {
     FAILED,
 }
 
-enum class CrawlEdgeApproval {
-    NONE,
-    EXPLICIT,
-    REVOKED,
-}
-
 enum class CrawlStartIntent {
     NEW_CRAWL,
     RESUME,
@@ -490,7 +453,6 @@ data class CrawlEdgeRecord(
     val status: CrawlEdgeStatus,
     val message: String? = null,
     val childScreenName: String? = null,
-    val approval: CrawlEdgeApproval = CrawlEdgeApproval.NONE,
     val externalPackage: String? = null,
     // Identity fields carried from the originating PressableElement so an edge can be compared to
     // an element via ElementFingerprint. Not separately serialized — the parent <element> persists
@@ -526,7 +488,6 @@ data class EdgeXmlView(
     val childScreenId: String? = null,
     val childScreenName: String? = null,
     val message: String? = null,
-    val approval: CrawlEdgeApproval = CrawlEdgeApproval.NONE,
     val externalPackage: String? = null,
 )
 

@@ -17,6 +17,11 @@
   pre-refactor behavior first, and show at least one injected mutation turning them red before
   trusting them. Uncovered code is the case where a green suite is most reassuring and least
   informative.
+- **Enumerate tests to retire by behavior, not by name.** When a change removes a behavior, find
+  its pins by what they *assert* — the fixture they build, the outcome they demand — not by
+  grepping test names for the feature. A pin written under one feature is often named for another,
+  and the ones a name-search misses are exactly the ones that still pass for the wrong reason.
+
 - **Prefer executable checks to inspection.** Any acceptance criterion that *can* be a
   test/build/lint check *must* be one; human inspection is the last resort.
 

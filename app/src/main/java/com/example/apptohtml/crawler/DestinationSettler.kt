@@ -153,93 +153,6 @@ internal class DestinationSettler {
         )
     }
 
-    fun compatibility(
-        expectedRoot: AccessibilityNodeSnapshot,
-        expectedFingerprint: String,
-        expectedMetrics: DestinationRichnessMetrics,
-        actualRoot: AccessibilityNodeSnapshot,
-        actualFingerprint: String,
-        actualMetrics: DestinationRichnessMetrics,
-    ): DestinationCompatibilityResult {
-        val expectedPackageName = expectedRoot.packageName
-        val actualPackageName = actualRoot.packageName
-        if (expectedPackageName == null || actualPackageName == null || expectedPackageName != actualPackageName) {
-            return DestinationCompatibilityResult(
-                isCompatible = false,
-                reason = DestinationCompatibilityReason.PACKAGE_MISMATCH,
-                expectedMetrics = expectedMetrics,
-                actualMetrics = actualMetrics,
-            )
-        }
-
-        if (expectedFingerprint == actualFingerprint) {
-            return DestinationCompatibilityResult(
-                isCompatible = true,
-                reason = DestinationCompatibilityReason.EXACT_FINGERPRINT_MATCH,
-                expectedMetrics = expectedMetrics,
-                actualMetrics = actualMetrics,
-            )
-        }
-
-        val expectedIdentities = meaningfulPressableIdentities(expectedRoot)
-        val actualIdentities = meaningfulPressableIdentities(actualRoot)
-        if (expectedIdentities.isNotEmpty() && actualIdentities.isNotEmpty()) {
-            val expectedSubsetOfActual = actualIdentities.containsAll(expectedIdentities)
-            val actualSubsetOfExpected = expectedIdentities.containsAll(actualIdentities)
-            if (expectedSubsetOfActual && actualMetrics.richnessScore >= expectedMetrics.richnessScore) {
-                return DestinationCompatibilityResult(
-                    isCompatible = true,
-                    reason = DestinationCompatibilityReason.ACTUAL_ENRICHES_EXPECTED_IDENTITIES,
-                    expectedMetrics = expectedMetrics,
-                    actualMetrics = actualMetrics,
-                )
-            }
-            if (actualSubsetOfExpected && expectedMetrics.richnessScore >= actualMetrics.richnessScore) {
-                return DestinationCompatibilityResult(
-                    isCompatible = true,
-                    reason = DestinationCompatibilityReason.ACTUAL_IS_COMPATIBLE_SUBSET,
-                    expectedMetrics = expectedMetrics,
-                    actualMetrics = actualMetrics,
-                )
-            }
-
-            val overlappingIdentityCount = expectedIdentities.intersect(actualIdentities).size
-            if (
-                expectedLooksSparseForCompatibility(expectedMetrics) &&
-                overlappingIdentityCount > 0 &&
-                actualMetrics.richnessScore >= expectedMetrics.richnessScore
-            ) {
-                return DestinationCompatibilityResult(
-                    isCompatible = true,
-                    reason = DestinationCompatibilityReason.SPARSE_EXPECTED_IDENTITY_OVERLAP,
-                    expectedMetrics = expectedMetrics,
-                    actualMetrics = actualMetrics,
-                )
-            }
-        }
-
-        if (
-            expectedIdentities.isEmpty() &&
-            expectedLooksSparseForCompatibility(expectedMetrics) &&
-            expectedRoot.className == actualRoot.className &&
-            actualMetrics.richnessScore >= expectedMetrics.richnessScore
-        ) {
-            return DestinationCompatibilityResult(
-                isCompatible = true,
-                reason = DestinationCompatibilityReason.SPARSE_EXPECTED_ROOT_CLASS_MATCH,
-                expectedMetrics = expectedMetrics,
-                actualMetrics = actualMetrics,
-            )
-        }
-
-        return DestinationCompatibilityResult(
-            isCompatible = false,
-            reason = DestinationCompatibilityReason.UNRELATED_DESTINATION_IDENTITIES,
-            expectedMetrics = expectedMetrics,
-            actualMetrics = actualMetrics,
-        )
-    }
-
     private fun eligibilityReason(
         request: DestinationSettleRequest,
         packageName: String?,
@@ -321,40 +234,6 @@ internal class DestinationSettler {
         )
     }
 
-    private fun meaningfulPressableIdentities(root: AccessibilityNodeSnapshot): Set<String> {
-        return AccessibilityTreeSnapshotter.collectPressableElements(root)
-            .mapNotNull(::meaningfulPressableIdentity)
-            .toSet()
-    }
-
-    private fun meaningfulPressableIdentity(element: PressableElement): String? {
-        val label = normalizeCompatibilityToken(element.label)
-        val resourceId = normalizeCompatibilityToken(element.resourceId)
-        if (label.isEmpty() && resourceId.isEmpty()) {
-            return null
-        }
-        return buildList {
-            add(label)
-            add(resourceId)
-            add(normalizeCompatibilityToken(element.className))
-            add(element.isListItem.toString())
-            add(element.checkable.toString())
-            add(element.checked.toString())
-            add(element.editable.toString())
-        }.joinToString("|")
-    }
-
-    private fun normalizeCompatibilityToken(value: String?): String {
-        return value
-            ?.trim()
-            ?.lowercase()
-            .orEmpty()
-    }
-
-    private fun expectedLooksSparseForCompatibility(metrics: DestinationRichnessMetrics): Boolean {
-        return metrics.distinctPressableCount <= 1 &&
-            metrics.visibleTextOrContentDescriptionCount <= 1
-    }
 }
 
 internal data class DestinationSettleRequest(
@@ -395,13 +274,6 @@ internal data class DestinationSample(
     val eligible: Boolean,
     val eligibilityReason: DestinationEligibilityReason,
     val becameCurrentBest: Boolean,
-)
-
-internal data class DestinationCompatibilityResult(
-    val isCompatible: Boolean,
-    val reason: DestinationCompatibilityReason,
-    val expectedMetrics: DestinationRichnessMetrics,
-    val actualMetrics: DestinationRichnessMetrics,
 )
 
 internal data class DestinationRichnessMetrics(
@@ -507,12 +379,3 @@ internal enum class DestinationEligibilityReason(val isEligible: Boolean) {
     UNCHANGED_FROM_PARENT(false),
 }
 
-internal enum class DestinationCompatibilityReason {
-    PACKAGE_MISMATCH,
-    EXACT_FINGERPRINT_MATCH,
-    ACTUAL_ENRICHES_EXPECTED_IDENTITIES,
-    ACTUAL_IS_COMPATIBLE_SUBSET,
-    SPARSE_EXPECTED_IDENTITY_OVERLAP,
-    SPARSE_EXPECTED_ROOT_CLASS_MATCH,
-    UNRELATED_DESTINATION_IDENTITIES,
-}

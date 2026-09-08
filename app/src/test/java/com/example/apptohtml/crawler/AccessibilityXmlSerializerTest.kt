@@ -144,7 +144,6 @@ class AccessibilityXmlSerializerTest {
                     status = CrawlEdgeStatus.CAPTURED,
                     childScreenId = "screen_00007",
                     childScreenName = "Detail",
-                    approval = CrawlEdgeApproval.EXPLICIT,
                     externalPackage = "com.example.other",
                 )
             )
@@ -154,7 +153,7 @@ class AccessibilityXmlSerializerTest {
 
         assertTrue(
             xml.contains(
-                """<edge id="edge_001" status="captured" child-screen-id="screen_00007" child-screen-name="Detail" approval="explicit" external-package="com.example.other" />"""
+                """<edge id="edge_001" status="captured" child-screen-id="screen_00007" child-screen-name="Detail" external-package="com.example.other" />"""
             )
         )
     }

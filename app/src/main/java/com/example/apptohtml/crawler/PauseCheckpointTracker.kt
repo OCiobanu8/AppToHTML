@@ -31,8 +31,6 @@ internal class PauseCheckpointTracker(
             PauseReason.FAILED_EDGE_COUNT_EXCEEDED -> {
                 nextFailedEdgeBudget += config.subsequentFailedEdgeThreshold
             }
-
-            PauseReason.EXTERNAL_PACKAGE_BOUNDARY -> Unit
         }
     }
 

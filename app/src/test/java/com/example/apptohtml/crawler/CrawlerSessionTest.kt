@@ -127,44 +127,6 @@ class CrawlerSessionTest {
     }
 
     @Test
-    fun skipExternalEdge_completes_deferred_with_skip_edge() = runBlocking {
-        uiStateFlow.value = traversingState(requestId = 5005L)
-
-        val pauseResult = async {
-            CrawlerSession.pauseForDecision(
-                reason = PauseReason.EXTERNAL_PACKAGE_BOUNDARY,
-                snapshot = PauseProgressSnapshot(
-                    elapsedTimeMs = 15_000L,
-                    capturedScreenCount = 6,
-                    capturedChildScreenCount = 5,
-                    failedEdgeCount = 0,
-                ),
-                externalPackageContext = ExternalPackageDecisionContext(
-                    currentPackageName = "com.example.target",
-                    nextPackageName = "com.google.android.googlequicksearchbox",
-                    parentScreenId = "screen_00000",
-                    parentScreenName = "Home",
-                    triggerLabel = "Open Google",
-                ),
-            )
-        }
-
-        waitForPause()
-        val pausedState = CrawlerSession.currentState()
-        val decisionId = pausedState.pauseDecisionId
-
-        assertEquals("com.example.target", pausedState.pauseCurrentPackageName)
-        assertEquals("com.google.android.googlequicksearchbox", pausedState.pauseNextPackageName)
-        assertEquals("Open Google", pausedState.pauseTriggerLabel)
-
-        CrawlerSession.skipExternalEdge(requestId = 5005L, decisionId = decisionId!!)
-
-        assertEquals(PauseDecision.SKIP_EDGE, pauseResult.await())
-        assertEquals(CrawlerPhase.TRAVERSING_CHILD_SCREENS, CrawlerSession.currentState().phase)
-        assertNull(CrawlerSession.currentState().pauseDecisionId)
-    }
-
-    @Test
     fun stale_pause_decision_id_is_ignored() = runBlocking {
         uiStateFlow.value = traversingState(requestId = 6006L)
 

@@ -80,7 +80,7 @@ codebase is intentionally small, with most logic grouped by responsibility.
 - Receives accessibility events while the target app is active.
 - Coordinates crawl start, progress, pause, completion, and failure.
 - Publishes pause metadata and graph artifact paths to the UI.
-- Resolves user decisions for checkpoint pauses and external-package boundaries.
+- Resolves user decisions for checkpoint pauses.
 
 **Boundary**
 
@@ -158,11 +158,11 @@ are attempted in score order.
   the screen identity it should reach.
 - Verifies entry restore against an expected logical fingerprint before
   treating the current root as replay-ready.
-- Settles clicked destinations and external-package boundaries.
+- Settles clicked destinations and detects external-package boundaries.
 - Gates click fallback candidates by meaningful eligibility (resource id,
   label, class plus bounds, or strong bounds for icon-only controls).
 - Expands the breadth-first crawl frontier.
-- Handles pause checkpoints and external-package boundaries.
+- Handles pause checkpoints, and skips external-package destinations automatically.
 - Names the captured screen.
 - Launches the target app and returns to AppToHTML.
 

@@ -30,7 +30,6 @@ import com.example.apptohtml.crawler.CrawlerPhase
 import com.example.apptohtml.crawler.CrawlerSession
 import com.example.apptohtml.crawler.DeepCrawlCoordinator
 import com.example.apptohtml.crawler.EntryScreenResetOutcome
-import com.example.apptohtml.crawler.ExternalPackageDecisionContext
 import com.example.apptohtml.crawler.LiveActionIds
 import com.example.apptohtml.crawler.LiveNodeActions
 import com.example.apptohtml.crawler.LiveNodeAttributes
@@ -393,12 +392,10 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
                     override suspend fun awaitPauseDecision(
                         reason: PauseReason,
                         snapshot: PauseProgressSnapshot,
-                        externalPackageContext: ExternalPackageDecisionContext?,
                     ): PauseDecision {
                         return CrawlerSession.pauseForDecision(
                             reason = reason,
                             snapshot = snapshot,
-                            externalPackageContext = externalPackageContext,
                         )
                     }
 

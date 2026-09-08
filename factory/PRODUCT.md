@@ -20,7 +20,7 @@ plus a crawl index.
 5. **Export** per-session artifacts (HTML, XML, and a crawl index) to per-session directories.
 
 The crawl is a bounded, resumable, safety-gated traversal — not an exhaustive spider. It settles
-destinations, honors checkpoints, and asks before crossing app boundaries.
+destinations, honors checkpoints, and never crosses app boundaries.
 
 ## Durable principles that shape the product
 

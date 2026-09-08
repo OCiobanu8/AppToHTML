@@ -212,7 +212,6 @@ object CrawlerSession {
     suspend fun pauseForDecision(
         reason: PauseReason,
         snapshot: PauseProgressSnapshot,
-        externalPackageContext: ExternalPackageDecisionContext? = null,
     ): PauseDecision {
         val deferred = synchronized(this) {
             val current = _uiState.value
@@ -239,7 +238,6 @@ object CrawlerSession {
                 decisionId = decisionId,
                 reason = reason,
                 snapshot = snapshot,
-                externalPackageContext = externalPackageContext,
             )
             logSafely(
                 "Paused deep crawl for requestId=$requestId decisionId=$decisionId reason=${reason.name.lowercase()}."
@@ -257,16 +255,6 @@ object CrawlerSession {
             requestId = requestId,
             decisionId = decisionId,
             decision = PauseDecision.CONTINUE,
-            resumedState = { current -> current.withResumedFromDecision() },
-        )
-    }
-
-    @Synchronized
-    fun skipExternalEdge(requestId: Long, decisionId: Long) {
-        resolvePauseDecision(
-            requestId = requestId,
-            decisionId = decisionId,
-            decision = PauseDecision.SKIP_EDGE,
             resumedState = { current -> current.withResumedFromDecision() },
         )
     }

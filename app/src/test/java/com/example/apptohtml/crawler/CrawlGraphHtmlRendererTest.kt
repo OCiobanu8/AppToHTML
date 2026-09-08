@@ -83,7 +83,7 @@ class CrawlGraphHtmlRendererTest {
                     toScreenId = null,
                     label = "Open browser",
                     status = CrawlEdgeStatus.SKIPPED_EXTERNAL_PACKAGE,
-                    message = "User chose to stay inside the app.",
+                    message = "Skipped external package 'com.example.other'.",
                 ),
             ),
         )

@@ -4,7 +4,6 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
-import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -99,37 +98,6 @@ class SavedCrawlLoaderTest {
     }
 
     @Test
-    fun load_collects_explicit_approval_packages() {
-        val dir = tempFolder.newFolder("crawl")
-
-        val trigger = rootTriggerElement()
-        writeRootScreen(
-            dir = dir,
-            edgesOverride = mapOf(
-                trigger.toLinkKey() to EdgeXmlView(
-                    edgeId = "edge_001",
-                    status = CrawlEdgeStatus.CAPTURED,
-                    childScreenId = "screen_00001",
-                    childScreenName = "External",
-                    approval = CrawlEdgeApproval.EXPLICIT,
-                ),
-            ),
-        )
-        writeChildScreen(
-            dir = dir,
-            screenId = "screen_00001",
-            screenName = "External",
-            depth = 1,
-            expansionStatus = ScreenExpansionStatus.COMPLETE,
-            packageNameOverride = externalPackage,
-        )
-
-        val loaded = SavedCrawlLoader.load(dir)
-        assertNotNull(loaded)
-        assertTrue(loaded!!.allowedPackages.contains(externalPackage))
-    }
-
-    @Test
     fun load_hydrates_edge_external_package() {
         val dir = tempFolder.newFolder("crawl")
 
@@ -150,28 +118,6 @@ class SavedCrawlLoaderTest {
         val edge = loaded!!.edges.firstOrNull { it.edgeId == "edge_001" }
         assertNotNull(edge)
         assertEquals(externalPackage, edge!!.externalPackage)
-    }
-
-    @Test
-    fun load_collects_explicit_approval_package_from_edge_without_child_screen() {
-        val dir = tempFolder.newFolder("crawl")
-
-        val trigger = rootTriggerElement()
-        writeRootScreen(
-            dir = dir,
-            edgesOverride = mapOf(
-                trigger.toLinkKey() to EdgeXmlView(
-                    edgeId = "edge_001",
-                    status = CrawlEdgeStatus.IN_PROGRESS,
-                    approval = CrawlEdgeApproval.EXPLICIT,
-                    externalPackage = externalPackage,
-                ),
-            ),
-        )
-
-        val loaded = SavedCrawlLoader.load(dir)
-        assertNotNull(loaded)
-        assertTrue(loaded!!.allowedPackages.contains(externalPackage))
     }
 
     @Test

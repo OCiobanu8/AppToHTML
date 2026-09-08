@@ -394,9 +394,6 @@ object AccessibilityXmlSerializer {
         if (edge.message != null) {
             builder.append(""" message="${escape(edge.message)}"""")
         }
-        if (edge.approval != CrawlEdgeApproval.NONE) {
-            builder.append(""" approval="${escape(edge.approval.toXmlAttr())}"""")
-        }
         if (edge.externalPackage != null) {
             builder.append(""" external-package="${escape(edge.externalPackage)}"""")
         }
@@ -447,6 +444,5 @@ object AccessibilityXmlSerializer {
 
     private fun ScreenExpansionStatus.toXmlAttr(): String = name.lowercase(Locale.US)
     private fun CrawlEdgeStatus.toXmlAttr(): String = name.lowercase(Locale.US)
-    private fun CrawlEdgeApproval.toXmlAttr(): String = name.lowercase(Locale.US)
     private fun CrawlRunStatus.toXmlAttr(): String = name.lowercase(Locale.US)
 }

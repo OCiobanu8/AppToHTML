@@ -272,7 +272,6 @@ object ScreenXmlReader {
             childScreenId = node.optionalAttribute("child-screen-id"),
             childScreenName = node.optionalAttribute("child-screen-name"),
             message = node.optionalAttribute("message"),
-            approval = parseEdgeApproval(node.optionalAttribute("approval")),
             externalPackage = node.optionalAttribute("external-package"),
         )
     }
@@ -287,13 +286,6 @@ object ScreenXmlReader {
         val upper = value.uppercase(Locale.US)
         return CrawlEdgeStatus.entries.firstOrNull { it.name == upper }
             ?: CrawlEdgeStatus.PENDING
-    }
-
-    private fun parseEdgeApproval(value: String?): CrawlEdgeApproval {
-        if (value == null) return CrawlEdgeApproval.NONE
-        val upper = value.uppercase(Locale.US)
-        return CrawlEdgeApproval.entries.firstOrNull { it.name == upper }
-            ?: CrawlEdgeApproval.NONE
     }
 
     private fun parseRunStatus(value: String): CrawlRunStatus {

@@ -1,7 +1,6 @@
 package com.example.apptohtml.storage
 
 import com.example.apptohtml.crawler.AccessibilityXmlSerializer
-import com.example.apptohtml.crawler.CrawlEdgeApproval
 import com.example.apptohtml.crawler.CrawlEdgeStatus
 import com.example.apptohtml.crawler.CrawlRoute
 import com.example.apptohtml.crawler.CrawlRunStatus
@@ -16,7 +15,6 @@ import com.example.apptohtml.crawler.ScreenNaming
 import com.example.apptohtml.crawler.ScreenSnapshot
 import com.example.apptohtml.crawler.toLinkKey
 import org.junit.Assert.assertEquals
-import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -42,7 +40,7 @@ class SavedCrawlRepositoryTest {
     }
 
     @Test
-    fun snapshot_derives_screen_summaries_pending_work_and_approval_provenance() {
+    fun snapshot_derives_screen_summaries_and_pending_work() {
         val crawlDir = tempFolder.newFolder("crawl")
         val open = element(label = "Open")
         writeScreen(
@@ -77,7 +75,6 @@ class SavedCrawlRepositoryTest {
                     status = CrawlEdgeStatus.CAPTURED,
                     childScreenId = "screen_00002",
                     childScreenName = "Share Sheet",
-                    approval = CrawlEdgeApproval.EXPLICIT,
                 )
             ),
         )
@@ -98,54 +95,6 @@ class SavedCrawlRepositoryTest {
         assertTrue(snapshot!!.hasPendingWork)
         assertEquals(3, snapshot.screens.size)
         assertEquals(1, snapshot.screens.first { it.screenId == "screen_00000" }.pendingEdgeCount)
-        val allowedPackage = snapshot.allowedPackages.single()
-        assertEquals(externalPackage, allowedPackage.packageName)
-        assertEquals("edge_002", allowedPackage.edgeId)
-        assertEquals("screen_00001", allowedPackage.parentScreenId)
-        assertEquals("Detail", allowedPackage.parentScreenName)
-        assertEquals("Share", allowedPackage.triggerLabel)
-    }
-
-    @Test
-    fun revokeApproval_flips_edge_marker_and_removes_allowed_package_from_snapshot() {
-        val crawlDir = tempFolder.newFolder("crawl")
-        val share = element(label = "Share")
-        writeScreen(
-            dir = crawlDir,
-            screenId = "screen_00000",
-            screenName = "Home",
-            packageName = targetPackage,
-            depth = 0,
-            expansionStatus = ScreenExpansionStatus.COMPLETE,
-            isRoot = true,
-            elements = listOf(share),
-            edgesByElement = mapOf(
-                share.toLinkKey() to EdgeXmlView(
-                    edgeId = "edge_007",
-                    status = CrawlEdgeStatus.CAPTURED,
-                    childScreenId = "screen_00001",
-                    childScreenName = "External",
-                    approval = CrawlEdgeApproval.EXPLICIT,
-                )
-            ),
-        )
-        writeScreen(
-            dir = crawlDir,
-            screenId = "screen_00001",
-            screenName = "External",
-            packageName = externalPackage,
-            depth = 1,
-            expansionStatus = ScreenExpansionStatus.COMPLETE,
-            isRoot = false,
-        )
-        val repository = SavedCrawlRepository { crawlDir }
-
-        assertTrue(repository.revokeApproval(targetPackage, "edge_007"))
-
-        val rootXml = File(crawlDir, "screen_00000_home.xml").readText(Charsets.UTF_8)
-        assertTrue(rootXml.contains("""approval="revoked""""))
-        assertFalse(rootXml.contains("""approval="explicit""""))
-        assertTrue(repository.snapshot(targetPackage)!!.allowedPackages.isEmpty())
     }
 
     private fun writeScreen(
