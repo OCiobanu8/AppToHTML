@@ -131,15 +131,17 @@ object ScreenXmlReader {
     private fun parseScreenIdentity(element: Element): ScreenIdentityFields {
         val packageName = element.getAttribute("package")
         val title = element.getAttribute("title")
-        val hints = listOfNotNull(
-            element.getAttribute("hint-1").takeIf { it.isNotBlank() },
-            element.getAttribute("hint-2").takeIf { it.isNotBlank() },
-        )
         return ScreenIdentityFields(
             packageName = packageName,
             title = title,
-            hints = hints,
+            titleDisambiguators = readTitleDisambiguators(element),
         )
+    }
+
+    private fun readTitleDisambiguators(element: Element): List<String> {
+        return (1..ScreenIdentityCodec.MAX_TITLE_DISAMBIGUATORS).mapNotNull { index ->
+            element.getAttribute("title-disambiguator-$index").takeIf { it.isNotBlank() }
+        }
     }
 
     private fun parseParent(element: Element): ParentEdgeRef {
@@ -162,10 +164,10 @@ object ScreenXmlReader {
             .mapNotNull { it.toIntOrNull() }
         val expectedPackageName = stepElement.optionalAttribute("expected-package")
         val expectedReplayScreenName = stepElement.optionalAttribute("expected-replay-screen-name")
-        val expectedDestinationFingerprint = firstElementChild(stepElement, "expected-destination-identity")
-            ?.let(::decodeDestinationIdentity)
-        val expectedReplayFingerprint = firstElementChild(stepElement, "expected-replay")
-            ?.let(::decodeReplay)
+        val expectedDestinationIdentity = firstElementChild(stepElement, "expected-destination")
+            ?.let(::parseStepIdentity)
+        val expectedReplayIdentity = firstElementChild(stepElement, "expected-replay")
+            ?.let(::parseStepIdentity)
         return CrawlRouteStep(
             childIndexPath = childIndexPath,
             bounds = stepElement.getAttribute("bounds"),
@@ -177,40 +179,32 @@ object ScreenXmlReader {
             editable = stepElement.getAttribute("editable") == "true",
             firstSeenStep = stepElement.getAttribute("first-seen-step").toIntOrNull() ?: 0,
             expectedPackageName = expectedPackageName,
-            expectedDestinationFingerprint = expectedDestinationFingerprint,
-            expectedReplayFingerprint = expectedReplayFingerprint,
+            expectedDestinationIdentity = expectedDestinationIdentity,
+            expectedReplayIdentity = expectedReplayIdentity,
             expectedReplayScreenName = expectedReplayScreenName,
         )
     }
 
-    private fun decodeDestinationIdentity(element: Element): String? {
-        val raw = element.optionalAttribute("fingerprint")
-        if (raw != null) return raw
-        val packageName = element.getAttribute("package")
-        val title = element.getAttribute("title")
-        if (packageName.isBlank() && title.isBlank()) return null
-        val hints = listOfNotNull(
-            element.getAttribute("hint-1").takeIf { it.isNotBlank() },
-            element.getAttribute("hint-2").takeIf { it.isNotBlank() },
-        )
-        return ScreenIdentityCodec.encode(packageName, title, hints)
-    }
-
-    private fun decodeReplay(element: Element): String? {
-        val raw = element.optionalAttribute("fingerprint")
-        if (raw != null) return raw
-        val rootClass = element.getAttribute("root-class")
+    /** Both step-level expectations round-trip through the same shape; see the serializer. */
+    private fun parseStepIdentity(element: Element): ScreenIdentity {
         val elements = childElements(element, "element").map { child ->
-            ReplayFingerprintCodec.ElementFields(
-                resourceId = child.getAttribute("resource-id"),
-                label = child.getAttribute("label"),
-                className = child.getAttribute("class"),
-                isListItem = child.getAttribute("list-item"),
-                checkable = child.getAttribute("checkable"),
-                editable = child.getAttribute("editable"),
+            ScreenElementIdentity(
+                fingerprint = ElementFingerprint(
+                    resourceId = child.getAttribute("resource-id").takeIf { it.isNotBlank() },
+                    label = child.getAttribute("label"),
+                    className = child.getAttribute("class").takeIf { it.isNotBlank() },
+                    isListItem = child.getAttribute("list-item") == "true",
+                    checkable = child.getAttribute("checkable") == "true",
+                    editable = child.getAttribute("editable") == "true",
+                ),
+                isBackAffordance = child.getAttribute("back") == "true",
             )
         }
-        return ReplayFingerprintCodec.encode(rootClass, elements)
+        return ScreenIdentity(
+            packageName = element.getAttribute("package").takeIf { it.isNotBlank() },
+            rootClassName = element.getAttribute("root-class"),
+            elements = elements.toSet(),
+        )
     }
 
     private fun parseRunLevel(crawl: Element): RunLevelState? {

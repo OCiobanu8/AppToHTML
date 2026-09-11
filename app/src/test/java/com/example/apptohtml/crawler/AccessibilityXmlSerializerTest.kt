@@ -21,7 +21,7 @@ class AccessibilityXmlSerializerTest {
         val identity = ScreenIdentityFields(
             packageName = "com_example_target",
             title = "home",
-            hints = listOf("welcome"),
+            titleDisambiguators = listOf("welcome"),
         )
         val parent = ParentEdgeRef(
             screenId = "screen_00000",
@@ -47,7 +47,7 @@ class AccessibilityXmlSerializerTest {
             xml.contains("""<crawl schema="v1" screen-id="screen_00001" depth="1" expansion-status="in_progress" is-root="false">""")
         )
         assertTrue(
-            xml.contains("""<screen-identity package="com_example_target" title="home" hint-1="welcome" />""")
+            xml.contains("""<screen-identity package="com_example_target" title="home" title-disambiguator-1="welcome" />""")
         )
         assertTrue(
             xml.contains(
@@ -77,7 +77,7 @@ class AccessibilityXmlSerializerTest {
             screenIdentity = ScreenIdentityFields(
                 packageName = "com_example_target",
                 title = "home",
-                hints = emptyList(),
+                titleDisambiguators = emptyList(),
             ),
             parent = null,
             route = CrawlRoute(),
@@ -199,31 +199,21 @@ class AccessibilityXmlSerializerTest {
         assertTrue(xml.contains("<merged-elements>"))
     }
 
+    // RETIRED: two `screenIdentityCodec_roundtrips_*` tests exercised ScreenIdentityCodec.decode,
+    // which this cycle left with zero production callers and has now been deleted — the same
+    // rule that retired decodeContent. The encoding side is still pinned below, and the
+    // name-half round trip that production actually performs is covered by
+    // ScreenXmlReaderTest (screen-identity attributes are read back as fields, not parsed).
+    //
+    // The zero-disambiguator "none" placeholder assertion is preserved here:
     @Test
-    fun screenIdentityCodec_roundtrips_with_two_hints() {
+    fun screenIdentityCodec_encodes_the_none_placeholder_when_there_are_no_disambiguators() {
         val encoded = ScreenIdentityCodec.encode(
             packageName = "com.example.app",
             title = "Settings",
-            hints = listOf("Notifications", "Privacy"),
+            titleDisambiguators = emptyList(),
         )
-        val decoded = ScreenIdentityCodec.decode(encoded)
-        assertNotNull(decoded)
-        assertEquals("com_example_app", decoded!!.packageName)
-        assertEquals("settings", decoded.title)
-        assertEquals(listOf("notifications", "privacy"), decoded.hints)
-    }
-
-    @Test
-    fun screenIdentityCodec_roundtrips_with_zero_hints_using_none_placeholder() {
-        val encoded = ScreenIdentityCodec.encode(
-            packageName = "com.example.app",
-            title = "Settings",
-            hints = emptyList(),
-        )
-        assertTrue(encoded.endsWith(":hint:none"))
-        val decoded = ScreenIdentityCodec.decode(encoded)
-        assertNotNull(decoded)
-        assertTrue(decoded!!.hints.isEmpty())
+        assertTrue(encoded.endsWith(":disambiguator:none"))
     }
 
     @Test
@@ -231,52 +221,14 @@ class AccessibilityXmlSerializerTest {
         val name = "Account Settings"
         val pkg = "com.example.app"
         val expected = ScreenNaming.dedupFingerprint(screenName = name, packageName = pkg)
-        val encoded = ScreenIdentityCodec.encode(packageName = pkg, title = name, hints = emptyList())
+        val encoded = ScreenIdentityCodec.encode(packageName = pkg, title = name, titleDisambiguators = emptyList())
         assertEquals(expected, encoded)
     }
 
-    @Test
-    fun replayFingerprintCodec_decodes_element_with_empty_resource_id() {
-        val rootClass = "android.widget.FrameLayout"
-        val elements = listOf(
-            ReplayFingerprintCodec.ElementFields(
-                label = "Open",
-                resourceId = "",
-                className = "android.widget.Button",
-                isListItem = "false",
-                checkable = "false",
-                editable = "false",
-            ),
-            ReplayFingerprintCodec.ElementFields(
-                label = "Close",
-                resourceId = "com.example:id/close",
-                className = "android.widget.Button",
-                isListItem = "false",
-                checkable = "false",
-                editable = "false",
-            ),
-        )
-        val encoded = ReplayFingerprintCodec.encode(rootClass, elements)
-        val decoded = ReplayFingerprintCodec.decode(encoded)
-        assertNotNull(decoded)
-        assertEquals(rootClass, decoded!!.rootClass)
-        assertEquals(2, decoded.elements.size)
-        assertEquals("", decoded.elements[0].resourceId)
-        assertEquals("com.example:id/close", decoded.elements[1].resourceId)
-    }
-
-    @Test
-    fun replayFingerprintCodec_decodes_empty_payload() {
-        val decoded = ReplayFingerprintCodec.decode("android.widget.FrameLayout::")
-        assertNotNull(decoded)
-        assertEquals("android.widget.FrameLayout", decoded!!.rootClass)
-        assertTrue(decoded.elements.isEmpty())
-    }
-
-    @Test
-    fun replayFingerprintCodec_returns_null_for_malformed_input() {
-        assertNull(ReplayFingerprintCodec.decode("no-separator"))
-    }
+    // RETIRED: four `contentCodec_*` tests exercised ScreenIdentityCodec.decodeContent, which
+    // had no production consumer and has been deleted. The persistence path that matters
+    // round-trips through structured <element> children and is covered end to end by
+    // ScreenXmlReaderTest.readFull_round_trips_a_step_identity_with_a_flagged_back_affordance.
 
     @Test
     fun merged_element_carries_fingerprint_attribute() {
@@ -399,22 +351,38 @@ class AccessibilityXmlSerializerTest {
             editable = false,
             firstSeenStep = 0,
             expectedPackageName = "com.example.target",
-            expectedDestinationFingerprint = ScreenIdentityCodec.encode(
+            expectedDestinationIdentity = ScreenIdentity(
                 packageName = "com.example.target",
-                title = "Detail",
-                hints = listOf("Account"),
+                rootClassName = "android.widget.FrameLayout",
+                elements = setOf(
+                ScreenElementIdentity(
+                    fingerprint = ElementFingerprint.ofFields(
+                        label = "Detail",
+                        resourceId = "com.example.target:id/detail",
+                        className = "android.widget.Button",
+                        isListItem = false,
+                        checkable = false,
+                        editable = false,
+                    ),
+                    isBackAffordance = false,
+                ),
+                ),
             ),
-            expectedReplayFingerprint = ReplayFingerprintCodec.encode(
-                rootClass = "android.widget.FrameLayout",
-                elements = listOf(
-                    ReplayFingerprintCodec.ElementFields(
+            expectedReplayIdentity = ScreenIdentity(
+                packageName = "com.example.target",
+                rootClassName = "android.widget.FrameLayout",
+                elements = setOf(
+                ScreenElementIdentity(
+                    fingerprint = ElementFingerprint.ofFields(
                         label = "Open",
                         resourceId = "",
                         className = "android.widget.Button",
-                        isListItem = "false",
-                        checkable = "false",
-                        editable = "false",
-                    )
+                        isListItem = false,
+                        checkable = false,
+                        editable = false,
+                    ),
+                    isBackAffordance = false,
+                ),
                 ),
             ),
             expectedReplayScreenName = "Detail",
@@ -432,7 +400,7 @@ class AccessibilityXmlSerializerTest {
             screenIdentity = ScreenIdentityFields(
                 packageName = "com_example_target",
                 title = "home",
-                hints = emptyList(),
+                titleDisambiguators = emptyList(),
             ),
             parent = ParentEdgeRef(
                 screenId = "screen_00000",

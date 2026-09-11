@@ -68,9 +68,9 @@ class SavedCrawlLoaderTest {
         val rootFingerprint = ScreenIdentityCodec.encode(
             packageName = targetPackage,
             title = "Home",
-            hints = emptyList(),
+            titleDisambiguators = emptyList(),
         )
-        assertEquals("screen_00000", loaded.screenFingerprintToId[rootFingerprint])
+        assertEquals("screen_00000", loaded.dedupKeyToScreenId[rootFingerprint])
     }
 
     @Test
@@ -172,7 +172,7 @@ class SavedCrawlLoaderTest {
             startedAt = 2_000L,
             screens = loaded!!.screens,
             edges = loaded.edges,
-            screenFingerprintToId = loaded.screenFingerprintToId,
+            dedupKeyToScreenId = loaded.dedupKeyToScreenId,
             rootScreenId = loaded.rootScreenId,
             nextScreenSequence = loaded.nextScreenSequence,
             nextEdgeSequence = loaded.nextEdgeSequence,
@@ -180,12 +180,8 @@ class SavedCrawlLoaderTest {
         assertEquals("screen_00000", tracker.currentRootScreenId)
         assertNotNull(tracker.findScreen("screen_00001"))
         assertEquals(2, tracker.capturedScreenCount())
-        val rootFingerprint = ScreenIdentityCodec.encode(
-            packageName = targetPackage,
-            title = "Home",
-            hints = emptyList(),
-        )
-        assertEquals("screen_00000", tracker.findScreenIdByFingerprint(rootFingerprint))
+        val rootIdentity = testIdentity(screenName = "Home", packageName = targetPackage)
+        assertEquals("screen_00000", tracker.findScreenIdByIdentity(rootIdentity))
         assertEquals(loaded.nextScreenSequence, tracker.nextScreenSequenceNumber())
         // Confirm legacy merged xml files are ignored when scanning.
         assertFalse(loaded.screens.any { it.xmlPath.endsWith("_merged_accessibility.xml") })
@@ -211,7 +207,7 @@ class SavedCrawlLoaderTest {
             screenIdentity = ScreenIdentityFields(
                 packageName = ScreenNaming.normalizeIdentityToken(targetPackage),
                 title = ScreenNaming.normalizeIdentityToken("Home"),
-                hints = emptyList(),
+                titleDisambiguators = emptyList(),
             ),
             parent = null,
             route = CrawlRoute(),
@@ -268,7 +264,7 @@ class SavedCrawlLoaderTest {
             screenIdentity = ScreenIdentityFields(
                 packageName = ScreenNaming.normalizeIdentityToken(packageName),
                 title = ScreenNaming.normalizeIdentityToken(screenName),
-                hints = emptyList(),
+                titleDisambiguators = emptyList(),
             ),
             parent = ParentEdgeRef(
                 screenId = "screen_00000",

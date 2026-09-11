@@ -7,7 +7,7 @@ import java.util.Locale
 
 object ScreenNaming {
     private const val minStrongTextTitleScore = 160
-    private const val minIdentityHintScore = 120
+    private const val minTitleDisambiguatorScore = 120
     private val boundsRegex = Regex("\\[(\\d+),(\\d+)]\\[(\\d+),(\\d+)]")
     private val genericWindowNames = setOf(
         "android.view.View",
@@ -99,43 +99,42 @@ object ScreenNaming {
         packageName: String? = null,
         root: AccessibilityNodeSnapshot? = null,
     ): String {
-        return buildScreenIdentity(
+        val name = buildScreenNameIdentity(
             screenName = screenName,
             packageName = packageName,
             root = root,
-        ).fingerprint
+        )
+        return ScreenIdentityCodec.encode(
+            packageName = name.packageName,
+            title = name.screenName,
+            titleDisambiguators = name.titleDisambiguators,
+        )
     }
 
-    internal fun buildScreenIdentity(
+    internal fun buildScreenNameIdentity(
         screenName: String,
         packageName: String?,
         root: AccessibilityNodeSnapshot? = null,
-    ): ScreenIdentity {
+    ): ScreenNameIdentity {
         val normalizedTitle = normalizeIdentityToken(screenName).ifBlank { "unnamed" }
-        val identityHints = root?.let(::collectIdentityHints).orEmpty()
+        val titleDisambiguators = root?.let(::collectTitleDisambiguators).orEmpty()
             .map(::normalizeIdentityToken)
-            .filter { hint -> hint.isNotBlank() && hint != normalizedTitle }
+            .filter { value -> value.isNotBlank() && value != normalizedTitle }
             .distinct()
-            .take(2)
+            .take(ScreenIdentityCodec.MAX_TITLE_DISAMBIGUATORS)
         val normalizedPackage = normalizeIdentityToken(packageName).ifBlank { "unknown" }
         val confidence = when {
             isWeakDedupTitle(screenName) -> ScreenDedupConfidence.WEAK
-            identityHints.isNotEmpty() -> ScreenDedupConfidence.STRONG
+            titleDisambiguators.isNotEmpty() -> ScreenDedupConfidence.STRONG
             packageName.isNullOrBlank() -> ScreenDedupConfidence.WEAK
             else -> ScreenDedupConfidence.STRONG
         }
 
-        return ScreenIdentity(
-            fingerprint = buildString {
-                append("v2:pkg:")
-                append(normalizedPackage)
-                append(":title:")
-                append(normalizedTitle)
-                append(":hint:")
-                append(identityHints.ifEmpty { listOf("none") }.joinToString("|"))
-            },
+        return ScreenNameIdentity(
+            packageName = normalizedPackage,
+            screenName = normalizedTitle,
+            titleDisambiguators = titleDisambiguators,
             confidence = confidence,
-            identityHints = identityHints,
         )
     }
 
@@ -310,7 +309,7 @@ object ScreenNaming {
         root: AccessibilityNodeSnapshot?,
         packageName: String?,
     ): ScreenNameDebugInfo {
-        val identity = buildScreenIdentity(
+        val identity = buildScreenNameIdentity(
             screenName = chosenName,
             packageName = packageName,
             root = root,
@@ -337,8 +336,12 @@ object ScreenNaming {
                     score = candidate.score,
                 )
             },
-            identityHints = identity.identityHints,
-            dedupFingerprint = identity.fingerprint,
+            titleDisambiguators = identity.titleDisambiguators,
+            dedupFingerprint = ScreenIdentityCodec.encode(
+                packageName = identity.packageName,
+                title = identity.screenName,
+                titleDisambiguators = identity.titleDisambiguators,
+            ),
             dedupConfidence = identity.confidence,
         )
     }
@@ -388,8 +391,8 @@ object ScreenNaming {
         )
     }
 
-    private fun collectIdentityHints(root: AccessibilityNodeSnapshot): List<String> {
-        val textHints = collectVisibleTextCandidates(
+    private fun collectTitleDisambiguators(root: AccessibilityNodeSnapshot): List<String> {
+        val textCandidates = collectVisibleTextCandidates(
             node = root,
             depth = 0,
             insideScrollableAncestor = false,
@@ -397,19 +400,19 @@ object ScreenNaming {
         )
             .asSequence()
             .filter { candidate ->
-                candidate.score >= minIdentityHintScore && !isWeakDedupTitle(candidate.title)
+                candidate.score >= minTitleDisambiguatorScore && !isWeakDedupTitle(candidate.title)
             }
             .map { candidate -> candidate.title }
-        val resourceHints = collectVisibleResourceIdCandidates(root, emptySet())
+        val resourceCandidates = collectVisibleResourceIdCandidates(root, emptySet())
             .asSequence()
             .filter { candidate -> !isWeakDedupTitle(candidate.title) }
             .map { candidate -> candidate.title }
 
-        return (textHints + resourceHints)
-            .map { hint -> hint.replace("\\s+".toRegex(), " ").trim() }
-            .filter { hint -> hint.isNotBlank() }
+        return (textCandidates + resourceCandidates)
+            .map { value -> value.replace("\\s+".toRegex(), " ").trim() }
+            .filter { value -> value.isNotBlank() }
             .distinct()
-            .take(2)
+            .take(ScreenIdentityCodec.MAX_TITLE_DISAMBIGUATORS)
             .toList()
     }
 
@@ -617,16 +620,7 @@ object ScreenNaming {
     )
 }
 
-internal data class ScreenIdentity(
-    val fingerprint: String,
-    val confidence: ScreenDedupConfidence,
-    val identityHints: List<String>,
-) {
-    val canLinkToExisting: Boolean
-        get() = confidence == ScreenDedupConfidence.STRONG
-}
-
-internal enum class ScreenDedupConfidence {
+enum class ScreenDedupConfidence {
     STRONG,
     WEAK,
 }
@@ -640,7 +634,7 @@ internal data class ScreenNameDebugInfo(
     val eventClassCandidate: String?,
     val textCandidates: List<ScreenNameCandidate>,
     val resourceIdCandidate: ScreenNameCandidate?,
-    val identityHints: List<String>,
+    val titleDisambiguators: List<String>,
     val dedupFingerprint: String,
     val dedupConfidence: ScreenDedupConfidence,
 )

@@ -6,7 +6,7 @@ import java.io.File
 data class LoadedCrawlState(
     val screens: List<CrawlScreenRecord>,
     val edges: List<CrawlEdgeRecord>,
-    val screenFingerprintToId: LinkedHashMap<String, String>,
+    val dedupKeyToScreenId: LinkedHashMap<String, String>,
     val rootScreenId: String?,
     val nextScreenSequence: Int,
     val nextEdgeSequence: Int,
@@ -39,7 +39,7 @@ object SavedCrawlLoader {
 
         val screens = mutableListOf<CrawlScreenRecord>()
         val edges = mutableListOf<CrawlEdgeRecord>()
-        val screenFingerprintToId = LinkedHashMap<String, String>()
+        val dedupKeyToScreenId = LinkedHashMap<String, String>()
         val screensById = mutableMapOf<String, CrawlScreenRecord>()
         val htmlFilenameByScreenId = mutableMapOf<String, String>()
         val resolvedLinks = mutableMapOf<String, MutableMap<PressableElementLinkKey, String>>()
@@ -55,17 +55,29 @@ object SavedCrawlLoader {
             val htmlFile = File(xmlFile.parentFile, "$baseName.html")
             val mergedXmlFile = File(xmlFile.parentFile, "${baseName}_merged_accessibility.xml")
             val mergedXmlPath = if (mergedXmlFile.exists()) mergedXmlFile.absolutePath else null
-            val canonicalFingerprint = ScreenIdentityCodec.encode(
-                packageName = head.screenIdentity.packageName,
-                title = head.screenIdentity.title,
-                hints = head.screenIdentity.hints,
+            val nameConfidence = ScreenNaming.buildScreenNameIdentity(
+                screenName = head.screenName,
+                packageName = head.screenPackage,
+                root = null,
+            ).confidence
+            // The content half is not recoverable from the artifacts and is recomputed from the
+            // live screen after resume — exactly as the blanked replay fingerprint used to be.
+            val identity = ScreenIdentity(
+                packageName = head.screenPackage,
+                rootClassName = "",
+                elements = emptySet(),
+                name = ScreenNameIdentity(
+                    packageName = head.screenIdentity.packageName,
+                    screenName = head.screenIdentity.title,
+                    titleDisambiguators = head.screenIdentity.titleDisambiguators,
+                    confidence = nameConfidence,
+                ),
             )
             val record = CrawlScreenRecord(
                 screenId = head.screenId,
                 screenName = head.screenName,
                 packageName = head.screenPackage,
-                screenFingerprint = canonicalFingerprint,
-                replayFingerprint = "",
+                identity = identity,
                 htmlPath = htmlFile.absolutePath,
                 xmlPath = xmlFile.absolutePath,
                 mergedXmlPath = mergedXmlPath,
@@ -87,13 +99,8 @@ object SavedCrawlLoader {
                 rootScreenId = head.screenId
                 runLevel = head.runLevel
             }
-            val identityForConfidence = ScreenNaming.buildScreenIdentity(
-                screenName = head.screenName,
-                packageName = head.screenPackage,
-                root = null,
-            )
-            if (identityForConfidence.canLinkToExisting) {
-                screenFingerprintToId.putIfAbsent(canonicalFingerprint, head.screenId)
+            DedupPolicy.keyFor(identity)?.let { dedupKey ->
+                dedupKeyToScreenId.putIfAbsent(dedupKey, head.screenId)
             }
         }
 
@@ -150,7 +157,7 @@ object SavedCrawlLoader {
         return LoadedCrawlState(
             screens = screens,
             edges = edges,
-            screenFingerprintToId = screenFingerprintToId,
+            dedupKeyToScreenId = dedupKeyToScreenId,
             rootScreenId = rootScreenId,
             nextScreenSequence = maxScreenSeq + 1,
             nextEdgeSequence = maxEdgeSeq + 1,

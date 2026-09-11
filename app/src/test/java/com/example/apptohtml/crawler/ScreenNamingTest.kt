@@ -117,7 +117,7 @@ class ScreenNamingTest {
     }
 
     @Test
-    fun buildScreenIdentity_uses_hints_and_marks_generic_titles_weak() {
+    fun buildScreenNameIdentity_uses_disambiguators_and_marks_generic_titles_weak() {
         val googleServices = node(
             className = "android.widget.FrameLayout",
             bounds = "[0,0][1080,2400]",
@@ -143,12 +143,12 @@ class ScreenNamingTest {
             ),
         )
 
-        val googleIdentity = ScreenNaming.buildScreenIdentity(
+        val googleIdentity = ScreenNaming.buildScreenNameIdentity(
             screenName = "Navigate up",
             packageName = "com.android.settings",
             root = googleServices,
         )
-        val simIdentity = ScreenNaming.buildScreenIdentity(
+        val simIdentity = ScreenNaming.buildScreenNameIdentity(
             screenName = "Navigate up",
             packageName = "com.android.settings",
             root = sims,
@@ -156,9 +156,9 @@ class ScreenNamingTest {
 
         assertEquals(ScreenDedupConfidence.WEAK, googleIdentity.confidence)
         assertEquals(ScreenDedupConfidence.WEAK, simIdentity.confidence)
-        assertTrue(googleIdentity.fingerprint != simIdentity.fingerprint)
-        assertTrue(googleIdentity.identityHints.isNotEmpty())
-        assertTrue(simIdentity.identityHints.isNotEmpty())
+        assertTrue(nameKey(googleIdentity) != nameKey(simIdentity))
+        assertTrue(googleIdentity.titleDisambiguators.isNotEmpty())
+        assertTrue(simIdentity.titleDisambiguators.isNotEmpty())
     }
 
     private fun selectedApp(): SelectedAppRef {
@@ -195,4 +195,10 @@ class ScreenNamingTest {
             childIndexPath = childIndexPath,
         )
     }
+
+    private fun nameKey(name: ScreenNameIdentity): String = ScreenIdentityCodec.encode(
+        packageName = name.packageName,
+        title = name.screenName,
+        titleDisambiguators = name.titleDisambiguators,
+    )
 }

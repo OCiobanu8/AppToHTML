@@ -135,15 +135,15 @@ class CrawlRunTrackerTest {
     }
 
     @Test
-    fun fromExistingState_exposes_screens_and_fingerprint_index() {
+    fun fromExistingState_exposes_screens_and_dedup_index() {
         val rootScreen = sampleScreen(
             screenId = "screen_00000",
-            fingerprint = "v2:pkg:com.example:title:Root:hint:none|none",
+            screenName = "Root",
             depth = 0,
         )
         val childScreen = sampleScreen(
             screenId = "screen_00001",
-            fingerprint = "v2:pkg:com.example:title:Settings:hint:none|none",
+            screenName = "Settings",
             depth = 1,
             parentScreenId = "screen_00000",
             expansionStatus = ScreenExpansionStatus.IN_PROGRESS,
@@ -167,9 +167,9 @@ class CrawlRunTrackerTest {
             startedAt = 1L,
             screens = listOf(rootScreen, childScreen),
             edges = listOf(edge),
-            screenFingerprintToId = linkedMapOf(
-                rootScreen.screenFingerprint to rootScreen.screenId,
-                childScreen.screenFingerprint to childScreen.screenId,
+            dedupKeyToScreenId = linkedMapOf(
+                testDedupKey(rootScreen.identity) to rootScreen.screenId,
+                testDedupKey(childScreen.identity) to childScreen.screenId,
             ),
             rootScreenId = "screen_00000",
             nextScreenSequence = 2,
@@ -183,11 +183,11 @@ class CrawlRunTrackerTest {
         )
         assertEquals(
             "screen_00000",
-            tracker.findScreenIdByFingerprint(rootScreen.screenFingerprint),
+            tracker.findScreenIdByIdentity(rootScreen.identity),
         )
         assertEquals(
             "screen_00001",
-            tracker.findScreenIdByFingerprint(childScreen.screenFingerprint),
+            tracker.findScreenIdByIdentity(childScreen.identity),
         )
         assertEquals(listOf("edge_000"), tracker.outboundEdges("screen_00000").map { it.edgeId })
     }
@@ -196,12 +196,12 @@ class CrawlRunTrackerTest {
     fun nextScreenSequenceNumber_after_fromExistingState_returns_max_plus_one() {
         val rootScreen = sampleScreen(
             screenId = "screen_00000",
-            fingerprint = "v2:pkg:com.example:title:Root:hint:none|none",
+            screenName = "Root",
             depth = 0,
         )
         val laterScreen = sampleScreen(
             screenId = "screen_00007",
-            fingerprint = "v2:pkg:com.example:title:Seven:hint:none|none",
+            screenName = "Seven",
             depth = 1,
             parentScreenId = "screen_00000",
         )
@@ -212,9 +212,9 @@ class CrawlRunTrackerTest {
             startedAt = 1L,
             screens = listOf(rootScreen, laterScreen),
             edges = emptyList(),
-            screenFingerprintToId = linkedMapOf(
-                rootScreen.screenFingerprint to rootScreen.screenId,
-                laterScreen.screenFingerprint to laterScreen.screenId,
+            dedupKeyToScreenId = linkedMapOf(
+                testDedupKey(rootScreen.identity) to rootScreen.screenId,
+                testDedupKey(laterScreen.identity) to laterScreen.screenId,
             ),
             rootScreenId = "screen_00000",
             nextScreenSequence = 8,
@@ -229,7 +229,7 @@ class CrawlRunTrackerTest {
     fun fromExistingState_rejects_sequence_counter_below_max() {
         val screen = sampleScreen(
             screenId = "screen_00005",
-            fingerprint = "v2:pkg:com.example:title:Five:hint:none|none",
+            screenName = "Five",
             depth = 0,
         )
 
@@ -240,7 +240,7 @@ class CrawlRunTrackerTest {
                 startedAt = 1L,
                 screens = listOf(screen),
                 edges = emptyList(),
-                screenFingerprintToId = linkedMapOf(screen.screenFingerprint to screen.screenId),
+                dedupKeyToScreenId = linkedMapOf(testDedupKey(screen.identity) to screen.screenId),
                 rootScreenId = screen.screenId,
                 nextScreenSequence = 5,
                 nextEdgeSequence = 0,
@@ -255,13 +255,13 @@ class CrawlRunTrackerTest {
     fun fromExistingState_rejects_multiple_in_progress_screens() {
         val s0 = sampleScreen(
             screenId = "screen_00000",
-            fingerprint = "v2:pkg:com.example:title:A:hint:none|none",
+            screenName = "A",
             depth = 0,
             expansionStatus = ScreenExpansionStatus.IN_PROGRESS,
         )
         val s1 = sampleScreen(
             screenId = "screen_00001",
-            fingerprint = "v2:pkg:com.example:title:B:hint:none|none",
+            screenName = "B",
             depth = 1,
             parentScreenId = "screen_00000",
             expansionStatus = ScreenExpansionStatus.IN_PROGRESS,
@@ -274,9 +274,9 @@ class CrawlRunTrackerTest {
                 startedAt = 1L,
                 screens = listOf(s0, s1),
                 edges = emptyList(),
-                screenFingerprintToId = linkedMapOf(
-                    s0.screenFingerprint to s0.screenId,
-                    s1.screenFingerprint to s1.screenId,
+                dedupKeyToScreenId = linkedMapOf(
+                    testDedupKey(s0.identity) to s0.screenId,
+                    testDedupKey(s1.identity) to s1.screenId,
                 ),
                 rootScreenId = s0.screenId,
                 nextScreenSequence = 2,
@@ -316,8 +316,7 @@ class CrawlRunTrackerTest {
                 elements = emptyList(),
                 xmlDump = "<screen/>",
             ),
-            screenFingerprint = "v2:pkg:com.example.app:title:Root:hint:none|none",
-            replayFingerprint = "",
+            identity = testIdentity(screenName = "Root"),
             files = CapturedScreenFiles(
                 htmlFile = File("/tmp/${screenId}.html"),
                 xmlFile = File("/tmp/${screenId}.xml"),
@@ -331,7 +330,7 @@ class CrawlRunTrackerTest {
 
     private fun sampleScreen(
         screenId: String,
-        fingerprint: String,
+        screenName: String,
         depth: Int,
         parentScreenId: String? = null,
         expansionStatus: ScreenExpansionStatus = ScreenExpansionStatus.NOT_STARTED,
@@ -340,8 +339,7 @@ class CrawlRunTrackerTest {
             screenId = screenId,
             screenName = "Screen $screenId",
             packageName = "com.example.app",
-            screenFingerprint = fingerprint,
-            replayFingerprint = "",
+            identity = testIdentity(screenName = screenName),
             htmlPath = "/tmp/${screenId}.html",
             xmlPath = "/tmp/${screenId}.xml",
             scrollStepCount = 1,

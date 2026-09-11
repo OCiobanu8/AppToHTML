@@ -299,6 +299,159 @@ class DeepCrawlCoordinatorTest {
         }
     }
 
+    /**
+     * SCOPE: "a test runs a crawl producing a root and a child and asserts both identities come
+     * from the same builder — concretely, that the root's identity now contains the back-affordance
+     * element."
+     *
+     * The root carries an element labelled "Up" from its very first capture. The identity's token
+     * test flags it as a back affordance; `EntryScreenBackAffordanceDetector` does not treat it as a
+     * pressable back button (a bare "up" needs toolbar context there), so the initial rewind leaves
+     * it alone. Before this cycle the root's stored value came from the entry builder, which dropped
+     * that element; one builder now keeps it, flagged, exactly as a child's always did.
+     *
+     * Round-4 N2: the previous version of this pin could not fail — the harness only added the
+     * root's back button after the crawler returned, so the root's stored identity never held one.
+     */
+    @Test
+    fun rootAndChild_identities_come_from_the_same_builder() = runBlocking {
+        val tempDir = Files.createTempDirectory("deep-crawl-one-builder").toFile()
+        try {
+            val host = FakeHost(
+                entryScreenId = "A",
+                screens = mapOf(
+                    "A" to fakeScreen(
+                        id = "A",
+                        screenName = "Screen A",
+                        elements = listOf(fakeElement("Up", 0), fakeElement("Open B", 1)),
+                        transitions = mapOf("Up" to "A", "Open B" to "B"),
+                    ),
+                    "B" to fakeScreen(id = "B", screenName = "Screen B", elements = emptyList(), transitions = emptyMap()),
+                ),
+            )
+
+            val outcome = coordinator(host, tempDir).crawl(
+                initialRoot = host.captureCurrentRootSnapshot("com.example.target")!!,
+                eventClassName = "ScreenA",
+            )
+
+            val manifestJson = outcome.summary.manifestFile.readText()
+            val replayValues = Regex(""""replayFingerprint": "([^"]*)"""")
+                .findAll(manifestJson).map { it.groupValues[1] }.toList()
+
+            assertEquals(2, replayValues.size)
+            assertTrue(
+                "the ROOT's stored identity keeps its flagged back affordance",
+                replayValues.first().contains("com.example.target:id/up|up|android.widget.Button|false|false|false|true"),
+            )
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    /**
+     * Pins the `nameKey` / `keyFor` split at the path that actually consumes it.
+     *
+     * A screen whose title is weak ("Continue") is deliberately NOT eligible to be catalogued, so
+     * `DedupPolicy.keyFor` returns null for it. Replay validation asks a different question — *is
+     * the screen I replayed to still called what it was called?* — and must use the ungated
+     * `nameKey`. Gating it makes the stored side `""`, which the live side can never equal, and
+     * every weak-titled screen fails replay and loses its whole subtree.
+     */
+    @Test
+    fun weakTitledScreen_still_replays_and_expands() = runBlocking {
+        val tempDir = Files.createTempDirectory("deep-crawl-weak-title").toFile()
+        try {
+            val host = FakeHost(
+                entryScreenId = "A",
+                screens = mapOf(
+                    "A" to fakeScreen(
+                        id = "A",
+                        screenName = "Screen A",
+                        elements = listOf(fakeElement("Open B", 0)),
+                        transitions = mapOf("Open B" to "B"),
+                    ),
+                    // "Continue" is in ScreenNaming's weak call-to-action set, so this screen is
+                    // STRONG-ineligible for dedup while still being a perfectly replayable screen.
+                    "B" to fakeScreen(
+                        id = "B",
+                        screenName = "Continue",
+                        elements = listOf(fakeElement("Open C", 0)),
+                        transitions = mapOf("Open C" to "C"),
+                    ),
+                    "C" to fakeScreen(id = "C", screenName = "Screen C", elements = emptyList(), transitions = emptyMap()),
+                ),
+            )
+
+            val outcome = coordinator(host, tempDir).crawl(
+                initialRoot = host.captureCurrentRootSnapshot("com.example.target")!!,
+                eventClassName = "ScreenA",
+            )
+
+            val summary = outcome.summary
+            val crawlLogText = File(summary.manifestFile.parentFile, "crawl.log").readText()
+
+            assertFalse(
+                "a weak-titled screen must not fail replay validation",
+                crawlLogText.contains("Route replay diverged"),
+            )
+            assertEquals(3, summary.capturedScreenCount)
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    /**
+     * S4 — route-step replay validation, pinned at the harness seam.
+     *
+     * A depth-1 child is captured with its back affordance and then loses it before the replay
+     * capture. Pre-refactor S4 compared the child's whole element set with zero tolerance and the
+     * back affordance always counted, so this diverges and the edge fails. The subject of an S4
+     * comparison is the destination CHILD, which is never the crawl root — so this outcome must
+     * not depend on whether the child's PARENT happens to be the root.
+     */
+    @Test
+    fun routeStepValidation_fails_when_a_depth_one_child_loses_its_back_affordance() = runBlocking {
+        val tempDir = Files.createTempDirectory("deep-crawl-route-step-back").toFile()
+        try {
+            val host = FakeHost(
+                entryScreenId = "A",
+                screens = mapOf(
+                    "A" to fakeScreen(
+                        id = "A",
+                        screenName = "Screen A",
+                        elements = listOf(fakeElement("Open B", 0), fakeElement("Open C", 1)),
+                        transitions = mapOf("Open B" to "B", "Open C" to "C"),
+                    ),
+                    "B" to fakeScreen(
+                        id = "B",
+                        screenName = "Screen B",
+                        elements = listOf(fakeElement("Open D", 0)),
+                        transitions = mapOf("Open D" to "D"),
+                    ),
+                    "C" to fakeScreen(id = "C", screenName = "Screen C", elements = emptyList(), transitions = emptyMap()),
+                    "D" to fakeScreen(id = "D", screenName = "Screen D", elements = emptyList(), transitions = emptyMap()),
+                ),
+                backAffordanceDroppedOnReplayScreens = setOf("B"),
+            )
+
+            val outcome = coordinator(host, tempDir).crawl(
+                initialRoot = host.captureCurrentRootSnapshot("com.example.target")!!,
+                eventClassName = "ScreenA",
+            )
+
+            val summary = outcome.summary
+            val crawlLogText = File(summary.manifestFile.parentFile, "crawl.log").readText()
+
+            assertTrue(
+                "expected route replay to diverge when the child's back affordance disappeared",
+                crawlLogText.contains("matchedExpectedReplay=false"),
+            )
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
     @Test
     fun bfsTraversal_recovers_root_when_entry_screen_has_misleading_back_affordance() = runBlocking {
         val tempDir = Files.createTempDirectory("deep-crawl-entry-restore").toFile()
@@ -1020,7 +1173,7 @@ class DeepCrawlCoordinatorTest {
             assertTrue(crawlLogText.contains("triggerLabel=\"Open B\""))
             assertTrue(crawlLogText.contains("sampleCount=3"))
             assertTrue(crawlLogText.contains("stopReason=fixed_dwell_exhausted"))
-            assertTrue(crawlLogText.contains("sameFingerprintAsPrevious=true"))
+            assertTrue(crawlLogText.contains("sameIdentityAsPrevious=true"))
         } finally {
             tempDir.deleteRecursively()
         }
@@ -1120,9 +1273,9 @@ class DeepCrawlCoordinatorTest {
 
             assertEquals(2, summary.capturedScreenCount)
             assertFalse(manifestJson.contains(""""status": "failed""""))
-            assertTrue(crawlLogText.contains("observedFingerprint=\"android.widget.FrameLayout::"))
+            assertTrue(crawlLogText.contains("observedIdentity=\"android.widget.FrameLayout::"))
             assertTrue(crawlLogText.contains("Summary"))
-            assertTrue(crawlLogText.contains("selectedFingerprint=\"android.widget.FrameLayout::"))
+            assertTrue(crawlLogText.contains("selectedIdentity=\"android.widget.FrameLayout::"))
             assertTrue(crawlLogText.contains("Detailed option"))
             assertTrue(crawlLogText.contains("selectionReason=best_richness"))
             assertTrue(crawlLogText.contains("visibleTextOrContentDescriptionCount=4"))
@@ -1981,6 +2134,123 @@ class DeepCrawlCoordinatorTest {
         }
     }
 
+    // ---- route-step characterization (S2-S4 on a replayed child) ---------------------------
+    //
+    // Uses only harness API present at HEAD 6e1ce3b plus the `replayElementsByScreen` knob, so the
+    // identical block runs against the pre-refactor code and the refactored code. A child is
+    // discovered first; `replayElementsByScreen` changes what it shows only after the crawler has
+    // returned to the root, i.e. on the replay that precedes expanding it.
+
+    private fun rowAt(label: String, index: Int, top: Int): PressableElement =
+        fakeElement(label, index).copy(bounds = "[0,$top][200,${top + 60}]")
+
+    private suspend fun crawlThreeLevels(
+        tempDir: File,
+        childElements: List<PressableElement>,
+        childTransitions: Map<String, String>,
+        replayChildElements: List<PressableElement>? = null,
+    ): Pair<CrawlRunSummary, String> {
+        val host = FakeHost(
+            entryScreenId = "A",
+            screens = mapOf(
+                "A" to fakeScreen(
+                    id = "A",
+                    screenName = "Screen A",
+                    elements = listOf(fakeElement("Open B", 0)),
+                    transitions = mapOf("Open B" to "B"),
+                ),
+                "B" to fakeScreen(
+                    id = "B",
+                    screenName = "Screen B",
+                    elements = childElements,
+                    transitions = childTransitions,
+                ),
+                "C" to fakeScreen(id = "C", screenName = "Screen C", elements = emptyList(), transitions = emptyMap()),
+            ),
+            replayElementsByScreen = replayChildElements?.let { mapOf("B" to it) }.orEmpty(),
+        )
+        val summary = coordinator(host, tempDir).crawl(
+            initialRoot = host.captureCurrentRootSnapshot("com.example.target")!!,
+            eventClassName = "ScreenA",
+        ).summary
+        return summary to File(summary.manifestFile.parentFile, "crawl.log").readText()
+    }
+
+    /** Replaying to an unchanged child succeeds and the child expands. */
+    @Test
+    fun routeStep_unchangedChild_replays_and_expands() = runBlocking {
+        val tempDir = Files.createTempDirectory("route-step-unchanged").toFile()
+        try {
+            val (summary, log) = crawlThreeLevels(
+                tempDir = tempDir,
+                childElements = listOf(fakeElement("Open C", 0)),
+                childTransitions = mapOf("Open C" to "C"),
+            )
+            assertEquals(3, summary.capturedScreenCount)
+            assertFalse(log.contains("matchedExpectedReplay=false"))
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    /** Zero tolerance: one extra control on replay is a different screen, and the child is lost. */
+    @Test
+    fun routeStep_extraElementOnReplay_fails_replay() = runBlocking {
+        val tempDir = Files.createTempDirectory("route-step-extra").toFile()
+        try {
+            val (summary, log) = crawlThreeLevels(
+                tempDir = tempDir,
+                childElements = listOf(fakeElement("Open C", 0)),
+                childTransitions = mapOf("Open C" to "C"),
+                replayChildElements = listOf(fakeElement("Open C", 0), fakeElement("Late banner", 1)),
+            )
+            assertEquals(2, summary.capturedScreenCount)
+            assertTrue(log.contains("matchedExpectedReplay=false"))
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    /** Position is not identity: a control that only moved is the same screen. */
+    @Test
+    fun routeStep_positionOnlyChangeOnReplay_still_matches() = runBlocking {
+        val tempDir = Files.createTempDirectory("route-step-moved").toFile()
+        try {
+            val (summary, log) = crawlThreeLevels(
+                tempDir = tempDir,
+                childElements = listOf(rowAt("Open C", 0, top = 500)),
+                childTransitions = mapOf("Open C" to "C"),
+                replayChildElements = listOf(rowAt("Open C", 0, top = 540)),
+            )
+            assertEquals(3, summary.capturedScreenCount)
+            assertFalse(log.contains("matchedExpectedReplay=false"))
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    /**
+     * Round-4 N1. A row whose resource id merely *contains* "back" (`send_feedback`) drifts across
+     * the 300px band on replay. Back-ness is decided from position; identity must not be. At HEAD
+     * the zero-tolerance sites compared position-free fingerprint encodings, so this replays fine.
+     */
+    @Test
+    fun routeStep_backSignalRowCrossingTheTopBand_still_matches() = runBlocking {
+        val tempDir = Files.createTempDirectory("route-step-band").toFile()
+        try {
+            val (summary, log) = crawlThreeLevels(
+                tempDir = tempDir,
+                childElements = listOf(fakeElement("Open C", 0), rowAt("Send feedback", 1, top = 280)),
+                childTransitions = mapOf("Open C" to "C", "Send feedback" to "B"),
+                replayChildElements = listOf(fakeElement("Open C", 0), rowAt("Send feedback", 1, top = 320)),
+            )
+            assertEquals(3, summary.capturedScreenCount)
+            assertFalse(log.contains("matchedExpectedReplay=false"))
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
     private fun coordinator(
         host: FakeHost,
         tempDir: File,
@@ -2114,7 +2384,7 @@ class DeepCrawlCoordinatorTest {
             screenIdentity = ScreenIdentityFields(
                 packageName = ScreenNaming.normalizeIdentityToken("com.example.target"),
                 title = ScreenNaming.normalizeIdentityToken(screenName),
-                hints = emptyList(),
+                titleDisambiguators = emptyList(),
             ),
             parent = parent,
             route = CrawlRoute(),
@@ -2212,6 +2482,10 @@ class DeepCrawlCoordinatorTest {
         private val showBackAffordanceOnEntryRoot: Boolean = false,
         private val screensWithoutBackAffordance: Set<String> = emptySet(),
         private val shiftedBoundsOnReplayScreens: Set<String> = emptySet(),
+        /** Screens that lose their back affordance from their second capture onward. */
+        private val backAffordanceDroppedOnReplayScreens: Set<String> = emptySet(),
+        /** Elements a screen shows once the crawler has returned to the root, i.e. on replay. */
+        private val replayElementsByScreen: Map<String, List<PressableElement>> = emptyMap(),
         private val delayedTransitions: Map<String, DelayedTransition> = emptyMap(),
         private val resetCaptureCountsOnRelaunch: Boolean = false,
     ) : DeepCrawlCoordinator.Host {
@@ -2238,6 +2512,7 @@ class DeepCrawlCoordinatorTest {
             val root = rootFor(
                 screenId = captureScreenId,
                 shiftedBounds = captureScreenId in shiftedBoundsOnReplayScreens && captureCount >= 2,
+                dropBackAffordance = captureScreenId in backAffordanceDroppedOnReplayScreens && captureCount >= 2,
                 captureCount = captureCount,
             )
             advancePendingDelayedTransitionAfterCapture(pendingTransition)
@@ -2369,6 +2644,7 @@ class DeepCrawlCoordinatorTest {
             screenId: String,
             shiftedBounds: Boolean = false,
             captureCount: Int = 0,
+            dropBackAffordance: Boolean = false,
         ): AccessibilityNodeSnapshot {
             val screen = screens.getValue(screenId)
             val variant = screen.captureVariants.getOrNull(
@@ -2376,7 +2652,9 @@ class DeepCrawlCoordinatorTest {
             )
             val packageName = variant?.packageNameOverride ?: screen.packageName
             val className = variant?.className ?: "android.widget.FrameLayout"
-            val elements = variant?.elements ?: screen.elements
+            val elements = replayElementsByScreen[screenId]?.takeIf { returnedToEntryScreen }
+                ?: variant?.elements
+                ?: screen.elements
             val scrollable = variant?.scrollable ?: screen.scrollable
             val rootBounds = shiftedBounds.shiftedBounds("[0,0][1080,2400]")
             return AccessibilityNodeSnapshot(
@@ -2451,7 +2729,7 @@ class DeepCrawlCoordinatorTest {
                             )
                         )
                     }
-                    if (screenId != entryScreenId && screenId !in screensWithoutBackAffordance) {
+                    if (screenId != entryScreenId && screenId !in screensWithoutBackAffordance && !dropBackAffordance) {
                         add(
                             AccessibilityNodeSnapshot(
                                 className = "android.widget.ImageButton",

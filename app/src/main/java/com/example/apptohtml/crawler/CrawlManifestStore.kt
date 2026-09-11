@@ -33,8 +33,10 @@ object CrawlManifestStore {
                     appendLine("""      "screenId": "${escape(screen.screenId)}",""")
                     appendLine("""      "screenName": "${escape(screen.screenName)}",""")
                     appendLine("""      "packageName": "${escape(screen.packageName)}",""")
-                    appendLine("""      "screenFingerprint": "${escape(screen.screenFingerprint)}",""")
-                    appendLine("""      "replayFingerprint": "${escape(screen.replayFingerprint)}",""")
+                    // Two projections of the one structured identity. This file is a debug log
+                    // with no reader in the app; the fields stay for continuity of the log format.
+                    appendLine("""      "screenFingerprint": "${escape(DedupPolicy.nameKey(screen.identity).orEmpty())}",""")
+                    appendLine("""      "replayFingerprint": "${escape(ScreenIdentityCodec.encodeContent(screen.identity))}",""")
                     appendLine("""      "htmlPath": "${escape(screen.htmlPath)}",""")
                     appendLine("""      "xmlPath": "${escape(screen.xmlPath)}",""")
                     appendLine("""      "mergedXmlPath": ${quotedOrNull(screen.mergedXmlPath)},""")
@@ -56,8 +58,8 @@ object CrawlManifestStore {
                             appendLine("""          "editable": ${step.editable},""")
                             appendLine("""          "firstSeenStep": ${step.firstSeenStep},""")
                             appendLine("""          "expectedPackageName": ${quotedOrNull(step.expectedPackageName)},""")
-                            appendLine("""          "expectedDestinationFingerprint": ${quotedOrNull(step.expectedDestinationFingerprint)},""")
-                            appendLine("""          "expectedReplayFingerprint": ${quotedOrNull(step.expectedReplayFingerprint)},""")
+                            appendLine("""          "expectedDestinationFingerprint": ${quotedOrNull(step.expectedDestinationIdentity?.let(ScreenIdentityCodec::encodeContent))},""")
+                            appendLine("""          "expectedReplayFingerprint": ${quotedOrNull(step.expectedReplayIdentity?.let(ScreenIdentityCodec::encodeContent))},""")
                             append("""          "expectedReplayScreenName": ${quotedOrNull(step.expectedReplayScreenName)}""")
                             appendLine()
                             append("        }")

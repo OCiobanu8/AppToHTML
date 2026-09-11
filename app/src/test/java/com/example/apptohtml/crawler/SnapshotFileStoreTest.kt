@@ -165,13 +165,13 @@ class SnapshotFileStoreTest {
                 depth = 0,
                 expansionStatus = ScreenExpansionStatus.NOT_STARTED,
                 isRoot = true,
-                screenIdentity = ScreenIdentityCodec.decode(
-                    ScreenNaming.buildScreenIdentity(
+                screenIdentity = ScreenNaming.buildScreenNameIdentity(
                         screenName = snapshot.screenName,
                         packageName = snapshot.packageName,
                         root = null,
-                    ).fingerprint,
-                )!!,
+                    ).let {
+                        ScreenIdentityFields(it.packageName, it.screenName, it.titleDisambiguators)
+                    },
                 parent = null,
                 route = CrawlRoute(),
                 runLevel = RunLevelState(
@@ -205,13 +205,11 @@ class SnapshotFileStoreTest {
             finishedAt = finishedAt,
         )
 
-        val expected = ScreenIdentityCodec.decode(
-            ScreenNaming.buildScreenIdentity(
-                screenName = snapshot.screenName,
-                packageName = snapshot.packageName,
-                root = null,
-            ).fingerprint,
-        )
+        val expected = ScreenNaming.buildScreenNameIdentity(
+            screenName = snapshot.screenName,
+            packageName = snapshot.packageName,
+            root = null,
+        ).let { ScreenIdentityFields(it.packageName, it.screenName, it.titleDisambiguators) }
         assertEquals(expected, state.screenIdentity)
     }
 

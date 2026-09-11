@@ -269,8 +269,8 @@ data class CrawlRouteStep(
     val editable: Boolean,
     val firstSeenStep: Int,
     val expectedPackageName: String? = null,
-    val expectedDestinationFingerprint: String? = null,
-    val expectedReplayFingerprint: String? = null,
+    val expectedDestinationIdentity: ScreenIdentity? = null,
+    val expectedReplayIdentity: ScreenIdentity? = null,
     val expectedReplayScreenName: String? = null,
 )
 
@@ -310,8 +310,8 @@ internal fun PressableElement.toLinkKey(): PressableElementLinkKey {
 
 internal fun PressableElement.toRouteStep(
     expectedPackageName: String? = null,
-    expectedDestinationFingerprint: String? = null,
-    expectedReplayFingerprint: String? = null,
+    expectedDestinationIdentity: ScreenIdentity? = null,
+    expectedReplayIdentity: ScreenIdentity? = null,
     expectedReplayScreenName: String? = null,
 ): CrawlRouteStep {
     return CrawlRouteStep(
@@ -325,8 +325,8 @@ internal fun PressableElement.toRouteStep(
         editable = editable,
         firstSeenStep = firstSeenStep,
         expectedPackageName = expectedPackageName,
-        expectedDestinationFingerprint = expectedDestinationFingerprint,
-        expectedReplayFingerprint = expectedReplayFingerprint,
+        expectedDestinationIdentity = expectedDestinationIdentity,
+        expectedReplayIdentity = expectedReplayIdentity,
         expectedReplayScreenName = expectedReplayScreenName,
     )
 }
@@ -426,8 +426,7 @@ data class CrawlScreenRecord(
     val screenId: String,
     val screenName: String,
     val packageName: String,
-    val screenFingerprint: String,
-    val replayFingerprint: String,
+    val identity: ScreenIdentity,
     val htmlPath: String,
     val xmlPath: String,
     val mergedXmlPath: String? = null,
@@ -465,7 +464,7 @@ data class CrawlEdgeRecord(
 data class ScreenIdentityFields(
     val packageName: String,
     val title: String,
-    val hints: List<String> = emptyList(),
+    val titleDisambiguators: List<String> = emptyList(),
 )
 
 data class ParentEdgeRef(
