@@ -13,7 +13,7 @@ package com.example.apptohtml.crawler
  * `checked` (transient on/off state) is excluded; `checkable` (the element's type/affordance) is
  * kept, so a toggle never collapses into a plain button with the same label.
  */
-internal data class ElementFingerprint(
+data class ElementFingerprint(
     val resourceId: String?,   // viewIdResourceName, or null if blank
     val label: String,         // normalized (see normalizeLabel)
     val className: String?,    // null if blank

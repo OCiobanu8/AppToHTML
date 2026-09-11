@@ -5,7 +5,7 @@ internal class DestinationSettler {
         val startedAt = request.timeProvider()
         val samples = mutableListOf<DestinationSample>()
         var attemptNumber = 0
-        var previousFingerprint: String? = null
+        var previousIdentity: ScreenIdentity? = null
         var firstEligibleSample: DestinationSample? = null
         var lastEligibleSample: DestinationSample? = null
         var bestSample: DestinationSample? = null
@@ -19,11 +19,11 @@ internal class DestinationSettler {
                 root = root,
                 attemptNumber = attemptNumber,
                 elapsedMillis = elapsedMillis,
-                previousFingerprint = previousFingerprint,
+                previousIdentity = previousIdentity,
             )
 
-            if (sample.fingerprint != null) {
-                previousFingerprint = sample.fingerprint
+            if (sample.identity != null) {
+                previousIdentity = sample.identity
             }
 
             if (sample.eligible) {
@@ -44,9 +44,13 @@ internal class DestinationSettler {
                 }
                 lastEligibleSample = sample
 
+                // S5 — known-destination match, resolved through the caller's named policy.
                 val matchesKnownDestination = request.mode == DestinationSettleMode.ROUTE_REPLAY &&
-                    request.knownDestinationFingerprint != null &&
-                    sample.fingerprint == request.knownDestinationFingerprint
+                    request.knownDestinationIdentity != null &&
+                    sample.identity != null &&
+                    request.sameScreenPolicy
+                        .compare(request.knownDestinationIdentity, sample.identity)
+                        .matched
                 if (matchesKnownDestination) {
                     return resultForSample(
                         sample = sample,
@@ -79,7 +83,7 @@ internal class DestinationSettler {
                 } else {
                     DestinationSettleResult(
                         root = null,
-                        fingerprint = null,
+                        identity = null,
                         packageName = null,
                         samples = samples.toList(),
                         stopReason = DestinationSettleStopReason.NO_ELIGIBLE_SAMPLE,
@@ -96,7 +100,7 @@ internal class DestinationSettler {
         root: AccessibilityNodeSnapshot?,
         attemptNumber: Int,
         elapsedMillis: Long,
-        previousFingerprint: String?,
+        previousIdentity: ScreenIdentity?,
     ): DestinationSample {
         if (root == null) {
             return DestinationSample(
@@ -104,35 +108,47 @@ internal class DestinationSettler {
                 elapsedMillis = elapsedMillis,
                 root = null,
                 packageName = null,
-                fingerprint = null,
+                identity = null,
                 metrics = null,
                 expectedPackageMatched = false,
                 packageChanged = false,
-                fingerprintChangedFromBefore = false,
-                fingerprintChangedFromTop = false,
-                sameFingerprintAsPrevious = false,
+                identityChangedFromBefore = false,
+                identityChangedFromTop = false,
+                sameIdentityAsPrevious = false,
                 eligible = false,
                 eligibilityReason = DestinationEligibilityReason.NULL_CAPTURE,
                 becameCurrentBest = false,
             )
         }
 
-        val fingerprint = request.fingerprint(root)
-        val metrics = DestinationRichnessMetrics.from(root, fingerprint)
+        val identity = request.identity(root)
+        // The richness metric measures the LOGICAL encoding, as it did before the structure
+        // existed: its length feeds richnessScore, which selects the captured sample.
+        val metrics = DestinationRichnessMetrics.from(
+            root = root,
+            logicalFingerprint = ScreenIdentityCodec.encodeLogical(
+                identity = identity,
+                countBackAffordances = request.sameScreenPolicy.countBackAffordances,
+            ),
+        )
         val packageName = root.packageName
         val expectedPackageMatched = request.expectedPackageName == null ||
             packageName == request.expectedPackageName
         val packageChanged = packageName != null && packageName != request.parentPackageName
-        val fingerprintChangedFromBefore = fingerprint != request.beforeClickFingerprint
-        val fingerprintChangedFromTop = fingerprint != request.topFingerprint
-        val sameFingerprintAsPrevious = fingerprint == previousFingerprint
+        // S6 — "did anything change?", resolved through the same named policy.
+        val policy = request.sameScreenPolicy
+        val identityChangedFromBefore =
+            !policy.compare(request.beforeClickIdentity, identity).matched
+        val identityChangedFromTop = !policy.compare(request.topIdentity, identity).matched
+        val sameIdentityAsPrevious =
+            previousIdentity != null && policy.compare(previousIdentity, identity).matched
         val eligibilityReason = eligibilityReason(
             request = request,
             packageName = packageName,
             expectedPackageMatched = expectedPackageMatched,
             packageChanged = packageChanged,
-            fingerprintChangedFromBefore = fingerprintChangedFromBefore,
-            fingerprintChangedFromTop = fingerprintChangedFromTop,
+            identityChangedFromBefore = identityChangedFromBefore,
+            identityChangedFromTop = identityChangedFromTop,
         )
 
         return DestinationSample(
@@ -140,13 +156,13 @@ internal class DestinationSettler {
             elapsedMillis = elapsedMillis,
             root = root,
             packageName = packageName,
-            fingerprint = fingerprint,
+            identity = identity,
             metrics = metrics,
             expectedPackageMatched = expectedPackageMatched,
             packageChanged = packageChanged,
-            fingerprintChangedFromBefore = fingerprintChangedFromBefore,
-            fingerprintChangedFromTop = fingerprintChangedFromTop,
-            sameFingerprintAsPrevious = sameFingerprintAsPrevious,
+            identityChangedFromBefore = identityChangedFromBefore,
+            identityChangedFromTop = identityChangedFromTop,
+            sameIdentityAsPrevious = sameIdentityAsPrevious,
             eligible = eligibilityReason.isEligible,
             eligibilityReason = eligibilityReason,
             becameCurrentBest = false,
@@ -158,8 +174,8 @@ internal class DestinationSettler {
         packageName: String?,
         expectedPackageMatched: Boolean,
         packageChanged: Boolean,
-        fingerprintChangedFromBefore: Boolean,
-        fingerprintChangedFromTop: Boolean,
+        identityChangedFromBefore: Boolean,
+        identityChangedFromTop: Boolean,
     ): DestinationEligibilityReason {
         if (request.expectedPackageName != null) {
             return if (expectedPackageMatched) {
@@ -173,7 +189,7 @@ internal class DestinationSettler {
             return DestinationEligibilityReason.PACKAGE_CHANGED
         }
 
-        return if (fingerprintChangedFromBefore && fingerprintChangedFromTop) {
+        return if (identityChangedFromBefore && identityChangedFromTop) {
             DestinationEligibilityReason.FINGERPRINT_CHANGED
         } else {
             DestinationEligibilityReason.UNCHANGED_FROM_PARENT
@@ -225,7 +241,7 @@ internal class DestinationSettler {
     ): DestinationSettleResult {
         return DestinationSettleResult(
             root = sample.root,
-            fingerprint = sample.fingerprint,
+            identity = sample.identity,
             packageName = sample.packageName,
             samples = samples.toList(),
             stopReason = stopReason,
@@ -239,11 +255,13 @@ internal class DestinationSettler {
 internal data class DestinationSettleRequest(
     val parentPackageName: String,
     val expectedPackageName: String? = null,
-    val beforeClickFingerprint: String,
-    val topFingerprint: String,
-    val knownDestinationFingerprint: String? = null,
+    val beforeClickIdentity: ScreenIdentity,
+    val topIdentity: ScreenIdentity,
+    val knownDestinationIdentity: ScreenIdentity? = null,
     val mode: DestinationSettleMode,
-    val fingerprint: (AccessibilityNodeSnapshot) -> String,
+    /** The policy S5 and S6 resolve through; the caller picks it, the settler does not guess. */
+    val sameScreenPolicy: SameScreenPolicy,
+    val identity: (AccessibilityNodeSnapshot) -> ScreenIdentity,
     val capture: suspend (String?) -> AccessibilityNodeSnapshot?,
     val timeProvider: () -> Long,
     val maxSettleMillis: Long = 3_000L,
@@ -251,7 +269,7 @@ internal data class DestinationSettleRequest(
 
 internal data class DestinationSettleResult(
     val root: AccessibilityNodeSnapshot?,
-    val fingerprint: String?,
+    val identity: ScreenIdentity?,
     val packageName: String?,
     val samples: List<DestinationSample>,
     val stopReason: DestinationSettleStopReason,
@@ -264,13 +282,13 @@ internal data class DestinationSample(
     val elapsedMillis: Long,
     val root: AccessibilityNodeSnapshot?,
     val packageName: String?,
-    val fingerprint: String?,
+    val identity: ScreenIdentity?,
     val metrics: DestinationRichnessMetrics?,
     val expectedPackageMatched: Boolean,
     val packageChanged: Boolean,
-    val fingerprintChangedFromBefore: Boolean,
-    val fingerprintChangedFromTop: Boolean,
-    val sameFingerprintAsPrevious: Boolean,
+    val identityChangedFromBefore: Boolean,
+    val identityChangedFromTop: Boolean,
+    val sameIdentityAsPrevious: Boolean,
     val eligible: Boolean,
     val eligibilityReason: DestinationEligibilityReason,
     val becameCurrentBest: Boolean,

@@ -8,9 +8,8 @@ package com.example.apptohtml.crawler
  * and every per-element edge attribute, producing structurally different XML that downstream
  * readers would have to special-case. A snapshot follows nothing, so the state it synthesizes has
  * no edges — which is honest — but is otherwise built exactly the way
- * `DeepCrawlCoordinator.buildScreenCrawlState` builds a root screen, including the two-step
- * identity derivation (`buildScreenIdentity` → encoded fingerprint → `ScreenIdentityCodec.decode`)
- * and its fallback.
+ * `DeepCrawlCoordinator.buildScreenCrawlState` builds a root screen, taking the name
+ * half of the structured identity directly rather than round-tripping it through an encoded string.
  */
 internal object SnapshotCrawlState {
 
@@ -21,18 +20,17 @@ internal object SnapshotCrawlState {
         startedAt: Long,
         finishedAt: Long,
     ): ScreenCrawlState {
-        val fingerprint = ScreenNaming.buildScreenIdentity(
+        val name = ScreenNaming.buildScreenNameIdentity(
             screenName = snapshot.screenName,
             packageName = snapshot.packageName,
             root = root,
-        ).fingerprint
+        )
 
-        val identity = ScreenIdentityCodec.decode(fingerprint)
-            ?: ScreenIdentityFields(
-                packageName = snapshot.packageName,
-                title = snapshot.screenName,
-                hints = emptyList(),
-            )
+        val identity = ScreenIdentityFields(
+            packageName = name.packageName,
+            title = name.screenName,
+            titleDisambiguators = name.titleDisambiguators,
+        )
 
         return ScreenCrawlState(
             screenId = SnapshotFileStore.SNAPSHOT_SCREEN_ID,

@@ -6,7 +6,7 @@ class CrawlRunTracker private constructor(
     val startedAt: Long,
     private val screens: MutableList<CrawlScreenRecord>,
     private val edges: MutableList<CrawlEdgeRecord>,
-    private val screenFingerprintToId: LinkedHashMap<String, String>,
+    private val dedupKeyToScreenId: LinkedHashMap<String, String>,
     private var rootScreenId: String?,
     private var nextScreenSequence: Int,
     private var nextEdgeSequence: Int,
@@ -24,7 +24,7 @@ class CrawlRunTracker private constructor(
         startedAt = startedAt,
         screens = mutableListOf(),
         edges = mutableListOf(),
-        screenFingerprintToId = linkedMapOf(),
+        dedupKeyToScreenId = linkedMapOf(),
         rootScreenId = null,
         nextScreenSequence = 0,
         nextEdgeSequence = 0,
@@ -35,9 +35,7 @@ class CrawlRunTracker private constructor(
     fun addScreen(
         screenId: String,
         snapshot: ScreenSnapshot,
-        screenFingerprint: String,
-        replayFingerprint: String,
-        indexFingerprint: Boolean = true,
+        identity: ScreenIdentity,
         files: CapturedScreenFiles,
         parentScreenId: String?,
         triggerElement: PressableElement?,
@@ -49,8 +47,7 @@ class CrawlRunTracker private constructor(
             screenId = screenId,
             screenName = snapshot.screenName,
             packageName = snapshot.packageName,
-            screenFingerprint = screenFingerprint,
-            replayFingerprint = replayFingerprint,
+            identity = identity,
             htmlPath = files.htmlFile.absolutePath,
             xmlPath = files.xmlFile.absolutePath,
             mergedXmlPath = files.mergedXmlFile?.absolutePath,
@@ -62,8 +59,8 @@ class CrawlRunTracker private constructor(
             depth = depth,
             expansionStatus = expansionStatus,
         )
-        if (indexFingerprint) {
-            screenFingerprintToId.putIfAbsent(screenFingerprint, screenId)
+        DedupPolicy.keyFor(identity)?.let { dedupKey ->
+            dedupKeyToScreenId.putIfAbsent(dedupKey, screenId)
         }
         if (depth == 0) {
             rootScreenId = screenId
@@ -162,8 +159,10 @@ class CrawlRunTracker private constructor(
         )
     }
 
-    fun findScreenIdByFingerprint(screenFingerprint: String): String? {
-        return screenFingerprintToId[screenFingerprint]
+    /** Resolves through [DedupPolicy]: null when this screen may not be catalogued at all. */
+    fun findScreenIdByIdentity(identity: ScreenIdentity): String? {
+        val dedupKey = DedupPolicy.keyFor(identity) ?: return null
+        return dedupKeyToScreenId[dedupKey]
     }
 
     fun findScreen(screenId: String): CrawlScreenRecord? {
@@ -207,7 +206,7 @@ class CrawlRunTracker private constructor(
             startedAt: Long,
             screens: List<CrawlScreenRecord>,
             edges: List<CrawlEdgeRecord>,
-            screenFingerprintToId: LinkedHashMap<String, String>,
+            dedupKeyToScreenId: LinkedHashMap<String, String>,
             rootScreenId: String?,
             nextScreenSequence: Int,
             nextEdgeSequence: Int,
@@ -233,7 +232,7 @@ class CrawlRunTracker private constructor(
                 startedAt = startedAt,
                 screens = screens.toMutableList(),
                 edges = edges.toMutableList(),
-                screenFingerprintToId = LinkedHashMap(screenFingerprintToId),
+                dedupKeyToScreenId = LinkedHashMap(dedupKeyToScreenId),
                 rootScreenId = rootScreenId,
                 nextScreenSequence = nextScreenSequence,
                 nextEdgeSequence = nextEdgeSequence,

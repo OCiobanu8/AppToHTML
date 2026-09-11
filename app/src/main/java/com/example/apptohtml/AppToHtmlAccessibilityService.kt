@@ -100,7 +100,6 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
     companion object {
         private const val captureDebounceMillis = 350L
         private const val scrollSettleDelayMillis = 350L
-        private const val maxBackNavigationAttempts = 3
     }
 
     private fun AccessibilityNodeInfo.toLiveNodeAttributes(): LiveNodeAttributes {
@@ -556,88 +555,6 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
                 CrawlerSession.updateProgress(requestId, "$progressPrefix $message")
             },
         )
-    }
-
-    private suspend fun restoreRootToTop(
-        selectedApp: SelectedAppRef,
-        targetPackageName: String,
-        requestId: Long,
-    ): AccessibilityNodeSnapshot? {
-        val currentRoot = captureCurrentRootSnapshot(targetPackageName) ?: return null
-        return scrollScanCoordinator.rewindToTop(
-            selectedApp = selectedApp,
-            initialRoot = currentRoot,
-            tryScrollBackward = { path ->
-                val liveRoot = rootInActiveWindow ?: return@rewindToTop false
-                liveNodeActions.performScroll(liveRoot, path, AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)
-            },
-            captureCurrentRoot = {
-                captureCurrentRootSnapshot(targetPackageName)
-            },
-            onProgress = { message ->
-                CrawlerSession.updateProgress(requestId, message)
-            },
-        )
-    }
-
-    private suspend fun navigateBackToRoot(
-        selectedApp: SelectedAppRef,
-        targetPackageName: String,
-        expectedRootLogicalFingerprint: String,
-        requestId: Long,
-    ): AccessibilityNodeSnapshot? {
-        repeat(maxBackNavigationAttempts) { attempt ->
-            CrawlerSession.updateProgress(
-                requestId = requestId,
-                message = "Returning to the root screen. Back attempt ${attempt + 1} of $maxBackNavigationAttempts.",
-            )
-            if (!performGlobalAction(GLOBAL_ACTION_BACK)) {
-                return null
-            }
-
-            val rewoundRoot = restoreRootToTop(
-                selectedApp = selectedApp,
-                targetPackageName = targetPackageName,
-                requestId = requestId,
-            ) ?: return@repeat
-
-            if (scrollScanCoordinator.logicalViewportFingerprint(rewoundRoot) == expectedRootLogicalFingerprint) {
-                return rewoundRoot
-            }
-        }
-
-        return null
-    }
-
-    private suspend fun recoverToRootAfterEdgeFailure(
-        selectedApp: SelectedAppRef,
-        targetPackageName: String,
-        expectedRootLogicalFingerprint: String,
-        requestId: Long,
-    ): Boolean {
-        val currentRoot = captureCurrentRootSnapshot(expectedPackageName = null)
-        if (currentRoot?.packageName == targetPackageName) {
-            val rewoundRoot = restoreRootToTop(
-                selectedApp = selectedApp,
-                targetPackageName = targetPackageName,
-                requestId = requestId,
-            )
-            if (
-                rewoundRoot != null &&
-                scrollScanCoordinator.logicalViewportFingerprint(rewoundRoot) == expectedRootLogicalFingerprint
-            ) {
-                return true
-            }
-        }
-
-        val returnedRoot = navigateBackToRoot(
-            selectedApp = selectedApp,
-            targetPackageName = targetPackageName,
-            expectedRootLogicalFingerprint = expectedRootLogicalFingerprint,
-            requestId = requestId,
-        )
-        return returnedRoot != null &&
-            scrollScanCoordinator.logicalViewportFingerprint(returnedRoot) == expectedRootLogicalFingerprint
     }
 
     private suspend fun captureCurrentRootSnapshot(expectedPackageName: String?): AccessibilityNodeSnapshot? {

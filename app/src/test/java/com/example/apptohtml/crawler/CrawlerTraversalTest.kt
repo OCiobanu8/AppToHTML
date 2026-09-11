@@ -260,12 +260,15 @@ class CrawlerTraversalTest {
             tracker.addScreen(
                 screenId = rootScreenId,
                 snapshot = rootSnapshot,
-                screenFingerprint = ScreenNaming.dedupFingerprint(
-                    screenName = rootSnapshot.screenName,
-                    packageName = rootSnapshot.packageName,
-                    root = rootSnapshot.mergedRoot,
+                identity = ScreenIdentity.fromRoot(
+                    rootSnapshot.mergedRoot ?: error("fixture snapshot has no merged root")
+                ).withName(
+                    ScreenNaming.buildScreenNameIdentity(
+                        screenName = rootSnapshot.screenName,
+                        packageName = rootSnapshot.packageName,
+                        root = rootSnapshot.mergedRoot,
+                    )
                 ),
-                replayFingerprint = "rfp-root",
                 files = rootFiles,
                 parentScreenId = null,
                 triggerElement = null,
@@ -281,12 +284,15 @@ class CrawlerTraversalTest {
             tracker.addScreen(
                 screenId = firstChildScreenId,
                 snapshot = firstChildSnapshot,
-                screenFingerprint = ScreenNaming.dedupFingerprint(
-                    screenName = firstChildSnapshot.screenName,
-                    packageName = firstChildSnapshot.packageName,
-                    root = firstChildSnapshot.mergedRoot,
+                identity = ScreenIdentity.fromRoot(
+                    firstChildSnapshot.mergedRoot ?: error("fixture snapshot has no merged root")
+                ).withName(
+                    ScreenNaming.buildScreenNameIdentity(
+                        screenName = firstChildSnapshot.screenName,
+                        packageName = firstChildSnapshot.packageName,
+                        root = firstChildSnapshot.mergedRoot,
+                    )
                 ),
-                replayFingerprint = "rfp-google",
                 files = firstChildFiles,
                 parentScreenId = rootScreenId,
                 triggerElement = firstTrigger,
@@ -303,11 +309,15 @@ class CrawlerTraversalTest {
 
             val secondTrigger = testElement(label = "Open Again", resourceId = "com.example:id/open_again")
             val secondChildSnapshot = testSnapshot("  google   screen ", "Primary Action")
-            val existingScreenId = tracker.findScreenIdByFingerprint(
-                ScreenNaming.dedupFingerprint(
-                    screenName = secondChildSnapshot.screenName,
-                    packageName = secondChildSnapshot.packageName,
-                    root = secondChildSnapshot.mergedRoot,
+            val existingScreenId = tracker.findScreenIdByIdentity(
+                ScreenIdentity.fromRoot(
+                    secondChildSnapshot.mergedRoot ?: error("fixture snapshot has no merged root")
+                ).withName(
+                    ScreenNaming.buildScreenNameIdentity(
+                        screenName = secondChildSnapshot.screenName,
+                        packageName = secondChildSnapshot.packageName,
+                        root = secondChildSnapshot.mergedRoot,
+                    )
                 )
             )
 
@@ -334,7 +344,7 @@ class CrawlerTraversalTest {
                     packageName = "com.example.target",
                     root = firstChildSnapshot.mergedRoot,
                 ),
-                manifest.screens.single { it.screenId == firstChildScreenId }.screenFingerprint
+                testDedupKey(manifest.screens.single { it.screenId == firstChildScreenId }.identity)
             )
             assertEquals(
                 listOf(firstTrigger.toRouteStep()),
@@ -370,12 +380,15 @@ class CrawlerTraversalTest {
             tracker.addScreen(
                 screenId = rootScreenId,
                 snapshot = rootSnapshot,
-                screenFingerprint = ScreenNaming.dedupFingerprint(
-                    screenName = rootSnapshot.screenName,
-                    packageName = rootSnapshot.packageName,
-                    root = rootSnapshot.mergedRoot,
+                identity = ScreenIdentity.fromRoot(
+                    rootSnapshot.mergedRoot ?: error("fixture snapshot has no merged root")
+                ).withName(
+                    ScreenNaming.buildScreenNameIdentity(
+                        screenName = rootSnapshot.screenName,
+                        packageName = rootSnapshot.packageName,
+                        root = rootSnapshot.mergedRoot,
+                    )
                 ),
-                replayFingerprint = "rfp-home",
                 files = rootFiles,
                 parentScreenId = null,
                 triggerElement = null,
@@ -391,12 +404,15 @@ class CrawlerTraversalTest {
             tracker.addScreen(
                 screenId = childScreenId,
                 snapshot = childSnapshot,
-                screenFingerprint = ScreenNaming.dedupFingerprint(
-                    screenName = childSnapshot.screenName,
-                    packageName = childSnapshot.packageName,
-                    root = childSnapshot.mergedRoot,
+                identity = ScreenIdentity.fromRoot(
+                    childSnapshot.mergedRoot ?: error("fixture snapshot has no merged root")
+                ).withName(
+                    ScreenNaming.buildScreenNameIdentity(
+                        screenName = childSnapshot.screenName,
+                        packageName = childSnapshot.packageName,
+                        root = childSnapshot.mergedRoot,
+                    )
                 ),
-                replayFingerprint = "rfp-details",
                 files = childFiles,
                 parentScreenId = rootScreenId,
                 triggerElement = trigger,

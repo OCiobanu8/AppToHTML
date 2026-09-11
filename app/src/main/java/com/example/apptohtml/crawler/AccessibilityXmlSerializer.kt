@@ -98,9 +98,11 @@ object AccessibilityXmlSerializer {
         builder.append("<screen-identity")
         builder.append(""" package="${escape(identity.packageName)}"""")
         builder.append(""" title="${escape(identity.title)}"""")
-        identity.hints.take(2).forEachIndexed { index, hint ->
-            builder.append(""" hint-${index + 1}="${escape(hint)}"""")
-        }
+        identity.titleDisambiguators
+            .take(ScreenIdentityCodec.MAX_TITLE_DISAMBIGUATORS)
+            .forEachIndexed { index, value ->
+                builder.append(""" title-disambiguator-${index + 1}="${escape(value)}"""")
+            }
         builder.append(" />")
         builder.append('\n')
     }
@@ -173,28 +175,11 @@ object AccessibilityXmlSerializer {
         builder.append(">")
         builder.append('\n')
 
-        val destinationFingerprint = step.expectedDestinationFingerprint
-        if (destinationFingerprint != null) {
-            val decoded = ScreenIdentityCodec.decode(destinationFingerprint)
-            val childIndent = "  ".repeat(depth + 1)
-            builder.append(childIndent)
-            builder.append("<expected-destination-identity")
-            if (decoded != null) {
-                builder.append(""" package="${escape(decoded.packageName)}"""")
-                builder.append(""" title="${escape(decoded.title)}"""")
-                decoded.hints.take(2).forEachIndexed { index, hint ->
-                    builder.append(""" hint-${index + 1}="${escape(hint)}"""")
-                }
-            } else {
-                builder.append(""" fingerprint="${escape(destinationFingerprint)}"""")
-            }
-            builder.append(" />")
-            builder.append('\n')
+        step.expectedDestinationIdentity?.let { identity ->
+            appendStepIdentity(builder, "expected-destination", identity, depth + 1)
         }
-
-        val replayFingerprint = step.expectedReplayFingerprint
-        if (replayFingerprint != null) {
-            appendExpectedReplay(builder, replayFingerprint, depth + 1)
+        step.expectedReplayIdentity?.let { identity ->
+            appendStepIdentity(builder, "expected-replay", identity, depth + 1)
         }
 
         builder.append(indent)
@@ -202,25 +187,26 @@ object AccessibilityXmlSerializer {
         builder.append('\n')
     }
 
-    private fun appendExpectedReplay(
+    /**
+     * Both step-level expectations are the same kind of value now, so they serialize identically.
+     *
+     * Before the structured identity they did not: `expected-destination-identity` was written from
+     * a *viewport* fingerprint but decoded as a *name* identity, which always failed, so its
+     * package/title branch was dead and the element name described something it did not hold.
+     */
+    private fun appendStepIdentity(
         builder: StringBuilder,
-        replayFingerprint: String,
+        tagName: String,
+        identity: ScreenIdentity,
         depth: Int,
     ) {
         val indent = "  ".repeat(depth)
-        val decoded = ReplayFingerprintCodec.decode(replayFingerprint)
-        if (decoded == null) {
-            builder.append(indent)
-            builder.append("<expected-replay")
-            builder.append(""" fingerprint="${escape(replayFingerprint)}"""")
-            builder.append(" />")
-            builder.append('\n')
-            return
-        }
         builder.append(indent)
-        builder.append("<expected-replay")
-        builder.append(""" root-class="${escape(decoded.rootClass)}"""")
-        if (decoded.elements.isEmpty()) {
+        builder.append("<").append(tagName)
+        builder.append(""" package="${escape(identity.packageName.orEmpty())}"""")
+        builder.append(""" root-class="${escape(identity.rootClassName)}"""")
+        val elements = identity.elements.sortedBy { it.encoded }
+        if (elements.isEmpty()) {
             builder.append(" />")
             builder.append('\n')
             return
@@ -228,20 +214,22 @@ object AccessibilityXmlSerializer {
         builder.append(">")
         builder.append('\n')
         val childIndent = "  ".repeat(depth + 1)
-        decoded.elements.forEach { element ->
+        elements.forEach { element ->
+            val fingerprint = element.fingerprint
             builder.append(childIndent)
             builder.append("<element")
-            builder.append(""" label="${escape(element.label)}"""")
-            builder.append(""" resource-id="${escape(element.resourceId)}"""")
-            builder.append(""" class="${escape(element.className)}"""")
-            builder.append(""" list-item="${escape(element.isListItem)}"""")
-            builder.append(""" checkable="${escape(element.checkable)}"""")
-            builder.append(""" editable="${escape(element.editable)}"""")
+            builder.append(""" label="${escape(fingerprint.label)}"""")
+            builder.append(""" resource-id="${escape(fingerprint.resourceId.orEmpty())}"""")
+            builder.append(""" class="${escape(fingerprint.className.orEmpty())}"""")
+            builder.append(""" list-item="${fingerprint.isListItem}"""")
+            builder.append(""" checkable="${fingerprint.checkable}"""")
+            builder.append(""" editable="${fingerprint.editable}"""")
+            builder.append(""" back="${element.isBackAffordance}"""")
             builder.append(" />")
             builder.append('\n')
         }
         builder.append(indent)
-        builder.append("</expected-replay>")
+        builder.append("</").append(tagName).append(">")
         builder.append('\n')
     }
 

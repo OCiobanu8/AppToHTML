@@ -107,44 +107,46 @@ internal class ScrollScanCoordinator(
         return currentRoot
     }
 
+    /**
+     * S1 — entry-screen restore. Resolves through [EntryRestorePolicy], the most forgiving of the
+     * named policies: it excludes back affordances from both sides and accepts an enriched or
+     * merely-similar screen, because the entry screen legitimately grows a back button once the
+     * crawler has navigated away and returned.
+     */
     suspend fun rewindToEntryScreen(
         initialRoot: AccessibilityNodeSnapshot,
         targetPackageName: String,
-        expectedEntryLogicalFingerprint: String? = null,
+        expectedEntryIdentity: ScreenIdentity? = null,
         tryBack: () -> Boolean,
         captureCurrentRoot: suspend () -> AccessibilityNodeSnapshot?,
         onProgress: (String) -> Unit = {},
     ): EntryScreenResetResult {
         var currentRoot = initialRoot
         var backAttempts = 0
+        val policy = EntryRestorePolicy(targetPackageName)
 
         while (true) {
-            val observedLogicalFingerprint = logicalEntryViewportFingerprint(currentRoot)
-            val entryFingerprintMatch = EntryScreenFingerprintMatcher.match(
-                expectedFingerprint = expectedEntryLogicalFingerprint,
-                observedRoot = currentRoot,
-                targetPackageName = targetPackageName,
-                observedFingerprint = observedLogicalFingerprint,
-            )
+            val observedIdentity = ScreenIdentity.fromRoot(currentRoot)
+            val entryFingerprintMatch = policy.compare(expectedEntryIdentity, observedIdentity)
             if (
-                expectedEntryLogicalFingerprint != null &&
-                entryFingerprintMatch.reason == EntryScreenFingerprintMatchReason.EXACT_FINGERPRINT_MATCH
+                expectedEntryIdentity != null &&
+                entryFingerprintMatch.reason == ScreenIdentityMatchReason.EXACT_FINGERPRINT_MATCH
             ) {
                 onProgress("Resetting to the first screen. Matched the captured logical entry screen.")
                 return entryScreenResetResult(
                     root = currentRoot,
                     outcome = EntryScreenResetOutcome.MATCHED_EXPECTED_LOGICAL,
-                    observedLogicalFingerprint = observedLogicalFingerprint,
-                    expectedLogicalFingerprint = expectedEntryLogicalFingerprint,
+                    observedIdentity = observedIdentity,
+                    expectedIdentity = expectedEntryIdentity,
                     entryFingerprintMatch = entryFingerprintMatch,
                 )
             }
 
             if (!EntryScreenBackAffordanceDetector.hasVisibleInAppBackAffordance(currentRoot)) {
                 val outcome = when {
-                    expectedEntryLogicalFingerprint == null ->
+                    expectedEntryIdentity == null ->
                         EntryScreenResetOutcome.NO_BACK_AFFORDANCE_ASSUMED_ENTRY
-                    entryFingerprintMatch.compatible ->
+                    entryFingerprintMatch.matched ->
                         EntryScreenResetOutcome.MATCHED_COMPATIBLE_LOGICAL
                     else -> EntryScreenResetOutcome.EXPECTED_LOGICAL_NOT_FOUND
                 }
@@ -158,8 +160,8 @@ internal class ScrollScanCoordinator(
                 return entryScreenResetResult(
                     root = currentRoot,
                     outcome = outcome,
-                    observedLogicalFingerprint = observedLogicalFingerprint,
-                    expectedLogicalFingerprint = expectedEntryLogicalFingerprint,
+                    observedIdentity = observedIdentity,
+                    expectedIdentity = expectedEntryIdentity,
                     entryFingerprintMatch = entryFingerprintMatch,
                 )
             }
@@ -168,8 +170,8 @@ internal class ScrollScanCoordinator(
                 return entryScreenResetResult(
                     root = currentRoot,
                     outcome = EntryScreenResetOutcome.MAX_ATTEMPTS_REACHED,
-                    observedLogicalFingerprint = observedLogicalFingerprint,
-                    expectedLogicalFingerprint = expectedEntryLogicalFingerprint,
+                    observedIdentity = observedIdentity,
+                    expectedIdentity = expectedEntryIdentity,
                     entryFingerprintMatch = entryFingerprintMatch,
                 )
             }
@@ -180,8 +182,8 @@ internal class ScrollScanCoordinator(
                 return entryScreenResetResult(
                     root = currentRoot,
                     outcome = EntryScreenResetOutcome.BACK_ACTION_FAILED,
-                    observedLogicalFingerprint = observedLogicalFingerprint,
-                    expectedLogicalFingerprint = expectedEntryLogicalFingerprint,
+                    observedIdentity = observedIdentity,
+                    expectedIdentity = expectedEntryIdentity,
                     entryFingerprintMatch = entryFingerprintMatch,
                 )
             }
@@ -191,16 +193,16 @@ internal class ScrollScanCoordinator(
                 ?: return entryScreenResetResult(
                     root = currentRoot,
                     outcome = EntryScreenResetOutcome.LEFT_TARGET_APP,
-                    observedLogicalFingerprint = observedLogicalFingerprint,
-                    expectedLogicalFingerprint = expectedEntryLogicalFingerprint,
+                    observedIdentity = observedIdentity,
+                    expectedIdentity = expectedEntryIdentity,
                     entryFingerprintMatch = entryFingerprintMatch,
                 )
             if (nextRoot.packageName != targetPackageName) {
                 return entryScreenResetResult(
                     root = currentRoot,
                     outcome = EntryScreenResetOutcome.LEFT_TARGET_APP,
-                    observedLogicalFingerprint = observedLogicalFingerprint,
-                    expectedLogicalFingerprint = expectedEntryLogicalFingerprint,
+                    observedIdentity = observedIdentity,
+                    expectedIdentity = expectedEntryIdentity,
                     entryFingerprintMatch = entryFingerprintMatch,
                 )
             }
@@ -276,25 +278,27 @@ internal class ScrollScanCoordinator(
     private fun entryScreenResetResult(
         root: AccessibilityNodeSnapshot,
         outcome: EntryScreenResetOutcome,
-        observedLogicalFingerprint: String,
-        expectedLogicalFingerprint: String?,
-        entryFingerprintMatch: EntryScreenFingerprintMatch? = null,
+        observedIdentity: ScreenIdentity,
+        expectedIdentity: ScreenIdentity?,
+        entryFingerprintMatch: ScreenIdentityComparison? = null,
     ): EntryScreenResetResult {
-        val matchedExpectedLogical = expectedLogicalFingerprint != null &&
-            observedLogicalFingerprint == expectedLogicalFingerprint
+        val matchedExpectedLogical =
+            entryFingerprintMatch?.reason == ScreenIdentityMatchReason.EXACT_FINGERPRINT_MATCH
         return EntryScreenResetResult(
             root = root,
             outcome = outcome,
-            observedLogicalFingerprint = observedLogicalFingerprint,
-            expectedLogicalFingerprint = expectedLogicalFingerprint,
+            observedIdentity = observedIdentity,
+            expectedIdentity = expectedIdentity,
             matchedExpectedLogical = matchedExpectedLogical,
             verifiedForReplay = outcome == EntryScreenResetOutcome.MATCHED_EXPECTED_LOGICAL ||
                 outcome == EntryScreenResetOutcome.MATCHED_COMPATIBLE_LOGICAL ||
                 outcome == EntryScreenResetOutcome.NO_BACK_AFFORDANCE_ASSUMED_ENTRY,
             entryFingerprintMatchReason = entryFingerprintMatch?.reason,
+            missingIdentities = entryFingerprintMatch?.missing.orEmpty(),
+            extraIdentities = entryFingerprintMatch?.extra.orEmpty(),
             entryFingerprintOverlapCount = entryFingerprintMatch?.overlapCount ?: 0,
-            entryFingerprintExpectedCount = entryFingerprintMatch?.expectedIdentityCount ?: 0,
-            entryFingerprintObservedCount = entryFingerprintMatch?.observedIdentityCount ?: 0,
+            entryFingerprintExpectedCount = entryFingerprintMatch?.expectedCount ?: 0,
+            entryFingerprintObservedCount = entryFingerprintMatch?.observedCount ?: 0,
             entryFingerprintExpectedCoverage = entryFingerprintMatch?.expectedCoverage ?: 0.0,
             entryFingerprintObservedCoverage = entryFingerprintMatch?.observedCoverage ?: 0.0,
             entryFingerprintDiceSimilarity = entryFingerprintMatch?.diceSimilarity ?: 0.0,
@@ -307,142 +311,41 @@ internal class ScrollScanCoordinator(
             .size
     }
 
+    /**
+     * Kept, and deliberately the only place bounds participate in identity: scroll-loop detection
+     * needs to notice that a scroll moved the viewport, which is a geometric question. The bead
+     * puts this fingerprint out of scope.
+     */
     fun geometrySensitiveViewportFingerprint(root: AccessibilityNodeSnapshot): String {
-        return buildViewportFingerprint(
-            root = root,
-            includeBounds = true,
-            excludeEntryBackAffordances = false,
-        )
-    }
-
-    fun logicalViewportFingerprint(root: AccessibilityNodeSnapshot): String {
-        return buildViewportFingerprint(
-            root = root,
-            includeBounds = false,
-            excludeEntryBackAffordances = false,
-        )
-    }
-
-    fun geometrySensitiveEntryViewportFingerprint(root: AccessibilityNodeSnapshot): String {
-        return buildViewportFingerprint(
-            root = root,
-            includeBounds = true,
-            excludeEntryBackAffordances = true,
-        )
-    }
-
-    fun logicalEntryViewportFingerprint(root: AccessibilityNodeSnapshot): String {
-        return buildViewportFingerprint(
-            root = root,
-            includeBounds = false,
-            excludeEntryBackAffordances = true,
-        )
-    }
-
-    private fun mergedElementFingerprint(element: PressableElement): ElementFingerprint {
-        return ElementFingerprint.of(element)
-    }
-
-    private fun buildViewportFingerprint(
-        root: AccessibilityNodeSnapshot,
-        includeBounds: Boolean,
-        excludeEntryBackAffordances: Boolean,
-    ): String {
         val elements = AccessibilityTreeSnapshotter.collectPressableElements(root)
-            .distinctBy(::mergedElementFingerprint)
-            .let { elements ->
-                if (excludeEntryBackAffordances) {
-                    elements.filterNot(::looksLikeEntryBackAffordance)
-                } else {
-                    elements
-                }
-            }
-            .map { element ->
-                buildElementFingerprint(
-                    element = element,
-                    includeBounds = includeBounds,
-                )
-            }
+            .distinctBy(ElementFingerprint::of)
+            .map { element -> "${ElementFingerprint.of(element).encoded}|${element.bounds}" }
             .sorted()
 
         return buildString {
             append(root.className.orEmpty())
-            if (includeBounds) {
-                append("::")
-                append(root.bounds)
-            }
+            append("::")
+            append(root.bounds)
             append("::")
             append(elements.joinToString("||"))
         }
     }
 
-    private fun buildElementFingerprint(
-        element: PressableElement,
-        includeBounds: Boolean,
-    ): String {
-        val base = ElementFingerprint.of(element).encoded
-        // The geometry-sensitive variant keeps bounds as a trailing field for loop detection only;
-        // the logical variant is the canonical replay fingerprint and must stay byte-identical to
-        // ReplayFingerprintCodec's per-element encoding.
-        return if (includeBounds) "$base|${element.bounds}" else base
-    }
-
-    private fun looksLikeEntryBackAffordance(element: PressableElement): Boolean {
-        val normalizedLabel = normalizeFingerprintToken(element.label)
-        val normalizedResourceId = normalizeFingerprintToken(element.resourceId)
-        val hasBackSignal = normalizedResourceId.contains("back") ||
-            normalizedResourceId.contains("navigate up") ||
-            normalizedResourceId.contains("navigateup") ||
-            normalizedResourceId.contains("up button") ||
-            normalizedResourceId.contains("upbutton") ||
-            normalizedResourceId.contains("nav button") ||
-            normalizedResourceId.contains("navbutton") ||
-            normalizedLabel == "navigate up" ||
-            normalizedLabel == "go back" ||
-            normalizedLabel == "navigate back" ||
-            normalizedLabel == "back" ||
-            normalizedLabel == "up"
-        if (!hasBackSignal) {
-            return false
-        }
-
-        val top = parseFingerprintBounds(element.bounds)?.top ?: return false
-        return top <= 300
-    }
-
-    private fun normalizeFingerprintToken(value: String?): String {
-        return value
-            ?.substringAfterLast('/')
-            ?.lowercase()
-            ?.replace(Regex("[^a-z0-9]+"), " ")
-            ?.trim()
-            .orEmpty()
-    }
-
-    private fun parseFingerprintBounds(bounds: String): FingerprintBounds? {
-        val match = BOUNDS_REGEX.matchEntire(bounds) ?: return null
-        return FingerprintBounds(
-            top = match.groupValues[2].toInt(),
-        )
-    }
-
-    private data class FingerprintBounds(
-        val top: Int,
-    )
-
-    private companion object {
-        val BOUNDS_REGEX = Regex("""\[(\d+),(\d+)]\[(\d+),(\d+)]""")
+    private fun mergedElementFingerprint(element: PressableElement): ElementFingerprint {
+        return ElementFingerprint.of(element)
     }
 }
 
 internal data class EntryScreenResetResult(
     val root: AccessibilityNodeSnapshot,
     val outcome: EntryScreenResetOutcome,
-    val observedLogicalFingerprint: String,
-    val expectedLogicalFingerprint: String?,
+    val observedIdentity: ScreenIdentity,
+    val expectedIdentity: ScreenIdentity?,
     val matchedExpectedLogical: Boolean,
     val verifiedForReplay: Boolean,
-    val entryFingerprintMatchReason: EntryScreenFingerprintMatchReason?,
+    val entryFingerprintMatchReason: ScreenIdentityMatchReason?,
+    val missingIdentities: Set<ScreenElementIdentity> = emptySet(),
+    val extraIdentities: Set<ScreenElementIdentity> = emptySet(),
     val entryFingerprintOverlapCount: Int,
     val entryFingerprintExpectedCount: Int,
     val entryFingerprintObservedCount: Int,
