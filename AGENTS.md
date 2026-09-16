@@ -45,7 +45,8 @@ Unix-style shell examples:
 ./gradlew test
 
 # Run a single test class
-./gradlew test --tests "com.example.apptohtml.crawler.CrawlerSessionTest"
+# (`test` is an aggregate task and rejects --tests; use the per-variant task)
+./gradlew testDebugUnitTest --tests "com.example.apptohtml.crawler.CrawlerSessionTest"
 
 # Run instrumented tests (requires connected device/emulator)
 ./gradlew connectedAndroidTest
@@ -65,7 +66,8 @@ PowerShell examples for this Windows workspace:
 .\gradlew.bat test
 
 # Run a single test class
-.\gradlew.bat test --tests "com.example.apptohtml.crawler.CrawlerSessionTest"
+# (`test` is an aggregate task and rejects --tests; use the per-variant task)
+.\gradlew.bat testDebugUnitTest --tests "com.example.apptohtml.crawler.CrawlerSessionTest"
 
 # Run instrumented tests (requires connected device/emulator)
 .\gradlew.bat connectedAndroidTest

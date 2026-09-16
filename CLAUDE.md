@@ -31,7 +31,8 @@ AppToHTML is an Android app that uses AccessibilityService to capture a target a
 ./gradlew test
 
 # Run a single test class
-./gradlew test --tests "com.example.apptohtml.CrawlerSessionTest"
+# (`test` is an aggregate task and rejects --tests; use the per-variant task)
+./gradlew testDebugUnitTest --tests "com.example.apptohtml.crawler.CrawlerSessionTest"
 
 # Run instrumented tests (requires connected device/emulator)
 ./gradlew connectedAndroidTest

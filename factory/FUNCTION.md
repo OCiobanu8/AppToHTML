@@ -34,6 +34,11 @@
   safe?" is *no* until proven otherwise.
 - **Serialize the volatile, keep the durable.** State that can be regenerated is runtime; the
   decisions and specifications behind it are the record worth keeping.
+- **Document a dependency by reference, never by restating it.** When code relies on another
+  component's behavior, point to that component and pin the behavior you rely on with
+  characterization tests — do not describe it in a comment or a spec. A restatement is a second,
+  untested copy of a fact someone else owns: it drifts silently, and each correction tends to
+  describe only the case that exposed the last error.
 
 ## What belongs in code vs a spec
 
