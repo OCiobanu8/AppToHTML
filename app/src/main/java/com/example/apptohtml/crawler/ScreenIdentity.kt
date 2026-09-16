@@ -44,13 +44,30 @@ data class ScreenNameIdentity(
  *
  * [name] is null for an identity built from a live root as a probe: such a screen has not been
  * through the naming pass and genuinely has no settled name. Every *captured* screen has one.
+ *
+ * [traits] is the third part: assertions this identity makes about the screen, checked against a
+ * live tree by [TraitEvaluator] rather than compared with another identity. An identity with no
+ * traits, or with negations alone, is *not settled yet* — never *matches everything* — and no
+ * traits is what every identity carries until one is proposed or settled for it.
  */
 data class ScreenIdentity(
     val packageName: String?,
     val rootClassName: String,
     val elements: Set<ScreenElementIdentity>,
     val name: ScreenNameIdentity? = null,
+    val traits: List<Trait> = emptyList(),
 ) {
+    /**
+     * The controls that identify this screen: exactly the elements its [HasControl] traits assert.
+     *
+     * Derived rather than stored as a per-element flag, so "which controls identify this screen"
+     * has one home, and no new field enters the [ScreenElementIdentity] equality that
+     * [EntryRestorePolicy] compares directly. [LacksControl] elements are not identifying — they
+     * are what the screen is not.
+     */
+    val identifyingElements: Set<ScreenElementIdentity>
+        get() = traits.filterIsInstance<HasControl>().mapTo(linkedSetOf()) { it.element }
+
     /** The element set a comparison should look at, given whether it counts back affordances. */
     fun elementsFor(countBackAffordances: Boolean): Set<ScreenElementIdentity> {
         return if (countBackAffordances) {
