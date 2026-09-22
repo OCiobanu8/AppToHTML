@@ -430,6 +430,7 @@ class CrawlerTraversalTest {
                 files = rootFiles,
                 snapshot = rootSnapshot,
                 resolvedChildLinks = mapOf(trigger.toLinkKey() to childFiles.htmlFile.name),
+                identity = tracker.findScreen(rootScreenId)?.identity,
             )
 
             val manifest = tracker.buildManifest(CrawlRunStatus.COMPLETED, finishedAt = 456L)

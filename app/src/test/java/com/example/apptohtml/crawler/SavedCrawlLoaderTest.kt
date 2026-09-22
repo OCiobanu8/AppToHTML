@@ -204,7 +204,7 @@ class SavedCrawlLoaderTest {
             depth = 0,
             expansionStatus = ScreenExpansionStatus.COMPLETE,
             isRoot = true,
-            screenIdentity = ScreenIdentityFields(
+            screenIdentity = nameOnlyIdentity(
                 packageName = ScreenNaming.normalizeIdentityToken(targetPackage),
                 title = ScreenNaming.normalizeIdentityToken("Home"),
                 titleDisambiguators = emptyList(),
@@ -261,7 +261,7 @@ class SavedCrawlLoaderTest {
             depth = depth,
             expansionStatus = expansionStatus,
             isRoot = false,
-            screenIdentity = ScreenIdentityFields(
+            screenIdentity = nameOnlyIdentity(
                 packageName = ScreenNaming.normalizeIdentityToken(packageName),
                 title = ScreenNaming.normalizeIdentityToken(screenName),
                 titleDisambiguators = emptyList(),

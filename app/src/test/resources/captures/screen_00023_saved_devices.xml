@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<screen name="Saved devices" package="com.android.settings" scroll-steps="1">
+  <crawl schema="v1" screen-id="screen_00023" depth="2" expansion-status="not_started" is-root="false">
+    <screen-identity package="com.android.settings" name-package="com_android_settings" title="saved_devices" title-disambiguator-1="collapsing_toolbar" root-class="android.widget.FrameLayout">
+      <element label="navigate up" resource-id="" class="android.widget.ImageButton" list-item="false" checkable="false" editable="false" back="true" />
+    </screen-identity>
+    <parent screen-id="screen_00002" trigger-label="See all" />
+    <route>
+      <step label="Connected devices" resource-id="" class="android.widget.LinearLayout" bounds="[0,842][1080,1090]" child-index-path="0.1.0.0.4" checkable="false" checked="false" editable="false" first-seen-step="0" expected-package="com.android.settings" expected-replay-screen-name="Connected devices">
+        <expected-destination package="com.android.settings" root-class="android.widget.FrameLayout">
+          <element label="connection preferences" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+          <element label="navigate up" resource-id="" class="android.widget.ImageButton" list-item="false" checkable="false" editable="false" back="true" />
+          <element label="pair new device" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+          <element label="see all" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+        </expected-destination>
+        <expected-replay package="com.android.settings" root-class="android.widget.FrameLayout">
+          <element label="connection preferences" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+          <element label="navigate up" resource-id="" class="android.widget.ImageButton" list-item="false" checkable="false" editable="false" back="true" />
+          <element label="pair new device" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+          <element label="see all" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+        </expected-replay>
+      </step>
+      <step label="See all" resource-id="" class="android.widget.LinearLayout" bounds="[0,896][1080,1051]" child-index-path="0.1.2" checkable="false" checked="false" editable="false" first-seen-step="0" expected-package="com.android.settings" expected-replay-screen-name="Saved devices">
+        <expected-destination package="com.android.settings" root-class="android.widget.FrameLayout">
+          <element label="navigate up" resource-id="" class="android.widget.ImageButton" list-item="false" checkable="false" editable="false" back="true" />
+        </expected-destination>
+        <expected-replay package="com.android.settings" root-class="android.widget.FrameLayout">
+          <element label="navigate up" resource-id="" class="android.widget.ImageButton" list-item="false" checkable="false" editable="false" back="true" />
+        </expected-replay>
+      </step>
+    </route>
+  </crawl>
+  <merged-elements>
+    <element label="Navigate up" resource-id="" class="android.widget.ImageButton" bounds="[0,136][147,283]" list-item="false" child-index-path="0.0.0" checkable="false" checked="false" editable="false" first-seen-step="0" fingerprint="|navigate up|android.widget.ImageButton|false|false|false" />
+  </merged-elements>
+  <scroll-steps>
+    <step index="0" new-elements="1">
+      <node class="android.widget.FrameLayout" package="com.android.settings" resource-id="" text="" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[0,0][1080,2400]">
+        <node class="android.widget.ScrollView" package="com.android.settings" resource-id="com.android.settings:id/content_parent" text="" content-description="" clickable="false" click-action="false" scrollable="true" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[0,136][1080,2337]">
+          <node class="android.widget.FrameLayout" package="com.android.settings" resource-id="com.android.settings:id/collapsing_toolbar" text="" content-description="Saved devices" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[0,136][1080,606]">
+            <node class="android.widget.ImageButton" package="com.android.settings" resource-id="" text="" content-description="Navigate up" clickable="true" click-action="true" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[0,136][147,283]" fingerprint="|navigate up|android.widget.ImageButton|false|false|false" />
+            <node class="android.widget.TextView" package="com.android.settings" resource-id="" text="Saved devices" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="false" bounds="[189,174][189,245]" />
+          </node>
+          <node class="androidx.recyclerview.widget.RecyclerView" package="com.android.settings" resource-id="com.android.settings:id/recycler_view" text="" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[0,606][1080,669]">
+            <node class="android.widget.LinearLayout" package="com.android.settings" resource-id="" text="" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[0,648][1080,669]" />
+          </node>
+        </node>
+      </node>
+    </step>
+  </scroll-steps>
+</screen>

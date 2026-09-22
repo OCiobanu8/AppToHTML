@@ -1979,6 +1979,23 @@ class DeepCrawlCoordinatorTest {
                 "child XML should reference its parent screen:\n$childXml",
                 childXml.contains("<parent screen-id=\"screen_00000\""),
             )
+
+            // Screen B is a leaf: nothing ever resolves an edge on it, so its page is written once
+            // and never rewritten. On a real Settings crawl that left 30 of 36 pages with no
+            // identity block, because the identity reached the page only via a later rewrite.
+            val childHtmlFile = parentDir.listFiles()
+                ?.firstOrNull { it.name.startsWith("screen_00001_") && it.name.endsWith(".html") }
+                ?: error("child HTML file should exist")
+            val childHtml = childHtmlFile.readText()
+            assertTrue(
+                "a leaf screen's page must carry its identity from its only write",
+                childHtml.contains("id=") && childHtml.contains("screen-identity"),
+            )
+            val rootHtml = summary.rootFiles.htmlFile.readText()
+            assertTrue(
+                "the root's page must carry it too",
+                rootHtml.contains("screen-identity"),
+            )
         } finally {
             tempDir.deleteRecursively()
         }
@@ -2381,7 +2398,7 @@ class DeepCrawlCoordinatorTest {
             depth = depth,
             expansionStatus = expansionStatus,
             isRoot = isRoot,
-            screenIdentity = ScreenIdentityFields(
+            screenIdentity = nameOnlyIdentity(
                 packageName = ScreenNaming.normalizeIdentityToken("com.example.target"),
                 title = ScreenNaming.normalizeIdentityToken(screenName),
                 titleDisambiguators = emptyList(),

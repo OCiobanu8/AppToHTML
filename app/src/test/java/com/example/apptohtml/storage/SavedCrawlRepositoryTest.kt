@@ -10,7 +10,7 @@ import com.example.apptohtml.crawler.PressableElement
 import com.example.apptohtml.crawler.RunLevelState
 import com.example.apptohtml.crawler.ScreenCrawlState
 import com.example.apptohtml.crawler.ScreenExpansionStatus
-import com.example.apptohtml.crawler.ScreenIdentityFields
+import com.example.apptohtml.crawler.nameOnlyIdentity
 import com.example.apptohtml.crawler.ScreenNaming
 import com.example.apptohtml.crawler.ScreenSnapshot
 import com.example.apptohtml.crawler.toLinkKey
@@ -120,7 +120,7 @@ class SavedCrawlRepositoryTest {
             depth = depth,
             expansionStatus = expansionStatus,
             isRoot = isRoot,
-            screenIdentity = ScreenIdentityFields(
+            screenIdentity = nameOnlyIdentity(
                 packageName = ScreenNaming.normalizeIdentityToken(packageName),
                 title = ScreenNaming.normalizeIdentityToken(screenName),
             ),

@@ -4,7 +4,9 @@
 
 ### Selected app
 
-The only persisted user-facing state today is the selected app reference.
+The only persisted user-facing *preference* is the selected app reference. A crawl's own
+artifacts also persist each screen's identity, which the crawler reads back on resume — see
+[Screen identity](#screen-identity) below.
 
 **Files**
 
@@ -63,6 +65,16 @@ The accessibility service keeps short-lived runtime facts such as:
 - live root tree used for scrolling and capture
 
 ## Output artifacts
+
+### Screen identity
+
+Every captured screen's `.xml` and `.html` carry the screen's whole identity — name, element set and
+traits — in a `<screen-identity>` block. This is the one part of a crawl's content that survives a
+resume and that an operator is expected to **edit**: `SavedCrawlLoader` reads it back, and
+route-replay arrival consults a settled screen's traits.
+
+See [screen-identity.md](screen-identity.md) for the format, what a capture proposes, and the
+validation tool.
 
 ### HTML output
 

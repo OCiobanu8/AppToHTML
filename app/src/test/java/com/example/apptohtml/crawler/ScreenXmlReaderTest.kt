@@ -45,7 +45,7 @@ class ScreenXmlReaderTest {
             depth = 1,
             expansionStatus = ScreenExpansionStatus.IN_PROGRESS,
             isRoot = false,
-            screenIdentity = ScreenIdentityFields(
+            screenIdentity = nameOnlyIdentity(
                 packageName = "com_example_target",
                 title = "empty",
                 titleDisambiguators = emptyList(),
@@ -141,7 +141,7 @@ class ScreenXmlReaderTest {
             depth = 1,
             expansionStatus = ScreenExpansionStatus.IN_PROGRESS,
             isRoot = false,
-            screenIdentity = ScreenIdentityFields(
+            screenIdentity = nameOnlyIdentity(
                 packageName = "com_example_target",
                 title = "detail",
                 titleDisambiguators = listOf("account", "billing"),
@@ -165,7 +165,7 @@ class ScreenXmlReaderTest {
 
             assertNotNull(payload)
             val head = payload!!.head
-            assertEquals(listOf("account", "billing"), head.screenIdentity.titleDisambiguators)
+            assertEquals(listOf("account", "billing"), head.screenIdentity.name?.titleDisambiguators)
             val parsedStep = head.route.steps.single()
             assertEquals(stepIdentity, parsedStep.expectedReplayIdentity)
             assertEquals(stepIdentity, parsedStep.expectedDestinationIdentity)
@@ -188,7 +188,7 @@ class ScreenXmlReaderTest {
             xmlDump = "",
             scrollStepCount = 3,
         )
-        val identity = ScreenIdentityFields(
+        val identity = nameOnlyIdentity(
             packageName = "com_example_target",
             title = "detail",
             titleDisambiguators = listOf("account"),
@@ -249,9 +249,9 @@ class ScreenXmlReaderTest {
         assertEquals(1, head.depth)
         assertEquals(ScreenExpansionStatus.IN_PROGRESS, head.expansionStatus)
         assertEquals(false, head.isRoot)
-        assertEquals("com_example_target", head.screenIdentity.packageName)
-        assertEquals("detail", head.screenIdentity.title)
-        assertEquals(listOf("account"), head.screenIdentity.titleDisambiguators)
+        assertEquals("com_example_target", head.screenIdentity.name?.packageName)
+        assertEquals("detail", head.screenIdentity.name?.screenName)
+        assertEquals(listOf("account"), head.screenIdentity.name?.titleDisambiguators)
         assertEquals(parent, head.parent)
         assertEquals(1, head.route.steps.size)
         val parsedStep = head.route.steps[0]
@@ -291,7 +291,7 @@ class ScreenXmlReaderTest {
             depth = 0,
             expansionStatus = ScreenExpansionStatus.COMPLETE,
             isRoot = true,
-            screenIdentity = ScreenIdentityFields(
+            screenIdentity = nameOnlyIdentity(
                 packageName = "com_example_target",
                 title = "home",
                 titleDisambiguators = emptyList(),
@@ -337,7 +337,7 @@ class ScreenXmlReaderTest {
             depth = 1,
             expansionStatus = ScreenExpansionStatus.NOT_STARTED,
             isRoot = false,
-            screenIdentity = ScreenIdentityFields(
+            screenIdentity = nameOnlyIdentity(
                 packageName = "com_example_target",
                 title = "home",
                 titleDisambiguators = emptyList(),

@@ -67,6 +67,9 @@ skipped traversal outcomes.
 ### `HtmlRenderer` and `AccessibilityXmlSerializer`
 
 - Transform the merged snapshot into user-facing output files.
+- Both write the screen's whole identity — name, element set and traits — from one producer, so the
+  `.xml` and the `.html` cannot describe the screen differently. See
+  [screen-identity.md](screen-identity.md).
 
 ### `CrawlGraphBuilder`, `CrawlGraphJsonWriter`, and `CrawlGraphHtmlRenderer`
 
@@ -153,6 +156,17 @@ is used only to rank already-eligible candidates. Fallback attempts and
 rejection reasons are logged for diagnosis.
 
 ## Route replay step validation
+
+> **Stale below, tracked as `a2h-c2b.9`.** This section still describes the flattened
+> `logicalViewportFingerprint` strings that `a2h-c2b.2` replaced with the structured screen identity
+> and its named comparison policies. It is left as-is here because rewriting it is `a2h-c2b.9`'s
+> unit of work, not this one's.
+>
+> One behaviour change is worth stating now, because it is new rather than merely renamed: arrival
+> at a replayed screen checks the screen's **name** as before and, when that screen's identity has
+> been **settled** with traits, also requires those traits to hold. An unsettled identity — which is
+> every machine-proposed one — is not consulted, so existing crawls are unaffected. The element set
+> is deliberately not compared there. See [screen-identity.md](screen-identity.md).
 
 `replayRouteToScreen(...)` validates each route step against the screen it is
 expected to reach. Each `CrawlScreenRecord` stores a bounds-free

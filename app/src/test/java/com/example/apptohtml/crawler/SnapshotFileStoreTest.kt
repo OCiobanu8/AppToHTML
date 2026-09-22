@@ -170,7 +170,7 @@ class SnapshotFileStoreTest {
                         packageName = snapshot.packageName,
                         root = null,
                     ).let {
-                        ScreenIdentityFields(it.packageName, it.screenName, it.titleDisambiguators)
+                        nameOnlyIdentity(it.packageName, it.screenName, it.titleDisambiguators)
                     },
                 parent = null,
                 route = CrawlRoute(),
@@ -209,7 +209,7 @@ class SnapshotFileStoreTest {
             screenName = snapshot.screenName,
             packageName = snapshot.packageName,
             root = null,
-        ).let { ScreenIdentityFields(it.packageName, it.screenName, it.titleDisambiguators) }
+        ).let { nameOnlyIdentity(it.packageName, it.screenName, it.titleDisambiguators) }
         assertEquals(expected, state.screenIdentity)
     }
 

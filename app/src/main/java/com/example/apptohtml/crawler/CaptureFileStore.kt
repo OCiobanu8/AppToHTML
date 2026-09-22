@@ -59,12 +59,21 @@ object CaptureFileStore {
         }
     }
 
+    /**
+     * Writes a screen's files for the first time.
+     *
+     * [identity] is taken separately from [crawlState] because a screen is saved *before* it enters
+     * the tracker, so its crawl state does not exist yet while its identity already does. Passing
+     * only the crawl state left every page written without its identity block until some later
+     * rewrite happened to supply one — which only ever happened for screens whose edges resolved.
+     */
     fun saveScreen(
         session: CrawlSessionDirectory,
         snapshot: ScreenSnapshot,
         screenId: String,
         resolvedChildLinks: Map<PressableElementLinkKey, String> = emptyMap(),
         crawlState: ScreenCrawlState? = null,
+        identity: ScreenIdentity? = crawlState?.screenIdentity,
     ): CapturedScreenFiles {
         val baseName = "${screenId}_${ScreenNaming.toFileBase(snapshot.screenName)}"
         val htmlFile = File(session.directory, "$baseName.html")
@@ -73,7 +82,10 @@ object CaptureFileStore {
             File(session.directory, "${baseName}_merged_accessibility.xml")
         }
 
-        htmlFile.writeText(HtmlRenderer.render(snapshot, resolvedChildLinks), Charsets.UTF_8)
+        htmlFile.writeText(
+            HtmlRenderer.render(snapshot, resolvedChildLinks, identity),
+            Charsets.UTF_8,
+        )
         val xmlContent = if (crawlState != null) {
             AccessibilityXmlSerializer.serialize(snapshot, crawlState)
         } else {
@@ -89,12 +101,23 @@ object CaptureFileStore {
         )
     }
 
+    /**
+     * Rewrites the page as a screen's edges resolve.
+     *
+     * [identity] is not optional in practice: this runs many times over a crawl, and omitting it
+     * would republish the page without its identity block, erasing anything an operator had settled
+     * by hand. It is the reason this function takes a parameter it never used to need.
+     */
     fun rewriteScreenHtml(
         files: CapturedScreenFiles,
         snapshot: ScreenSnapshot,
         resolvedChildLinks: Map<PressableElementLinkKey, String>,
+        identity: ScreenIdentity?,
     ) {
-        files.htmlFile.writeText(HtmlRenderer.render(snapshot, resolvedChildLinks), Charsets.UTF_8)
+        files.htmlFile.writeText(
+            HtmlRenderer.render(snapshot, resolvedChildLinks, identity),
+            Charsets.UTF_8,
+        )
     }
 
     fun rewriteScreenXml(

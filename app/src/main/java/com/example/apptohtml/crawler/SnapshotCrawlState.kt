@@ -13,6 +13,17 @@ package com.example.apptohtml.crawler
  */
 internal object SnapshotCrawlState {
 
+    /**
+     * [root] names the screen. The identity's **element set** is taken from the first viewport
+     * instead, whatever [root] is.
+     *
+     * The two differ on any scrolling screen, and taking the element set from a scroll-merged root
+     * made a snapshot fail validation against *itself*: the stored set held below-the-fold controls
+     * that the first viewport does not, so the tool reported them missing and offered to paste back
+     * a set with them deleted. Every production identity is built from the first viewport; a
+     * snapshot's must be too, or the artifact does not describe what the crawler would see on
+     * arrival.
+     */
     fun build(
         snapshot: ScreenSnapshot,
         root: AccessibilityNodeSnapshot?,
@@ -26,11 +37,12 @@ internal object SnapshotCrawlState {
             root = root,
         )
 
-        val identity = ScreenIdentityFields(
-            packageName = name.packageName,
-            title = name.screenName,
-            titleDisambiguators = name.titleDisambiguators,
-        )
+        // The content half comes from the FIRST VIEWPORT, deliberately not from the root the name
+        // was derived from — see this function's contract. No traits: proposing them is a2h-c2b.3,
+        // and an operator adds them by hand.
+        val identityRoot = snapshot.stepSnapshots.firstOrNull()?.root ?: root
+        val identity = (identityRoot?.let(ScreenIdentity::fromRoot) ?: ScreenIdentity.EMPTY)
+            .withName(name)
 
         return ScreenCrawlState(
             screenId = SnapshotFileStore.SNAPSHOT_SCREEN_ID,

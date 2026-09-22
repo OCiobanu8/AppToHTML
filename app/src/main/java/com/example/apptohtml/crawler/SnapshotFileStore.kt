@@ -87,7 +87,7 @@ internal object SnapshotFileStore {
         val metadataFile = File(directory, "snapshot.json")
         val logFile = File(directory, "capture.log")
 
-        writer.write(htmlFile, HtmlRenderer.render(snapshot, emptyMap()))
+        writer.write(htmlFile, HtmlRenderer.render(snapshot, emptyMap(), crawlState.screenIdentity))
         writer.write(xmlFile, AccessibilityXmlSerializer.serialize(snapshot, crawlState))
         mergedXmlFile?.let { writer.write(it, snapshot.mergedXmlDump.orEmpty()) }
         writer.write(
