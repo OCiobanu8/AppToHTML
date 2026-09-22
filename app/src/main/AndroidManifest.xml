@@ -2,6 +2,23 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
+    <!--
+      Package visibility (Android 11+). The operator picks a target app from the launcher apps on
+      the device, so this app has to be able to see them. Without this declaration
+      `queryIntentActivities` returns only the handful of packages already visible to us — on an
+      API 36 emulator that is three apps out of twenty-odd — and the filtering happens above the
+      match flags, so MATCH_ALL cannot recover them.
+
+      Declared as an intent query rather than QUERY_ALL_PACKAGES: we need exactly the apps a user
+      could launch, which is what this expresses, and nothing more. a2h-4ah.
+    -->
+    <queries>
+        <intent>
+            <action android:name="android.intent.action.MAIN" />
+            <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+    </queries>
+
     <application
         android:name=".AppToHtmlApplication"
         android:allowBackup="true"

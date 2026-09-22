@@ -60,16 +60,19 @@ object SavedCrawlLoader {
                 packageName = head.screenPackage,
                 root = null,
             ).confidence
-            // The content half is not recoverable from the artifacts and is recomputed from the
-            // live screen after resume — exactly as the blanked replay fingerprint used to be.
-            val identity = ScreenIdentity(
-                packageName = head.screenPackage,
-                rootClassName = "",
-                elements = emptySet(),
-                name = ScreenNameIdentity(
-                    packageName = head.screenIdentity.packageName,
-                    screenName = head.screenIdentity.title,
-                    titleDisambiguators = head.screenIdentity.titleDisambiguators,
+            // The whole identity is recovered — element set and traits included. It used to be
+            // blanked here because the artifacts did not carry it; they do now, and blanking it
+            // would discard on every resume whatever an operator had settled by hand.
+            //
+            // The name's confidence is still recomputed rather than read: it is a judgement about
+            // the live screen's naming signals, and computing it from the same inputs as before is
+            // what keeps every dedup key exactly where it was.
+            val persistedName = head.screenIdentity.name
+            val identity = head.screenIdentity.withName(
+                ScreenNameIdentity(
+                    packageName = persistedName?.packageName.orEmpty(),
+                    screenName = persistedName?.screenName.orEmpty(),
+                    titleDisambiguators = persistedName?.titleDisambiguators.orEmpty(),
                     confidence = nameConfidence,
                 ),
             )

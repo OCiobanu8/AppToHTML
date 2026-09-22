@@ -18,7 +18,7 @@ class AccessibilityXmlSerializerTest {
             xmlDump = "",
             scrollStepCount = 1,
         )
-        val identity = ScreenIdentityFields(
+        val identity = nameOnlyIdentity(
             packageName = "com_example_target",
             title = "home",
             titleDisambiguators = listOf("welcome"),
@@ -47,7 +47,9 @@ class AccessibilityXmlSerializerTest {
             xml.contains("""<crawl schema="v1" screen-id="screen_00001" depth="1" expansion-status="in_progress" is-root="false">""")
         )
         assertTrue(
-            xml.contains("""<screen-identity package="com_example_target" title="home" title-disambiguator-1="welcome" />""")
+            xml.contains(
+                """<screen-identity package="" name-package="com_example_target" title="home" title-disambiguator-1="welcome" root-class="" />"""
+            )
         )
         assertTrue(
             xml.contains(
@@ -74,7 +76,7 @@ class AccessibilityXmlSerializerTest {
             depth = 0,
             expansionStatus = ScreenExpansionStatus.COMPLETE,
             isRoot = true,
-            screenIdentity = ScreenIdentityFields(
+            screenIdentity = nameOnlyIdentity(
                 packageName = "com_example_target",
                 title = "home",
                 titleDisambiguators = emptyList(),
@@ -397,7 +399,7 @@ class AccessibilityXmlSerializerTest {
             depth = 1,
             expansionStatus = ScreenExpansionStatus.IN_PROGRESS,
             isRoot = false,
-            screenIdentity = ScreenIdentityFields(
+            screenIdentity = nameOnlyIdentity(
                 packageName = "com_example_target",
                 title = "home",
                 titleDisambiguators = emptyList(),

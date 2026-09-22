@@ -81,6 +81,19 @@ data class ScreenIdentity(
 
     companion object {
         /**
+         * The identity of nothing: no package, no root class, no elements, no traits.
+         *
+         * For the one case where a screen's file must still be written although its tree was never
+         * captured. Asserts nothing present, so [TraitEvaluator] reads it as unsettled rather than
+         * as a screen that matches everything.
+         */
+        val EMPTY = ScreenIdentity(
+            packageName = null,
+            rootClassName = "",
+            elements = emptySet(),
+        )
+
+        /**
          * Builds the content half from a live root.
          *
          * Order matters and is deliberately preserved from the pre-structure builder: pressables

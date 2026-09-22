@@ -34,3 +34,28 @@ internal fun testDedupKey(identity: ScreenIdentity): String =
     requireNotNull(DedupPolicy.keyFor(identity)) {
         "fixture identity is not eligible for dedup: $identity"
     }
+
+/**
+ * A screen identity carrying only its name half, taking the name tokens **exactly as given**.
+ *
+ * Distinct from [testIdentity], which normalizes what it is passed. These fixtures pass values that
+ * are already in identity form (`com_example_target`), so normalizing again would be a second
+ * opinion about a fact the caller already settled.
+ *
+ * `ScreenCrawlState` used to hold a name-only record and every such fixture said exactly this; it
+ * now holds a whole [ScreenIdentity], and this keeps that intent in one place rather than repeating
+ * the widened construction across six test files.
+ */
+internal fun nameOnlyIdentity(
+    packageName: String,
+    title: String,
+    titleDisambiguators: List<String> = emptyList(),
+    confidence: ScreenDedupConfidence = ScreenDedupConfidence.STRONG,
+): ScreenIdentity = ScreenIdentity.EMPTY.withName(
+    ScreenNameIdentity(
+        packageName = packageName,
+        screenName = title,
+        titleDisambiguators = titleDisambiguators,
+        confidence = confidence,
+    )
+)

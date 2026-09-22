@@ -147,6 +147,7 @@ internal class DeepCrawlCoordinator(
                     session = session,
                     snapshot = rootSnapshot,
                     screenId = rootScreenId,
+                    identity = rootIdentity,
                 )
                 tracker.addScreen(
                     screenId = rootScreenId,
@@ -520,7 +521,7 @@ internal class DeepCrawlCoordinator(
                 val remainedInCurrentPackage = childPackageName == currentPackageName
                 if (
                     remainedInCurrentPackage &&
-                    NavigatedAwayPolicy(countBackAffordances = !isRootScreen)
+                    NavigatedAwayPolicy(BackAffordanceCounting.forScreen(isRootScreen))
                         .navigatedAway(beforeClickIdentity, topIdentity, afterClickIdentity).not()
                 ) {
                     tracker.updateEdgeStatus(
@@ -559,6 +560,7 @@ internal class DeepCrawlCoordinator(
                         snapshot = snapshot,
                         resolvedChildLinks = resolvedLinksByScreenId
                             .getOrPut(screenRecord.screenId) { mutableMapOf() },
+                        identity = persistedIdentity(screenRecord),
                     )
                     rewriteScreenXmlFor(tracker, snapshot, screenRecord.screenId, CrawlRunStatus.IN_PROGRESS)
                     saveManifest(session, tracker, CrawlRunStatus.IN_PROGRESS)
@@ -641,6 +643,7 @@ internal class DeepCrawlCoordinator(
                         session = session,
                         snapshot = childSnapshot,
                         screenId = childScreenId,
+                        identity = childFullIdentity,
                     )
                     tracker.addScreen(
                         screenId = childScreenId,
@@ -690,6 +693,7 @@ internal class DeepCrawlCoordinator(
                     snapshot = snapshot,
                     resolvedChildLinks = resolvedLinksByScreenId
                         .getOrPut(screenRecord.screenId) { mutableMapOf() },
+                    identity = persistedIdentity(screenRecord),
                 )
                 rewriteScreenXmlFor(tracker, snapshot, screenRecord.screenId, CrawlRunStatus.IN_PROGRESS)
                 saveManifest(session, tracker, CrawlRunStatus.IN_PROGRESS)
@@ -864,8 +868,18 @@ internal class DeepCrawlCoordinator(
                     root = snapshot.mergedRoot ?: replayResult.root,
                 )
             )
-        // The screen must still be the one this route was recorded for. Name half only: a screen's
-        // content legitimately churns between visits, but what it is called does not.
+        // The screen must still be the one this route was recorded for. ReplayArrivalCheck owns
+        // that rule — the name, plus a settled identity's traits — and is pinned without a device.
+        //
+        // Traits are evaluated against the FIRST VIEWPORT, not the scroll-merged tree, because that
+        // is the tree the validation tool reads back from a capture. Using the merged tree here
+        // would make the crawler and the tool ask one question of two different screens: a
+        // `lacks-control` for a control below the fold would hold in the tool and fail here.
+        // The name half is unchanged and still reads the merged tree.
+        val arrivalRoot = snapshot.stepSnapshots.firstOrNull()?.root
+            ?: snapshot.mergedRoot
+            ?: replayResult.root
+        val arrival = ReplayArrivalCheck.check(screenRecord.identity, liveIdentity, arrivalRoot)
         val nameComparison = SameNamePolicy.compare(screenRecord.identity, liveIdentity)
         crawlLogger?.info(
                 "replay_validation destinationScreenId=${screenRecord.screenId} destinationScreenName=${quote(screenRecord.screenName)} " +
@@ -877,12 +891,27 @@ internal class DeepCrawlCoordinator(
             root = snapshot.mergedRoot ?: replayResult.root,
             screenName = snapshot.screenName,
         )
-        if (!nameComparison.matched) {
+        if (arrival !is ReplayArrivalCheck.Verdict.Arrived) {
             val routeElement = screenRecord.route.steps.last().toPressableElement()
+            val message = when (arrival) {
+                is ReplayArrivalCheck.Verdict.NameDiverged ->
+                    "Route replay diverged for '${screenRecord.screenName}'. " +
+                        "Expected '${screenRecord.screenName}' but found '${snapshot.screenName}'."
+                // Names the failing assertion: the screen is called the right thing, so saying only
+                // that it diverged would report "Expected X but found X" (a2h-c2b.6).
+                is ReplayArrivalCheck.Verdict.TraitsDoNotHold ->
+                    "Route replay reached '${screenRecord.screenName}' but its settled identity " +
+                        "does not hold there: ${arrival.describe()}."
+                ReplayArrivalCheck.Verdict.Arrived -> error("unreachable")
+            }
+            crawlLogger?.warn(
+                "replay_arrival_diverged destinationScreenId=${screenRecord.screenId} " +
+                    "verdict=${arrival::class.simpleName} message=${quote(message)}"
+            )
             return ScreenPreparationResult.Failure(
                 parentScreenId = screenRecord.parentScreenId ?: screenRecord.screenId,
                 element = routeElement,
-                message = "Route replay diverged for '${screenRecord.screenName}'. Expected '${screenRecord.screenName}' but found '${snapshot.screenName}'.",
+                message = message,
             )
         }
 
@@ -966,7 +995,7 @@ internal class DeepCrawlCoordinator(
         // S2 — pre-open top validation. The root's stored identity was captured before the crawler
         // ever navigated away, so it carries no back affordance, while the live root grows one once
         // it has. The policy is what ignores that now, not the builder.
-        val topComparison = SameScreenPolicy(countBackAffordances = !isRootScreen)
+        val topComparison = SameScreenPolicy(BackAffordanceCounting.forScreen(isRootScreen))
             .compare(expectedTopIdentity, liveTopIdentity)
         crawlLogger?.info(
             "screen_top_validation screenId=${screenRecord.screenId} screenName=${quote(screenRecord.screenName)} " +
@@ -1029,7 +1058,7 @@ internal class DeepCrawlCoordinator(
             "child_open_restore_result parentScreenId=${screenRecord.screenId} parentScreenName=${quote(screenRecord.screenName)} " +
                 "triggerLabel=${quote(element.label)} " +
                 "actualPackageName=${quote(openedChild.root.packageName.orEmpty())} " +
-                "destinationIdentityChanged=${!SameScreenPolicy(countBackAffordances = !isRootScreen).compare(beforeClickIdentity, openedChild.identity).matched} " +
+                "destinationIdentityChanged=${!SameScreenPolicy(BackAffordanceCounting.forScreen(isRootScreen)).compare(beforeClickIdentity, openedChild.identity).matched} " +
                 "settleStopReason=${openedChild.settleStopReason.name.lowercase()} " +
                 "settleElapsedMillis=${openedChild.settleElapsedMillis} settleSampleCount=${openedChild.sampleCount} " +
                 "selectedMetrics=${quote(formatDestinationMetrics(openedChild.selectedMetrics))} result=captured"
@@ -1054,7 +1083,7 @@ internal class DeepCrawlCoordinator(
                 beforeClickIdentity = beforeClickIdentity,
                 topIdentity = expectedTopIdentity,
                 mode = DestinationSettleMode.DISCOVERY,
-                sameScreenPolicy = SameScreenPolicy(countBackAffordances = !isRootScreen),
+                sameScreenPolicy = SameScreenPolicy(BackAffordanceCounting.forScreen(isRootScreen)),
                 identity = identity,
                 capture = { expectedPackageName ->
                     host.captureCurrentRootSnapshot(expectedPackageName)
@@ -1087,7 +1116,7 @@ internal class DeepCrawlCoordinator(
             root = selectedRoot,
             logicalFingerprint = ScreenIdentityCodec.encodeLogical(
                 identity = selectedIdentity,
-                countBackAffordances = !isRootScreen,
+                countBackAffordances = BackAffordanceCounting.forScreen(isRootScreen),
             ),
         )
 
@@ -1334,7 +1363,7 @@ internal class DeepCrawlCoordinator(
             val routeStepIdentity: (AccessibilityNodeSnapshot) -> ScreenIdentity = { root ->
                 ScreenIdentity.fromRoot(root)
             }
-            val routeStepPolicy = SameScreenPolicy(countBackAffordances = !routeStepIsRootScreen)
+            val routeStepPolicy = SameScreenPolicy(BackAffordanceCounting.forScreen(routeStepIsRootScreen))
             val topIdentity = if (routeStepIsRootScreen) {
                 entryScreenIdentity
             } else {
@@ -1395,7 +1424,7 @@ internal class DeepCrawlCoordinator(
             )
             // S3 - "did that click navigate?", through the named policy rather than two `==`s.
             if (
-                !NavigatedAwayPolicy(countBackAffordances = !routeStepIsRootScreen)
+                !NavigatedAwayPolicy(BackAffordanceCounting.forScreen(routeStepIsRootScreen))
                     .navigatedAway(beforeClickIdentity, topIdentity, afterClickIdentity)
             ) {
                 return replayFailure(
@@ -1417,12 +1446,10 @@ internal class DeepCrawlCoordinator(
             // S4 - route-step validation, now reporting what differed rather than only that it did.
             if (expectedReplayIdentity != null) {
                 val observedReplayIdentity = ScreenIdentity.fromRoot(nextRoot)
-                // The screen under comparison here is the destination CHILD, which is never the
-                // crawl root — so back affordances always count, independently of how deep the
-                // PARENT happens to sit. Deriving this from the parent loosened S4 for depth-1
-                // children, which is a tolerance change the SCOPE forbids.
-                val comparison = SameScreenPolicy(countBackAffordances = true)
-                    .compare(expectedReplayIdentity, observedReplayIdentity)
+                // Back affordances always count here; RouteStepDestinationCheck owns that rule
+                // and the reason, and is pinned so it cannot quietly become parent-derived.
+                val comparison =
+                    RouteStepDestinationCheck.compare(expectedReplayIdentity, observedReplayIdentity)
                 val matched = comparison.matched
                 crawlLogger?.info(
                     "replay_route_step_validation destinationScreenId=${screenRecord.screenId} " +
@@ -1633,18 +1660,35 @@ internal class DeepCrawlCoordinator(
         CaptureFileStore.rewriteScreenXml(filesFor(screenRecord), snapshot, crawlState)
     }
 
+    /**
+     * The identity a screen's files are written with — XML and HTML alike.
+     *
+     * The record already holds the whole identity, so this persists it rather than rebuilding a
+     * name-only copy. The fallbacks are kept: a record whose naming pass produced nothing is still
+     * written under the screen's own package and name.
+     *
+     * One producer on purpose. The page and the XML are rewritten from different call sites, and
+     * two copies of this rule would let a screen's two files disagree about what screen it is.
+     */
+    private fun persistedIdentity(screenRecord: CrawlScreenRecord): ScreenIdentity {
+        val name = screenRecord.identity.name
+        return screenRecord.identity.withName(
+            ScreenNameIdentity(
+                packageName = name?.packageName ?: screenRecord.packageName,
+                screenName = name?.screenName ?: screenRecord.screenName,
+                titleDisambiguators = name?.titleDisambiguators.orEmpty(),
+                confidence = name?.confidence ?: ScreenDedupConfidence.WEAK,
+            )
+        )
+    }
+
     private fun buildScreenCrawlState(
         tracker: CrawlRunTracker,
         snapshot: ScreenSnapshot,
         screenRecord: CrawlScreenRecord,
         runStatus: CrawlRunStatus,
     ): ScreenCrawlState {
-        val name = screenRecord.identity.name
-        val identity = ScreenIdentityFields(
-            packageName = name?.packageName ?: screenRecord.packageName,
-            title = name?.screenName ?: screenRecord.screenName,
-            titleDisambiguators = name?.titleDisambiguators.orEmpty(),
-        )
+        val identity = persistedIdentity(screenRecord)
         val parent = screenRecord.parentScreenId?.let { parentId ->
             ParentEdgeRef(
                 screenId = parentId,

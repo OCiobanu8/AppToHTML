@@ -4,7 +4,6 @@ import com.example.apptohtml.diagnostics.DiagnosticLogger
 import org.w3c.dom.Document
 
 import org.w3c.dom.Element
-import org.w3c.dom.Node
 import java.io.File
 import java.util.Locale
 import javax.xml.parsers.DocumentBuilderFactory
@@ -17,7 +16,7 @@ data class ScreenCrawlHead(
     val depth: Int,
     val expansionStatus: ScreenExpansionStatus,
     val isRoot: Boolean,
-    val screenIdentity: ScreenIdentityFields,
+    val screenIdentity: ScreenIdentity,
     val parent: ParentEdgeRef?,
     val route: CrawlRoute,
     val runLevel: RunLevelState?,
@@ -35,18 +34,47 @@ object ScreenXmlReader {
 
     fun readHead(file: File): ScreenCrawlHead? {
         val document = parseUpTo(file, MERGED_ELEMENTS_TAG) ?: return null
+        return parseHeadSafely(document, file)
+    }
+
+    /**
+     * Like [readHead], but lets a [MalformedScreenIdentity] out instead of swallowing it.
+     *
+     * The crawler wants the swallowing version: a screen it cannot rebuild is one to skip, not a
+     * crash. A tool an operator is using to settle a screen wants the opposite — the refusal names
+     * which assertion was rejected and why, and turning it into a bare null made every hand-edit
+     * typo report as "this capture predates the identity block, recapture it", which is advice to
+     * throw the edit away.
+     */
+    fun readHeadReportingRefusals(file: File): ScreenCrawlHead? {
+        val document = parseUpTo(file, MERGED_ELEMENTS_TAG) ?: return null
         return parseHead(document, file)
     }
 
     fun readFull(file: File): ScreenXmlPayload? {
         val document = parseUpTo(file, SCROLL_STEPS_TAG) ?: return null
-        val head = parseHead(document, file) ?: return null
+        val head = parseHeadSafely(document, file) ?: return null
         val (elements, edgeByElement) = parseMergedElements(document)
         return ScreenXmlPayload(
             head = head,
             elements = elements,
             edgeByElement = edgeByElement,
         )
+    }
+
+    /**
+     * An identity the file asserts but that cannot be built is a skipped screen, never a crash.
+     *
+     * A hand-edited `<traits>` block is the expected source: the trait types refuse their own
+     * degenerate shapes at construction, and that refusal arrives here as an exception. The crawler
+     * treats such a screen as unreadable — the same as malformed XML — while the validation tool
+     * reports the refusal with its message, which is why the message names what was rejected.
+     */
+    private fun parseHeadSafely(document: Document, file: File): ScreenCrawlHead? = try {
+        parseHead(document, file)
+    } catch (e: MalformedScreenIdentity) {
+        logSafely("Unusable screen identity in ${file.absolutePath}: ${e.message}", e)
+        null
     }
 
     private fun parseUpTo(file: File, stopMarker: String): Document? {
@@ -128,20 +156,13 @@ object ScreenXmlReader {
         )
     }
 
-    private fun parseScreenIdentity(element: Element): ScreenIdentityFields {
-        val packageName = element.getAttribute("package")
-        val title = element.getAttribute("title")
-        return ScreenIdentityFields(
-            packageName = packageName,
-            title = title,
-            titleDisambiguators = readTitleDisambiguators(element),
-        )
-    }
-
-    private fun readTitleDisambiguators(element: Element): List<String> {
-        return (1..ScreenIdentityCodec.MAX_TITLE_DISAMBIGUATORS).mapNotNull { index ->
-            element.getAttribute("title-disambiguator-$index").takeIf { it.isNotBlank() }
-        }
+    /**
+     * The whole `<screen-identity>`, read through [ScreenIdentityXml] so this reader and the
+     * validation tool's cannot decode the same bytes differently.
+     */
+    private fun parseScreenIdentity(element: Element): ScreenIdentity {
+        val content = ScreenIdentityXml.parse(element)
+        return ScreenIdentityXml.parseName(element)?.let(content::withName) ?: content
     }
 
     private fun parseParent(element: Element): ParentEdgeRef {
@@ -185,27 +206,8 @@ object ScreenXmlReader {
         )
     }
 
-    /** Both step-level expectations round-trip through the same shape; see the serializer. */
-    private fun parseStepIdentity(element: Element): ScreenIdentity {
-        val elements = childElements(element, "element").map { child ->
-            ScreenElementIdentity(
-                fingerprint = ElementFingerprint(
-                    resourceId = child.getAttribute("resource-id").takeIf { it.isNotBlank() },
-                    label = child.getAttribute("label"),
-                    className = child.getAttribute("class").takeIf { it.isNotBlank() },
-                    isListItem = child.getAttribute("list-item") == "true",
-                    checkable = child.getAttribute("checkable") == "true",
-                    editable = child.getAttribute("editable") == "true",
-                ),
-                isBackAffordance = child.getAttribute("back") == "true",
-            )
-        }
-        return ScreenIdentity(
-            packageName = element.getAttribute("package").takeIf { it.isNotBlank() },
-            rootClassName = element.getAttribute("root-class"),
-            elements = elements.toSet(),
-        )
-    }
+    /** Both step-level expectations round-trip through the same shape; see [ScreenIdentityXml]. */
+    private fun parseStepIdentity(element: Element): ScreenIdentity = ScreenIdentityXml.parse(element)
 
     private fun parseRunLevel(crawl: Element): RunLevelState? {
         val sessionId = crawl.optionalAttribute("session-id") ?: return null
@@ -288,32 +290,15 @@ object ScreenXmlReader {
             ?: CrawlRunStatus.IN_PROGRESS
     }
 
-    private fun Element.optionalAttribute(name: String): String? {
-        if (!hasAttribute(name)) return null
-        val value = getAttribute(name)
-        return value.takeIf { it.isNotEmpty() }
-    }
+    // The three lookups below delegate to the shared primitives in CrawlXml.kt so the reader and
+    // ScreenIdentityXml resolve children identically; the local names are kept because every call
+    // site in this file reads better with the parent named first.
 
-    private fun firstElementChild(parent: Element, tag: String): Element? {
-        val children = parent.childNodes
-        for (i in 0 until children.length) {
-            val node = children.item(i)
-            if (node.nodeType == Node.ELEMENT_NODE && (node as Element).tagName == tag) {
-                return node
-            }
-        }
-        return null
-    }
+    private fun Element.optionalAttribute(name: String): String? = optionalAttributeOrNull(name)
 
-    private fun childElements(parent: Element, tag: String): List<Element> {
-        val result = mutableListOf<Element>()
-        val children = parent.childNodes
-        for (i in 0 until children.length) {
-            val node = children.item(i)
-            if (node.nodeType == Node.ELEMENT_NODE && (node as Element).tagName == tag) {
-                result += node
-            }
-        }
-        return result
-    }
+    private fun firstElementChild(parent: Element, tag: String): Element? =
+        parent.firstChildElement(tag)
+
+    private fun childElements(parent: Element, tag: String): List<Element> =
+        parent.childElementsNamed(tag)
 }

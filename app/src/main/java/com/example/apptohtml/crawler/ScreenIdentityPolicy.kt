@@ -149,12 +149,53 @@ data class EntryRestorePolicy(
 }
 
 /**
+ * Whether a comparison counts back affordances — the one home for that rule.
+ *
+ * The rule is always read off **the screen the comparison is about**, never off whatever screen the
+ * caller happens to be standing on. Spelling it out here rather than inline at each call site is
+ * what makes the one deliberate exception visible as an exception instead of looking like a bug.
+ */
+object BackAffordanceCounting {
+
+    /**
+     * The ordinary rule: a screen counts back affordances unless it is the crawl root, whose stored
+     * identity was captured before the crawler had ever navigated away and so carries none.
+     */
+    fun forScreen(isRootScreen: Boolean): Boolean = !isRootScreen
+
+    /**
+     * The exception: a route step's **destination child**, which is never the crawl root, so back
+     * affordances always count however deep the parent sits.
+     *
+     * Deliberately a constant rather than [forScreen] of anything. Deriving it from the parent's
+     * root-ness loosened this comparison for depth-1 children — a tolerance change, and the reason
+     * this value is named and pinned rather than written inline.
+     */
+    const val FOR_ROUTE_STEP_DESTINATION: Boolean = true
+}
+
+/**
+ * S4 — "is the screen I replayed to the one this step recorded?"
+ *
+ * A seam with one job: hold the destination comparison to [BackAffordanceCounting]'s exception. The
+ * call site inside the replay loop is unreachable from a unit test, so without this the exception
+ * could only be asserted by reading a comment.
+ */
+internal object RouteStepDestinationCheck {
+    fun compare(
+        expected: ScreenIdentity,
+        observed: ScreenIdentity,
+    ): ScreenIdentityComparison =
+        SameScreenPolicy(BackAffordanceCounting.FOR_ROUTE_STEP_DESTINATION)
+            .compare(expected, observed)
+}
+
+/**
  * "Is this the same screen?" with no tolerance at all — the whole element set must match.
  *
  * [countBackAffordances] replaces the ad-hoc boolean that used to pick between two string builders
- * at six call sites. Each site sets it for **the screen the comparison is about**: false only where
- * that screen is the crawl root, whose stored identity was captured before the crawler had ever
- * navigated away and so carries no back affordance.
+ * at six call sites. Each site sets it for **the screen the comparison is about** — see
+ * [BackAffordanceCounting], which owns that rule.
  */
 data class SameScreenPolicy(
     val countBackAffordances: Boolean,

@@ -88,22 +88,59 @@ object AccessibilityXmlSerializer {
         builder.append('\n')
     }
 
+    /**
+     * The `<screen-identity>` element on its own, unindented — the block the HTML embeds.
+     *
+     * The same producer the XML uses, so the two files cannot describe the screen differently. Only
+     * the leading indentation differs between them, which is why the two copies are compared as
+     * parsed identities rather than as text.
+     */
+    fun screenIdentityBlock(identity: ScreenIdentity): String =
+        buildString { appendScreenIdentity(this, identity, depth = 0) }.trimEnd('\n')
+
+    /**
+     * The screen's whole identity: the name attributes, the root class and element set in the same
+     * shape the route-step expectations use, and the traits.
+     *
+     * The element set and traits used to be dropped here, which is why a resumed crawl could not
+     * recover them and why a hand-settled screen had nowhere to live. Written through
+     * [ScreenIdentityXml] so the screen's own identity and the ones its route steps carry cannot
+     * drift into two shapes.
+     */
     private fun appendScreenIdentity(
         builder: StringBuilder,
-        identity: ScreenIdentityFields,
+        identity: ScreenIdentity,
         depth: Int,
     ) {
         val indent = "  ".repeat(depth)
+        val name = identity.name
         builder.append(indent)
         builder.append("<screen-identity")
-        builder.append(""" package="${escape(identity.packageName)}"""")
-        builder.append(""" title="${escape(identity.title)}"""")
-        identity.titleDisambiguators
-            .take(ScreenIdentityCodec.MAX_TITLE_DISAMBIGUATORS)
-            .forEachIndexed { index, value ->
+        // `package` is the app's real package, meaning exactly what it means on a route-step
+        // identity, because the same reader decodes both. The name half's package is a *normalized
+        // identity token* — a different value — so it gets its own attribute rather than
+        // overloading this one.
+        builder.append(""" package="${escape(identity.packageName.orEmpty())}"""")
+        builder.append(""" name-package="${escape(name?.packageName.orEmpty())}"""")
+        builder.append(""" title="${escape(name?.screenName.orEmpty())}"""")
+        name?.titleDisambiguators
+            ?.take(ScreenIdentityCodec.MAX_TITLE_DISAMBIGUATORS)
+            ?.forEachIndexed { index, value ->
                 builder.append(""" title-disambiguator-${index + 1}="${escape(value)}"""")
             }
-        builder.append(" />")
+        builder.append(""" root-class="${escape(identity.rootClassName)}"""")
+        val elements = identity.elements.sortedBy { it.encoded }
+        if (elements.isEmpty() && identity.traits.isEmpty()) {
+            builder.append(" />")
+            builder.append('\n')
+            return
+        }
+        builder.append(">")
+        builder.append('\n')
+        ScreenIdentityXml.appendElements(builder, elements, depth + 1)
+        ScreenIdentityXml.appendTraits(builder, identity.traits, depth + 1)
+        builder.append(indent)
+        builder.append("</screen-identity>")
         builder.append('\n')
     }
 
@@ -199,39 +236,7 @@ object AccessibilityXmlSerializer {
         tagName: String,
         identity: ScreenIdentity,
         depth: Int,
-    ) {
-        val indent = "  ".repeat(depth)
-        builder.append(indent)
-        builder.append("<").append(tagName)
-        builder.append(""" package="${escape(identity.packageName.orEmpty())}"""")
-        builder.append(""" root-class="${escape(identity.rootClassName)}"""")
-        val elements = identity.elements.sortedBy { it.encoded }
-        if (elements.isEmpty()) {
-            builder.append(" />")
-            builder.append('\n')
-            return
-        }
-        builder.append(">")
-        builder.append('\n')
-        val childIndent = "  ".repeat(depth + 1)
-        elements.forEach { element ->
-            val fingerprint = element.fingerprint
-            builder.append(childIndent)
-            builder.append("<element")
-            builder.append(""" label="${escape(fingerprint.label)}"""")
-            builder.append(""" resource-id="${escape(fingerprint.resourceId.orEmpty())}"""")
-            builder.append(""" class="${escape(fingerprint.className.orEmpty())}"""")
-            builder.append(""" list-item="${fingerprint.isListItem}"""")
-            builder.append(""" checkable="${fingerprint.checkable}"""")
-            builder.append(""" editable="${fingerprint.editable}"""")
-            builder.append(""" back="${element.isBackAffordance}"""")
-            builder.append(" />")
-            builder.append('\n')
-        }
-        builder.append(indent)
-        builder.append("</").append(tagName).append(">")
-        builder.append('\n')
-    }
+    ) = ScreenIdentityXml.append(builder, tagName, identity, depth)
 
     private fun appendNode(
         builder: StringBuilder,
@@ -415,20 +420,8 @@ object AccessibilityXmlSerializer {
         builder.append('\n')
     }
 
-    private fun escape(input: String): String = buildString(input.length) {
-        input.forEach { char ->
-            append(
-                when (char) {
-                    '&' -> "&amp;"
-                    '<' -> "&lt;"
-                    '>' -> "&gt;"
-                    '"' -> "&quot;"
-                    '\'' -> "&apos;"
-                    else -> char
-                }
-            )
-        }
-    }
+    /** Delegates so the serializer and [ScreenXmlReader] cannot escape differently; see [escapeXml]. */
+    private fun escape(input: String): String = escapeXml(input)
 
     private fun ScreenExpansionStatus.toXmlAttr(): String = name.lowercase(Locale.US)
     private fun CrawlEdgeStatus.toXmlAttr(): String = name.lowercase(Locale.US)

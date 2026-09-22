@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<screen name="VPN" package="com.android.settings" scroll-steps="1">
+  <crawl schema="v1" screen-id="screen_00019" depth="2" expansion-status="not_started" is-root="false">
+    <screen-identity package="com.android.settings" name-package="com_android_settings" title="vpn" title-disambiguator-1="collapsing_toolbar" root-class="android.widget.FrameLayout">
+      <element label="add vpn profile" resource-id="com.android.settings:id/vpn_create" class="android.widget.Button" list-item="false" checkable="false" editable="false" back="false" />
+      <element label="navigate up" resource-id="" class="android.widget.ImageButton" list-item="false" checkable="false" editable="false" back="true" />
+    </screen-identity>
+    <parent screen-id="screen_00001" trigger-label="VPN" />
+    <route>
+      <step label="Network &amp; internet" resource-id="" class="android.widget.LinearLayout" bounds="[0,636][1080,842]" child-index-path="0.1.0.0.3" checkable="false" checked="false" editable="false" first-seen-step="0" expected-package="com.android.settings" expected-replay-screen-name="Network &amp; internet">
+        <expected-destination package="com.android.settings" root-class="android.widget.FrameLayout">
+          <element label="adaptive connectivity" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+          <element label="data saver" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+          <element label="hotspot &amp; tethering" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+          <element label="internet" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+          <element label="mobile network security" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+          <element label="navigate up" resource-id="" class="android.widget.ImageButton" list-item="false" checkable="false" editable="false" back="true" />
+          <element label="private dns" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+          <element label="sims" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+          <element label="vpn" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+        </expected-destination>
+        <expected-replay package="com.android.settings" root-class="android.widget.FrameLayout">
+          <element label="adaptive connectivity" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+          <element label="data saver" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+          <element label="hotspot &amp; tethering" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+          <element label="internet" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+          <element label="mobile network security" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+          <element label="navigate up" resource-id="" class="android.widget.ImageButton" list-item="false" checkable="false" editable="false" back="true" />
+          <element label="private dns" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+          <element label="sims" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+          <element label="vpn" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+        </expected-replay>
+      </step>
+      <step label="VPN" resource-id="" class="android.widget.LinearLayout" bounds="[188,1585][1268,1791]" child-index-path="0.1.4" checkable="false" checked="false" editable="false" first-seen-step="0" expected-package="com.android.settings" expected-replay-screen-name="VPN">
+        <expected-destination package="com.android.settings" root-class="android.widget.FrameLayout">
+          <element label="add vpn profile" resource-id="com.android.settings:id/vpn_create" class="android.widget.Button" list-item="false" checkable="false" editable="false" back="false" />
+          <element label="navigate up" resource-id="" class="android.widget.ImageButton" list-item="false" checkable="false" editable="false" back="true" />
+        </expected-destination>
+        <expected-replay package="com.android.settings" root-class="android.widget.FrameLayout">
+          <element label="add vpn profile" resource-id="com.android.settings:id/vpn_create" class="android.widget.Button" list-item="false" checkable="false" editable="false" back="false" />
+          <element label="navigate up" resource-id="" class="android.widget.ImageButton" list-item="false" checkable="false" editable="false" back="true" />
+        </expected-replay>
+      </step>
+    </route>
+  </crawl>
+  <merged-elements>
+    <element label="Navigate up" resource-id="" class="android.widget.ImageButton" bounds="[0,136][147,283]" list-item="false" child-index-path="0.0.0" checkable="false" checked="false" editable="false" first-seen-step="0" fingerprint="|navigate up|android.widget.ImageButton|false|false|false" />
+    <element label="Add VPN profile" resource-id="com.android.settings:id/vpn_create" class="android.widget.Button" bounds="[954,146][1080,272]" list-item="false" child-index-path="0.0.2" checkable="false" checked="false" editable="false" first-seen-step="0" fingerprint="com.android.settings:id/vpn_create|add vpn profile|android.widget.Button|false|false|false" />
+  </merged-elements>
+  <scroll-steps>
+    <step index="0" new-elements="2">
+      <node class="android.widget.FrameLayout" package="com.android.settings" resource-id="" text="" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[0,0][1080,2400]">
+        <node class="android.widget.ScrollView" package="com.android.settings" resource-id="com.android.settings:id/content_parent" text="" content-description="" clickable="false" click-action="false" scrollable="true" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[0,136][1080,2337]">
+          <node class="android.widget.FrameLayout" package="com.android.settings" resource-id="com.android.settings:id/collapsing_toolbar" text="" content-description="VPN" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[0,136][1080,606]">
+            <node class="android.widget.ImageButton" package="com.android.settings" resource-id="" text="" content-description="Navigate up" clickable="true" click-action="true" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[0,136][147,283]" fingerprint="|navigate up|android.widget.ImageButton|false|false|false" />
+            <node class="android.widget.TextView" package="com.android.settings" resource-id="" text="VPN" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="false" bounds="[189,174][189,245]" />
+            <node class="android.widget.Button" package="com.android.settings" resource-id="com.android.settings:id/vpn_create" text="" content-description="Add VPN profile" clickable="true" click-action="true" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[954,146][1080,272]" fingerprint="com.android.settings:id/vpn_create|add vpn profile|android.widget.Button|false|false|false" />
+          </node>
+          <node class="androidx.recyclerview.widget.RecyclerView" package="com.android.settings" resource-id="com.android.settings:id/recycler_view" text="" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="false" bounds="[0,606][1080,606]" />
+          <node class="android.widget.TextView" package="com.android.settings" resource-id="android:id/empty" text="No VPNs added" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[330,606][749,753]" />
+        </node>
+      </node>
+    </step>
+  </scroll-steps>
+</screen>

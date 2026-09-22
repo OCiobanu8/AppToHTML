@@ -461,12 +461,6 @@ data class CrawlEdgeRecord(
     val editable: Boolean = false,
 )
 
-data class ScreenIdentityFields(
-    val packageName: String,
-    val title: String,
-    val titleDisambiguators: List<String> = emptyList(),
-)
-
 data class ParentEdgeRef(
     val screenId: String,
     val triggerLabel: String?,
@@ -495,7 +489,14 @@ data class ScreenCrawlState(
     val depth: Int,
     val expansionStatus: ScreenExpansionStatus,
     val isRoot: Boolean,
-    val screenIdentity: ScreenIdentityFields,
+    /**
+     * The whole identity this screen is persisted with — name, element set and traits.
+     *
+     * Was a name-only record: the content half was dropped on the way to disk and recomputed from
+     * the live screen after a resume. Carrying all of it is what lets an operator settle a screen by
+     * editing its file and have the edit survive.
+     */
+    val screenIdentity: ScreenIdentity,
     val parent: ParentEdgeRef?,
     val route: CrawlRoute,
     val runLevel: RunLevelState? = null,
