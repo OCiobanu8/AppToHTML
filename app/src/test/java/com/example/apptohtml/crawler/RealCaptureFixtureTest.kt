@@ -65,7 +65,7 @@ class RealCaptureFixtureTest {
         val identity = ScreenXmlReader.readHead(file)!!.screenIdentity
 
         assertTrue(
-            "Nothing proposes traits yet; that is a2h-c2b.3. Every fresh capture is unsettled.",
+            "This capture predates a2h-c2b.3, which made the crawler propose traits; it carries none.",
             identity.traits.isEmpty(),
         )
         assertEquals(
@@ -128,7 +128,41 @@ class RealCaptureFixtureTest {
         return File(dir, "$base.xml")
     }
 
+    /**
+     * `a2h-c2b.3` scope call A on a real screen: the Settings list the `a2h-u68` evidence settled by
+     * hand — every pressable row id-less — is proposed as the structure that held there, and the
+     * proposal holds on the very capture it came from.
+     */
+    @Test
+    fun `a real Settings list screen is proposed as its list, and the proposal holds on itself`() {
+        val file = fixture("screen_00001_network_internet.xml")
+        val root = CaptureTreeReader.readFirstViewport(file)!!
+
+        val traits = TraitProposer.propose(root)
+        val list = traits.filterIsInstance<HasList>()
+            .single { it.containerResourceId == "com.android.settings:id/recycler_view" }
+
+        assertTrue(list.rowChildResourceIds.toString(), "android:id/title" in list.rowChildResourceIds)
+        assertEquals(1, list.minRows)
+        assertTrue(
+            "no id-less row may be proposed as a control",
+            traits.filterIsInstance<HasControl>().none { it.element.fingerprint.resourceId.isNullOrBlank() },
+        )
+        val name = ScreenXmlReader.readHead(file)!!.screenIdentity.name
+        assertEquals(
+            TraitVerdict.HOLDS,
+            TraitEvaluator.verdict(
+                ScreenIdentity.fromRoot(root).copy(traits = traits),
+                TraitEvaluationContext.of(root, name),
+            ),
+        )
+    }
+
     private companion object {
-        val FIXTURES = listOf("screen_00023_saved_devices", "screen_00019_vpn")
+        val FIXTURES = listOf(
+            "screen_00023_saved_devices",
+            "screen_00019_vpn",
+            "screen_00001_network_internet",
+        )
     }
 }

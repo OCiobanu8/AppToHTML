@@ -76,6 +76,12 @@ route-replay arrival consults a settled screen's traits.
 See [screen-identity.md](screen-identity.md) for the format, what a capture proposes, and the
 validation tool.
 
+### Identity cases
+
+`identity-cases.xml` in the crawl folder holds every operator case the crawl raised, open and closed;
+each involved screen's XML carries only a pointer to it. It survives Stop and resume. See
+[screen-identity.md](screen-identity.md#identity-cases).
+
 ### HTML output
 
 - One merged HTML file per captured screen.
@@ -99,7 +105,8 @@ validation tool.
 
 ### Crawl manifest
 
-- `crawl-index.json` tracks screens, edges, route metadata, dedup fingerprints, and aggregate counters.
+- `crawl-index.json` tracks screens, edges, route metadata, name keys, and aggregate counters. It holds no
+  copy of the identity cases; `identity-cases.xml` is their only home.
 - Route steps now preserve the `editable` flag so replay identity stays aligned with captured safety state.
 - Route steps can also preserve `expectedPackageName` so replay can cross package boundaries intentionally.
 - Screen records persist the captured `packageName` for replay, restore, and export.

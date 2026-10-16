@@ -127,6 +127,79 @@ class CrawlerSessionTest {
     }
 
     @Test
+    fun pauseForDecision_on_an_identity_case_shows_the_case_and_clears_it_on_continue() = runBlocking {
+        uiStateFlow.value = traversingState(requestId = 3103L)
+        val case = IdentityCase(
+            id = "case_002",
+            status = IdentityCaseStatus.OPEN,
+            kind = IdentityCaseKind.UNIQUENESS_COLLISION,
+            raisedOn = "screen_00007",
+            relatedScreenIds = listOf("screen_00002", "screen_00005"),
+            detail = "settled identities of screen_00002, screen_00005 all hold on this screen",
+        )
+
+        val pauseResult = async {
+            CrawlerSession.pauseForDecision(
+                reason = PauseReason.IDENTITY_CASE,
+                snapshot = PauseProgressSnapshot(
+                    elapsedTimeMs = 1_000L,
+                    capturedScreenCount = 8,
+                    capturedChildScreenCount = 7,
+                    failedEdgeCount = 0,
+                ),
+                identityCase = case,
+            )
+        }
+
+        waitForPause()
+        val pausedState = CrawlerSession.currentState()
+
+        assertEquals(CrawlerPhase.PAUSED_FOR_DECISION, pausedState.phase)
+        assertEquals(PauseReason.IDENTITY_CASE, pausedState.pauseReason)
+        assertEquals(case, pausedState.pauseIdentityCase)
+        assertTrue(pausedState.statusMessage, pausedState.statusMessage.contains("case_002"))
+        assertTrue(pausedState.statusMessage, pausedState.statusMessage.contains("screen_00007"))
+
+        CrawlerSession.resumeCrawl(requestId = 3103L, decisionId = pausedState.pauseDecisionId!!)
+
+        assertEquals(PauseDecision.CONTINUE, pauseResult.await())
+        assertNull(CrawlerSession.currentState().pauseIdentityCase)
+        assertNull(CrawlerSession.currentState().pauseReason)
+    }
+
+    @Test
+    fun stopAndSave_on_an_identity_case_completes_with_stop_and_clears_the_case() = runBlocking {
+        uiStateFlow.value = traversingState(requestId = 3104L)
+        val case = IdentityCase(
+            id = "case_000",
+            status = IdentityCaseStatus.OPEN,
+            kind = IdentityCaseKind.PROPOSAL_DOES_NOT_HOLD,
+            raisedOn = "screen_00001",
+            relatedScreenIds = emptyList(),
+            detail = "the proposal asserts nothing",
+        )
+
+        val pauseResult = async {
+            CrawlerSession.pauseForDecision(
+                reason = PauseReason.IDENTITY_CASE,
+                snapshot = PauseProgressSnapshot(
+                    elapsedTimeMs = 1_000L,
+                    capturedScreenCount = 2,
+                    capturedChildScreenCount = 1,
+                    failedEdgeCount = 0,
+                ),
+                identityCase = case,
+            )
+        }
+
+        waitForPause()
+        CrawlerSession.stopAndSave(requestId = 3104L, decisionId = CrawlerSession.currentState().pauseDecisionId!!)
+
+        assertEquals(PauseDecision.STOP, pauseResult.await())
+        assertNull(CrawlerSession.currentState().pauseIdentityCase)
+    }
+
+    @Test
     fun stale_pause_decision_id_is_ignored() = runBlocking {
         uiStateFlow.value = traversingState(requestId = 6006L)
 

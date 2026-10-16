@@ -76,6 +76,7 @@ object AccessibilityXmlSerializer {
         builder.append('\n')
 
         appendScreenIdentity(builder, crawlState.screenIdentity, depth + 1)
+        IdentityCasePointers.append(builder, crawlState.openCaseIds, depth + 1)
 
         crawlState.parent?.let { parent ->
             appendParent(builder, parent, depth + 1)

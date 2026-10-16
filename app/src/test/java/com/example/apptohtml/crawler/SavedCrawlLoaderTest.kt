@@ -70,7 +70,10 @@ class SavedCrawlLoaderTest {
             title = "Home",
             titleDisambiguators = emptyList(),
         )
-        assertEquals("screen_00000", loaded.dedupKeyToScreenId[rootFingerprint])
+        assertEquals(
+            rootFingerprint,
+            DedupPolicy.keyFor(loaded.screens.single { it.screenId == "screen_00000" }.identity),
+        )
     }
 
     @Test
@@ -172,7 +175,6 @@ class SavedCrawlLoaderTest {
             startedAt = 2_000L,
             screens = loaded!!.screens,
             edges = loaded.edges,
-            dedupKeyToScreenId = loaded.dedupKeyToScreenId,
             rootScreenId = loaded.rootScreenId,
             nextScreenSequence = loaded.nextScreenSequence,
             nextEdgeSequence = loaded.nextEdgeSequence,
@@ -181,7 +183,10 @@ class SavedCrawlLoaderTest {
         assertNotNull(tracker.findScreen("screen_00001"))
         assertEquals(2, tracker.capturedScreenCount())
         val rootIdentity = testIdentity(screenName = "Home", packageName = targetPackage)
-        assertEquals("screen_00000", tracker.findScreenIdByIdentity(rootIdentity))
+        assertEquals(
+            DedupPolicy.keyFor(rootIdentity),
+            tracker.knownIdentities()["screen_00000"]?.let(DedupPolicy::keyFor),
+        )
         assertEquals(loaded.nextScreenSequence, tracker.nextScreenSequenceNumber())
         // Confirm legacy merged xml files are ignored when scanning.
         assertFalse(loaded.screens.any { it.xmlPath.endsWith("_merged_accessibility.xml") })

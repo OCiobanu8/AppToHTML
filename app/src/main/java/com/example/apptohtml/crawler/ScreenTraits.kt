@@ -128,8 +128,17 @@ class TraitEvaluationContext private constructor(
     val packageName: String?,
     val nameKey: String?,
     internal val pressableFingerprints: Set<ElementFingerprint>,
-    private val containerRowsById: Map<String, List<List<Set<String>>>>,
+    /**
+     * Every container the walk indexed, in post-order. The one home of "what are a container's
+     * rows": [HasList] judges against it and [TraitProposer] proposes from it, so the two can never
+     * disagree about what a row is. Promises what [rowsOfContainersWithId] states, plus the node
+     * each container was read from.
+     */
+    internal val containers: List<IndexedContainer>,
 ) {
+    private val containerRowsById: Map<String, List<List<Set<String>>>> =
+        containers.groupBy(IndexedContainer::resourceId) { it.rows }
+
     /**
      * The rows of the containers carrying [resourceId], each row as the set of resource ids beneath
      * it. Promises only what [HasList.holds] observes: every non-blank id beneath each row of every
@@ -138,6 +147,13 @@ class TraitEvaluationContext private constructor(
      */
     internal fun rowsOfContainersWithId(resourceId: String): List<List<Set<String>>> =
         containerRowsById[resourceId].orEmpty()
+
+    /** One indexed container: its id, the node it was read from, and its rows' ids. */
+    internal class IndexedContainer(
+        val resourceId: String,
+        val node: AccessibilityNodeSnapshot,
+        val rows: List<Set<String>>,
+    )
 
     companion object {
         /**
@@ -154,13 +170,13 @@ class TraitEvaluationContext private constructor(
             val observed = ScreenIdentity.fromRoot(root).let { identity ->
                 if (name == null) identity else identity.withName(name)
             }
-            val containerRowsById = linkedMapOf<String, MutableList<List<Set<String>>>>()
-            indexContainers(root, containerRowsById)
+            val containers = mutableListOf<IndexedContainer>()
+            indexContainers(root, containers)
             return TraitEvaluationContext(
                 packageName = observed.packageName,
                 nameKey = DedupPolicy.nameKey(observed),
                 pressableFingerprints = observed.elements.mapTo(hashSetOf()) { it.fingerprint },
-                containerRowsById = containerRowsById,
+                containers = containers,
             )
         }
 
@@ -170,13 +186,16 @@ class TraitEvaluationContext private constructor(
          */
         private fun indexContainers(
             node: AccessibilityNodeSnapshot,
-            containerRowsById: MutableMap<String, MutableList<List<Set<String>>>>,
+            containers: MutableList<IndexedContainer>,
         ): SubtreeIds {
-            val children = node.children.map { child -> indexContainers(child, containerRowsById) }
+            val children = node.children.map { child -> indexContainers(child, containers) }
             val ownId = node.viewIdResourceName?.takeIf(String::isNotBlank)
             if (ownId != null && children.isNotEmpty()) {
-                containerRowsById.getOrPut(ownId) { mutableListOf() } +=
-                    children.map(SubtreeIds::beneath)
+                containers += IndexedContainer(
+                    resourceId = ownId,
+                    node = node,
+                    rows = children.map(SubtreeIds::beneath),
+                )
             }
             val beneath = children.flatMapTo(hashSetOf(), SubtreeIds::includingSelf)
             return SubtreeIds(
@@ -190,6 +209,20 @@ class TraitEvaluationContext private constructor(
         val beneath: Set<String>,
         val includingSelf: Set<String>,
     )
+}
+
+/**
+ * How a failing [Trait] is named to an operator — the one home for that wording, so a replay that
+ * diverged and a proposal that did not hold describe the same assertion the same way.
+ */
+internal fun describeFailing(traits: List<Trait>): String = traits.joinToString("; ") { trait ->
+    when (trait) {
+        is HasList ->
+            "no list ${trait.containerResourceId} with ${trait.minRows}+ rows carrying " +
+                trait.rowChildResourceIds.joinToString(", ")
+        is HasControl -> "missing control ${trait.element.fingerprint.label}"
+        is LacksControl -> "unexpected control ${trait.element.fingerprint.label}"
+    }
 }
 
 /** The trait predicate's answer for one identity. Tri-state so *unsettled* is never read as either. */

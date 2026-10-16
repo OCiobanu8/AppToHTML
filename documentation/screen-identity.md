@@ -55,9 +55,17 @@ would silently discard an edit made to the other, which is the failure the check
 
 ### What a capture proposes
 
-A capture writes its name and element set and **no traits**. Every fresh capture therefore validates
-as `UNSETTLED`: it proposes an element set but asserts nothing. Machine-proposed traits are
-`a2h-c2b.3`; today an operator adds them by hand.
+A crawl capture proposes traits for a screen it does not recognise and keeps them only if they
+**hold** — as checked at that moment, against the screen and against every other screen's saved first
+viewport. A proposal that does not hold, or a screen that more than one known screen claims, leaves the
+screen `UNSETTLED` and opens an operator case (below). The rules live in code, not here:
+
+- what is proposed: `TraitProposer` — structure and resource ids only, never an id-less instance;
+- whether it holds: `IdentitySettlement`, composed from `TraitEvaluator`;
+- whether a screen is already known: `ScreenRecognition`, which runs the known identities against it.
+
+A `capture-screen` snapshot is not a crawl and proposes nothing: it validates as `UNSETTLED` until an
+operator adds traits by hand.
 
 ## What the crawler reads back
 
@@ -65,17 +73,31 @@ as `UNSETTLED`: it proposes an element set but asserts nothing. Machine-proposed
 content half — correctly at the time, because nothing wrote it — which meant a resumed crawl also
 wrote an empty `replayFingerprint` into its own manifest and graph.
 
-One crawl decision consults it: **route-replay arrival**. The screen must still be called what it was
-called, and — if its identity is settled — its traits must hold there.
+Three crawl decisions consult it. **Dedup** — "is this a screen the crawl already has?" — runs every
+known identity against the screen (`ScreenRecognition`). **Route-replay arrival** requires the screen
+to still be called what it was called and, if its identity is settled, its traits to hold there.
+**Resume** asks the same of the root, which is re-scanned rather than replayed.
 
 - The **element set is deliberately not compared** at that site. A screen's content legitimately
   churns between visits, and requiring byte equality of it is the brittleness the identity redesign
   exists to remove.
-- An `UNSETTLED` identity is **not consulted at all**. Nothing proposes traits automatically, so
-  every machine-proposed identity is unsettled and every existing crawl behaves exactly as before.
-  Only a screen an operator deliberately settled can newly fail a replay.
-- A non-holding trait takes the existing `handlePreparationFailure` recovery path, the same one a
-  name divergence already took. No new pause, queue or case — those are `a2h-c2b.3`.
+- An `UNSETTLED` identity is **not consulted at all** at arrival, and is matched for dedup by its
+  name only. A crawl saved before machine proposals therefore links the screens it already holds
+  exactly as it did; screens it discovers anew are proposed for, and can open cases.
+- A settled identity that does not hold at arrival opens a case, and then takes the existing
+  `handlePreparationFailure` recovery path.
+
+## Identity cases
+
+Where the crawl's model of a screen and the screen diverge, the crawl **pauses** and hands an operator
+a case: a proposal that does not hold, two screens that both claim one (a uniqueness collision — never
+a silent merge), or a settled identity that no longer holds on replay. Continue carries on with the
+case left open; Stop saves the crawl so the case can be settled and the crawl resumed.
+
+A case lives in exactly one place: the crawl folder's `identity-cases.xml`, written and read by
+`IdentityCaseStore`. Each screen a case involves carries only an `<identity-case ref="…"/>` pointer,
+derived from the open cases (`IdentityCasePointers`). Closing a case — marking it `closed`, which keeps
+it as history and removes its pointers — is bead `a2h-c2b.13`.
 
 ## The validation tool
 

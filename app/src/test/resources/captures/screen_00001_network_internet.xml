@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="utf-8"?>
+<screen name="Network &amp; internet" package="com.android.settings" scroll-steps="2">
+  <crawl schema="v1" screen-id="screen_00001" depth="1" expansion-status="complete" is-root="false">
+    <screen-identity package="com.android.settings" name-package="com_android_settings" title="network_internet" title-disambiguator-1="collapsing_toolbar" root-class="android.widget.FrameLayout">
+      <element label="adaptive connectivity" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+      <element label="data saver" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+      <element label="hotspot &amp; tethering" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+      <element label="internet" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+      <element label="mobile network security" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+      <element label="navigate up" resource-id="" class="android.widget.ImageButton" list-item="false" checkable="false" editable="false" back="true" />
+      <element label="private dns" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+      <element label="sims" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+      <element label="vpn" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+    </screen-identity>
+    <parent screen-id="screen_00000" trigger-label="Network &amp; internet" />
+    <route>
+      <step label="Network &amp; internet" resource-id="" class="android.widget.LinearLayout" bounds="[0,636][1080,842]" child-index-path="0.1.0.0.3" checkable="false" checked="false" editable="false" first-seen-step="0" expected-package="com.android.settings" expected-replay-screen-name="Network &amp; internet">
+        <expected-destination package="com.android.settings" root-class="android.widget.FrameLayout">
+          <element label="adaptive connectivity" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+          <element label="data saver" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+          <element label="hotspot &amp; tethering" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+          <element label="internet" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+          <element label="mobile network security" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+          <element label="navigate up" resource-id="" class="android.widget.ImageButton" list-item="false" checkable="false" editable="false" back="true" />
+          <element label="private dns" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+          <element label="sims" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+          <element label="vpn" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+        </expected-destination>
+        <expected-replay package="com.android.settings" root-class="android.widget.FrameLayout">
+          <element label="adaptive connectivity" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+          <element label="data saver" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+          <element label="hotspot &amp; tethering" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+          <element label="internet" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+          <element label="mobile network security" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+          <element label="navigate up" resource-id="" class="android.widget.ImageButton" list-item="false" checkable="false" editable="false" back="true" />
+          <element label="private dns" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+          <element label="sims" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+          <element label="vpn" resource-id="" class="android.widget.LinearLayout" list-item="true" checkable="false" editable="false" back="false" />
+        </expected-replay>
+      </step>
+    </route>
+  </crawl>
+  <merged-elements>
+    <element label="Navigate up" resource-id="" class="android.widget.ImageButton" bounds="[184,136][331,283]" list-item="false" child-index-path="0.0.0" checkable="false" checked="false" editable="false" first-seen-step="0" fingerprint="|navigate up|android.widget.ImageButton|false|false|false">
+      <edge id="edge_021" status="skipped_blacklist" message="blacklist-label" />
+    </element>
+    <element label="Internet" resource-id="" class="android.widget.LinearLayout" bounds="[184,606][1264,812]" list-item="true" child-index-path="0.1.0" checkable="false" checked="false" editable="false" first-seen-step="0" fingerprint="|internet|android.widget.LinearLayout|true|false|false">
+      <edge id="edge_023" status="captured" child-screen-id="screen_00016" child-screen-name="Internet" message="Captured child screen &apos;Internet&apos;." />
+    </element>
+    <element label="SIMs" resource-id="" class="android.widget.LinearLayout" bounds="[184,812][1264,1018]" list-item="true" child-index-path="0.1.1" checkable="false" checked="false" editable="false" first-seen-step="0" fingerprint="|sims|android.widget.LinearLayout|true|false|false">
+      <edge id="edge_024" status="captured" child-screen-id="screen_00017" child-screen-name="SIMs" message="Captured child screen &apos;SIMs&apos;." />
+    </element>
+    <element label="Hotspot &amp; tethering" resource-id="" class="android.widget.LinearLayout" bounds="[184,1173][1264,1379]" list-item="true" child-index-path="0.1.2" checkable="false" checked="false" editable="false" first-seen-step="0" fingerprint="|hotspot &amp; tethering|android.widget.LinearLayout|true|false|false">
+      <edge id="edge_025" status="captured" child-screen-id="screen_00018" child-screen-name="Hotspot &amp; tethering" message="Captured child screen &apos;Hotspot &amp; tethering&apos;." />
+    </element>
+    <element label="Data Saver" resource-id="" class="android.widget.LinearLayout" bounds="[184,1379][1264,1585]" list-item="true" child-index-path="0.1.3" checkable="false" checked="false" editable="false" first-seen-step="0" fingerprint="|data saver|android.widget.LinearLayout|true|false|false">
+      <edge id="edge_022" status="skipped_blacklist" message="blacklist-label" />
+    </element>
+    <element label="VPN" resource-id="" class="android.widget.LinearLayout" bounds="[184,1585][1264,1791]" list-item="true" child-index-path="0.1.4" checkable="false" checked="false" editable="false" first-seen-step="0" fingerprint="|vpn|android.widget.LinearLayout|true|false|false">
+      <edge id="edge_026" status="captured" child-screen-id="screen_00019" child-screen-name="VPN" message="Captured child screen &apos;VPN&apos;." />
+    </element>
+    <element label="Private DNS" resource-id="" class="android.widget.LinearLayout" bounds="[184,1791][1264,1997]" list-item="true" child-index-path="0.1.5" checkable="false" checked="false" editable="false" first-seen-step="0" fingerprint="|private dns|android.widget.LinearLayout|true|false|false">
+      <edge id="edge_027" status="captured" child-screen-id="screen_00020" child-screen-name="Select Private DNS Mode" message="Captured child screen &apos;Select Private DNS Mode&apos;." />
+    </element>
+    <element label="Adaptive connectivity" resource-id="" class="android.widget.LinearLayout" bounds="[184,1997][1264,2203]" list-item="true" child-index-path="0.1.6" checkable="false" checked="false" editable="false" first-seen-step="0" fingerprint="|adaptive connectivity|android.widget.LinearLayout|true|false|false">
+      <edge id="edge_028" status="captured" child-screen-id="screen_00021" child-screen-name="Adaptive connectivity" message="Captured child screen &apos;Adaptive connectivity&apos;." />
+    </element>
+    <element label="Mobile network security" resource-id="" class="android.widget.LinearLayout" bounds="[184,2203][1264,2337]" list-item="true" child-index-path="0.1.7" checkable="false" checked="false" editable="false" first-seen-step="0" fingerprint="|mobile network security|android.widget.LinearLayout|true|false|false">
+      <edge id="edge_029" status="captured" child-screen-id="screen_00022" child-screen-name="Mobile network security" message="Captured child screen &apos;Mobile network security&apos;." />
+    </element>
+  </merged-elements>
+  <scroll-steps>
+    <step index="0" new-elements="9">
+      <node class="android.widget.FrameLayout" package="com.android.settings" resource-id="" text="" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[184,0][1264,2400]">
+        <node class="android.widget.ScrollView" package="com.android.settings" resource-id="com.android.settings:id/content_parent" text="" content-description="" clickable="false" click-action="false" scrollable="true" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[184,136][1264,2337]">
+          <node class="android.widget.FrameLayout" package="com.android.settings" resource-id="com.android.settings:id/collapsing_toolbar" text="" content-description="Network &amp; internet" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[184,136][1264,606]">
+            <node class="android.widget.ImageButton" package="com.android.settings" resource-id="" text="" content-description="Navigate up" clickable="true" click-action="true" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[184,136][331,283]" fingerprint="|navigate up|android.widget.ImageButton|false|false|false" />
+            <node class="android.widget.TextView" package="com.android.settings" resource-id="" text="Network &amp; internet" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="false" bounds="[373,174][373,245]" />
+          </node>
+          <node class="androidx.recyclerview.widget.RecyclerView" package="com.android.settings" resource-id="com.android.settings:id/recycler_view" text="" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[184,606][1264,2337]">
+            <node class="android.widget.LinearLayout" package="com.android.settings" resource-id="" text="" content-description="" clickable="true" click-action="true" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[184,606][1264,812]" fingerprint="|internet|android.widget.LinearLayout|true|false|false">
+              <node class="android.widget.TextView" package="com.android.settings" resource-id="android:id/title" text="Internet" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[373,648][553,719]" />
+              <node class="android.widget.TextView" package="com.android.settings" resource-id="android:id/summary" text="AndroidWifi" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[373,719][565,770]" />
+            </node>
+            <node class="android.widget.LinearLayout" package="com.android.settings" resource-id="" text="" content-description="" clickable="true" click-action="true" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[184,812][1264,1018]" fingerprint="|sims|android.widget.LinearLayout|true|false|false">
+              <node class="android.widget.TextView" package="com.android.settings" resource-id="android:id/title" text="SIMs" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[373,854][491,925]" />
+              <node class="android.widget.TextView" package="com.android.settings" resource-id="android:id/summary" text="T-Mobile" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[373,925][513,976]" />
+            </node>
+            <node class="android.widget.LinearLayout" package="com.android.settings" resource-id="" text="" content-description="" clickable="true" click-action="true" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[184,1173][1264,1379]" fingerprint="|hotspot &amp; tethering|android.widget.LinearLayout|true|false|false">
+              <node class="android.widget.TextView" package="com.android.settings" resource-id="android:id/title" text="Hotspot &amp; tethering" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[373,1215][830,1286]" />
+              <node class="android.widget.TextView" package="com.android.settings" resource-id="android:id/summary" text="Off" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[373,1286][424,1337]" />
+            </node>
+            <node class="android.widget.LinearLayout" package="com.android.settings" resource-id="" text="" content-description="" clickable="true" click-action="true" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[184,1379][1264,1585]" fingerprint="|data saver|android.widget.LinearLayout|true|false|false">
+              <node class="android.widget.TextView" package="com.android.settings" resource-id="android:id/title" text="Data Saver" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[373,1421][628,1492]" />
+              <node class="android.widget.TextView" package="com.android.settings" resource-id="android:id/summary" text="Off" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[373,1492][424,1543]" />
+            </node>
+            <node class="android.widget.LinearLayout" package="com.android.settings" resource-id="" text="" content-description="" clickable="true" click-action="true" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[184,1585][1264,1791]" fingerprint="|vpn|android.widget.LinearLayout|true|false|false">
+              <node class="android.widget.TextView" package="com.android.settings" resource-id="android:id/title" text="VPN" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[373,1627][478,1698]" />
+              <node class="android.widget.TextView" package="com.android.settings" resource-id="android:id/summary" text="None" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[373,1698][460,1749]" />
+            </node>
+            <node class="android.widget.LinearLayout" package="com.android.settings" resource-id="" text="" content-description="" clickable="true" click-action="true" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[184,1791][1264,1997]" fingerprint="|private dns|android.widget.LinearLayout|true|false|false">
+              <node class="android.widget.TextView" package="com.android.settings" resource-id="android:id/title" text="Private DNS" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[247,1833][528,1904]" />
+              <node class="android.widget.TextView" package="com.android.settings" resource-id="android:id/summary" text="Automatic" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[247,1904][416,1955]" />
+            </node>
+            <node class="android.widget.LinearLayout" package="com.android.settings" resource-id="" text="" content-description="" clickable="true" click-action="true" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[184,1997][1264,2203]" fingerprint="|adaptive connectivity|android.widget.LinearLayout|true|false|false">
+              <node class="android.widget.TextView" package="com.android.settings" resource-id="android:id/title" text="Adaptive connectivity" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[247,2039][751,2110]" />
+              <node class="android.widget.TextView" package="com.android.settings" resource-id="android:id/summary" text="On" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[247,2110][292,2161]" />
+            </node>
+            <node class="android.widget.LinearLayout" package="com.android.settings" resource-id="" text="" content-description="" clickable="true" click-action="true" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[184,2203][1264,2337]" fingerprint="|mobile network security|android.widget.LinearLayout|true|false|false">
+              <node class="android.widget.TextView" package="com.android.settings" resource-id="android:id/title" text="Mobile network security" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[247,2245][807,2316]" />
+              <node class="android.widget.TextView" package="com.android.settings" resource-id="android:id/summary" text="Network type, encryption, notification controls" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[247,2316][998,2337]" />
+            </node>
+          </node>
+        </node>
+      </node>
+    </step>
+    <step index="1" new-elements="0">
+      <node class="android.widget.FrameLayout" package="com.android.settings" resource-id="" text="" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[0,0][1080,2400]">
+        <node class="android.widget.ScrollView" package="com.android.settings" resource-id="com.android.settings:id/content_parent" text="" content-description="" clickable="false" click-action="false" scrollable="true" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[0,136][1080,2337]">
+          <node class="android.widget.FrameLayout" package="com.android.settings" resource-id="com.android.settings:id/collapsing_toolbar" text="" content-description="Network &amp; internet" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[0,136][1080,283]">
+            <node class="android.widget.ImageButton" package="com.android.settings" resource-id="" text="" content-description="Navigate up" clickable="true" click-action="true" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[0,136][147,283]" fingerprint="|navigate up|android.widget.ImageButton|false|false|false" />
+            <node class="android.widget.TextView" package="com.android.settings" resource-id="" text="Network &amp; internet" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="false" bounds="[189,174][189,245]" />
+          </node>
+          <node class="androidx.recyclerview.widget.RecyclerView" package="com.android.settings" resource-id="com.android.settings:id/recycler_view" text="" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[0,283][1080,2086]">
+            <node class="android.widget.LinearLayout" package="com.android.settings" resource-id="" text="" content-description="" clickable="true" click-action="true" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[0,283][1080,489]" fingerprint="|internet|android.widget.LinearLayout|true|false|false">
+              <node class="android.widget.TextView" package="com.android.settings" resource-id="android:id/title" text="Internet" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[189,325][369,396]" />
+              <node class="android.widget.TextView" package="com.android.settings" resource-id="android:id/summary" text="AndroidWifi" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[189,396][381,447]" />
+            </node>
+            <node class="android.widget.LinearLayout" package="com.android.settings" resource-id="" text="" content-description="" clickable="true" click-action="true" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[0,489][1080,695]" fingerprint="|sims|android.widget.LinearLayout|true|false|false">
+              <node class="android.widget.TextView" package="com.android.settings" resource-id="android:id/title" text="SIMs" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[189,531][307,602]" />
+              <node class="android.widget.TextView" package="com.android.settings" resource-id="android:id/summary" text="T-Mobile" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[189,602][329,653]" />
+            </node>
+            <node class="android.widget.LinearLayout" package="com.android.settings" resource-id="" text="" content-description="" clickable="true" click-action="true" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[0,850][1080,1056]" fingerprint="|hotspot &amp; tethering|android.widget.LinearLayout|true|false|false">
+              <node class="android.widget.TextView" package="com.android.settings" resource-id="android:id/title" text="Hotspot &amp; tethering" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[189,892][646,963]" />
+              <node class="android.widget.TextView" package="com.android.settings" resource-id="android:id/summary" text="Off" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[189,963][240,1014]" />
+            </node>
+            <node class="android.widget.LinearLayout" package="com.android.settings" resource-id="" text="" content-description="" clickable="true" click-action="true" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[0,1056][1080,1262]" fingerprint="|data saver|android.widget.LinearLayout|true|false|false">
+              <node class="android.widget.TextView" package="com.android.settings" resource-id="android:id/title" text="Data Saver" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[189,1098][444,1169]" />
+              <node class="android.widget.TextView" package="com.android.settings" resource-id="android:id/summary" text="Off" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[189,1169][240,1220]" />
+            </node>
+            <node class="android.widget.LinearLayout" package="com.android.settings" resource-id="" text="" content-description="" clickable="true" click-action="true" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[0,1262][1080,1468]" fingerprint="|vpn|android.widget.LinearLayout|true|false|false">
+              <node class="android.widget.TextView" package="com.android.settings" resource-id="android:id/title" text="VPN" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[189,1304][294,1375]" />
+              <node class="android.widget.TextView" package="com.android.settings" resource-id="android:id/summary" text="None" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[189,1375][276,1426]" />
+            </node>
+            <node class="android.widget.LinearLayout" package="com.android.settings" resource-id="" text="" content-description="" clickable="true" click-action="true" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[0,1468][1080,1674]" fingerprint="|private dns|android.widget.LinearLayout|true|false|false">
+              <node class="android.widget.TextView" package="com.android.settings" resource-id="android:id/title" text="Private DNS" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[63,1510][344,1581]" />
+              <node class="android.widget.TextView" package="com.android.settings" resource-id="android:id/summary" text="Automatic" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[63,1581][232,1632]" />
+            </node>
+            <node class="android.widget.LinearLayout" package="com.android.settings" resource-id="" text="" content-description="" clickable="true" click-action="true" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[0,1674][1080,1880]" fingerprint="|adaptive connectivity|android.widget.LinearLayout|true|false|false">
+              <node class="android.widget.TextView" package="com.android.settings" resource-id="android:id/title" text="Adaptive connectivity" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[63,1716][567,1787]" />
+              <node class="android.widget.TextView" package="com.android.settings" resource-id="android:id/summary" text="On" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[63,1787][108,1838]" />
+            </node>
+            <node class="android.widget.LinearLayout" package="com.android.settings" resource-id="" text="" content-description="" clickable="true" click-action="true" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[0,1880][1080,2086]" fingerprint="|mobile network security|android.widget.LinearLayout|true|false|false">
+              <node class="android.widget.TextView" package="com.android.settings" resource-id="android:id/title" text="Mobile network security" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[63,1922][623,1993]" />
+              <node class="android.widget.TextView" package="com.android.settings" resource-id="android:id/summary" text="Network type, encryption, notification controls" content-description="" clickable="false" click-action="false" scrollable="false" checkable="false" checked="false" editable="false" enabled="true" visible-to-user="true" bounds="[63,1993][814,2044]" />
+            </node>
+          </node>
+        </node>
+      </node>
+    </step>
+  </scroll-steps>
+</screen>

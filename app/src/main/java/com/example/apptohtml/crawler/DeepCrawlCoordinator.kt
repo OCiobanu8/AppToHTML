@@ -9,7 +9,7 @@ import java.util.Locale
 
 internal class DeepCrawlCoordinator(
     private val selectedApp: SelectedAppRef,
-    private val host: Host,
+    host: Host,
     private val loadBlacklist: () -> CrawlBlacklist,
     private val createSession: (Long, Boolean) -> CrawlSessionDirectory,
     private val pauseConfig: PauseCheckpointConfig = PauseCheckpointConfig(),
@@ -27,11 +27,19 @@ internal class DeepCrawlCoordinator(
     private val maxPostClickSettleMillis: Long = DEFAULT_MAX_POST_CLICK_SETTLE_MILLIS,
     private val entryRestoreSettleTimeProvider: () -> Long = timeProvider,
     private val maxEntryRestoreSettleMillis: Long = DEFAULT_MAX_ENTRY_RESTORE_SETTLE_MILLIS,
+    /** Reads a known screen's first viewport back from its saved XML, for the uniqueness check. */
+    private val readKnownScreenTree: (File) -> AccessibilityNodeSnapshot? = CaptureTreeReader::readFirstViewport,
 ) {
+    /**
+     * The host, seen through [xmlRepresentable]: every tree the crawl receives carries only text its
+     * saved XML can hold, so a fresh crawl and a resumed one judge the same labels.
+     */
+    private val host: Host = XmlRepresentableHost(host)
     private val resolvedLinksByScreenId = mutableMapOf<String, MutableMap<PressableElementLinkKey, String>>()
     private val crashContext = CrawlCrashContext()
     private var crawlLogger: CrawlLogger? = null
     private var lastLoggedManifestStatus: CrawlRunStatus? = null
+    private var knownScreenTrees = KnownScreenTrees()
 
     suspend fun crawl(
         initialRoot: AccessibilityNodeSnapshot,
@@ -39,6 +47,8 @@ internal class DeepCrawlCoordinator(
         intent: CrawlStartIntent = CrawlStartIntent.RESUME,
         resumeMode: ResumeMode = ResumeMode.ContinueAuto,
     ): DeepCrawlOutcome {
+        @Suppress("NAME_SHADOWING")
+        val initialRoot = initialRoot.xmlRepresentable()
         val crawlStartedAt = timeProvider()
         val blacklist = loadBlacklist()
         val wipeExisting = intent == CrawlStartIntent.NEW_CRAWL
@@ -53,10 +63,10 @@ internal class DeepCrawlCoordinator(
                 startedAt = crawlStartedAt,
                 screens = loaded.screens,
                 edges = loaded.edges,
-                dedupKeyToScreenId = loaded.dedupKeyToScreenId,
                 rootScreenId = loaded.rootScreenId,
                 nextScreenSequence = loaded.nextScreenSequence,
                 nextEdgeSequence = loaded.nextEdgeSequence,
+                cases = loaded.cases,
             )
         } else {
             CrawlRunTracker(
@@ -80,6 +90,15 @@ internal class DeepCrawlCoordinator(
         lastLoggedManifestStatus = null
         crashContext.reset()
         resolvedLinksByScreenId.clear()
+        knownScreenTrees = KnownScreenTrees(
+            read = readKnownScreenTree,
+            onUnreadable = { screenId, xmlFile ->
+                logger.warn(
+                    "known_tree_unreadable screenId=$screenId xmlFile=${quote(xmlFile.absolutePath)} " +
+                        "consequence=${quote("uniqueness cannot be checked against this screen")}"
+                )
+            },
+        )
         loaded?.resolvedLinks?.forEach { (parentId, links) ->
             resolvedLinksByScreenId[parentId] = links.toMutableMap()
         }
@@ -103,6 +122,7 @@ internal class DeepCrawlCoordinator(
             val rootFiles: CapturedScreenFiles
             val rootSnapshot: ScreenSnapshot
             val entryScreenIdentity: ScreenIdentity
+            var rootCase: PendingIdentityCase? = null
 
             if (loaded != null) {
                 val loadedRoot = loaded.screens.firstOrNull { it.depth == 0 }
@@ -118,6 +138,10 @@ internal class DeepCrawlCoordinator(
                 )
                 entryScreenIdentity = ScreenIdentity.fromRoot(
                     rootSnapshot.stepSnapshots.firstOrNull()?.root ?: liveEntryRoot
+                )
+                rootCase = settledRootDivergence(
+                    rootRecord = loadedRoot,
+                    rescannedTop = rootSnapshot.stepSnapshots.firstOrNull()?.root ?: liveEntryRoot,
                 )
                 rememberScreen(rootScreenId, loadedRoot.screenName)
                 logger.info(
@@ -137,12 +161,19 @@ internal class DeepCrawlCoordinator(
 
                 val rootSequence = tracker.nextScreenSequenceNumber()
                 rootScreenId = screenIdFor(rootSequence)
-                val rootIdentity = entryScreenIdentity.withName(
-                    screenNameIdentityFor(
-                        snapshot = rootSnapshot,
-                        root = rootSnapshot.mergedRoot ?: liveEntryRoot,
-                    )
+                val rootSettlement = settleNewScreen(
+                    screenId = rootScreenId,
+                    named = entryScreenIdentity.withName(
+                        screenNameIdentityFor(
+                            snapshot = rootSnapshot,
+                            root = rootSnapshot.mergedRoot ?: liveEntryRoot,
+                        )
+                    ),
+                    topRoot = rootSnapshot.stepSnapshots.firstOrNull()?.root ?: liveEntryRoot,
+                    tracker = tracker,
                 )
+                val rootIdentity = rootSettlement.identity
+                rootCase = rootSettlement.case
                 rootFiles = CaptureFileStore.saveScreen(
                     session = session,
                     snapshot = rootSnapshot,
@@ -180,6 +211,9 @@ internal class DeepCrawlCoordinator(
                 )
             }
             saveManifest(session, tracker, CrawlRunStatus.IN_PROGRESS)
+            rootCase?.let { case ->
+                raiseIdentityCase(case, session, tracker, pauseTracker, rootSnapshot, rootFiles)
+            }
 
             val frontier = ArrayDeque<String>()
             if (loaded != null) {
@@ -244,6 +278,9 @@ internal class DeepCrawlCoordinator(
                     )) {
                         is ScreenPreparationResult.Success -> prepared.snapshot
                         is ScreenPreparationResult.Failure -> {
+                            prepared.identityCase?.let { case ->
+                                raiseIdentityCase(case, session, tracker, pauseTracker, rootSnapshot, rootFiles)
+                            }
                             handlePreparationFailure(
                                 tracker = tracker,
                                 session = session,
@@ -490,6 +527,8 @@ internal class DeepCrawlCoordinator(
             )
             rewriteScreenXmlFor(tracker, snapshot, screenRecord.screenId, CrawlRunStatus.IN_PROGRESS)
             try {
+                // Raised once this edge's files are all consistent, so a Stop saves a coherent crawl.
+                var pendingCase: PendingIdentityCase? = null
                 host.publishProgress(
                     "Visiting target ${index + 1} of ${edgeWorkItems.size} from '${snapshot.screenName}': ${element.label}"
                 )
@@ -590,8 +629,18 @@ internal class DeepCrawlCoordinator(
                 )
                 val childFullIdentity = childIdentity.withName(childScreenName)
                 val childScreenFingerprint = DedupPolicy.nameKey(childFullIdentity).orEmpty()
-                // S7 — dedup resolves through DedupPolicy, which also decides eligibility.
-                val existingChildScreenId = tracker.findScreenIdByIdentity(childFullIdentity)
+                // S7 — dedup runs the known identities against the screen (ScreenRecognition).
+                val recognition = ScreenRecognition.recognize(
+                    observed = childFullIdentity,
+                    observedContext = TraitEvaluationContext.of(childTopRoot, childScreenName),
+                    known = tracker.knownIdentities(),
+                )
+                val existingLink = recognition as? ScreenRecognition.Result.Link
+                val existingChildScreenId = existingLink?.screenId
+                crawlLogger?.info(
+                    "child_recognition parentScreenId=${screenRecord.screenId} " +
+                        "candidateScreenName=${quote(childSnapshot.screenName)} result=${describe(recognition)}"
+                )
                 crawlLogger?.info(
                     "child_capture_candidate parentScreenId=${screenRecord.screenId} parentScreenName=${quote(screenRecord.screenName)} " +
                         "depth=${screenRecord.depth + 1} route=${quote(formatRoute(childRoute))} " +
@@ -626,12 +675,19 @@ internal class DeepCrawlCoordinator(
                         childScreenName = existingChildScreen.screenName,
                         message = "Linked to existing screen '${existingChildScreen.screenName}'.",
                     )
+                    val linkedByName = existingLink?.via == ScreenRecognition.Via.UNSETTLED_NAME
+                    val linkReason = if (linkedByName) {
+                        "Matched an unsettled screen by its strong name."
+                    } else {
+                        "Exactly one settled identity holds on this screen."
+                    }
                     crawlLogger?.info(
-                        "linked_existing parentScreenId=${screenRecord.screenId} parentScreenName=${quote(screenRecord.screenName)} " +
+                        "${if (linkedByName) "linked_existing_unsettled" else "linked_existing"} " +
+                            "parentScreenId=${screenRecord.screenId} parentScreenName=${quote(screenRecord.screenName)} " +
                             "candidateScreenName=${quote(childSnapshot.screenName)} candidateFingerprint=${quote(childScreenFingerprint)} " +
                             "matchedScreenId=${existingChildScreen.screenId} matchedScreenName=${quote(existingChildScreen.screenName)} " +
                             "matchedFingerprint=${quote(DedupPolicy.nameKey(existingChildScreen.identity).orEmpty())} " +
-                            "reason=${quote("Matched existing screen by strong dedup fingerprint.")} element=${formatElement(element)}"
+                            "reason=${quote(linkReason)} element=${formatElement(element)}"
                     )
                     resolvedLinksByScreenId
                         .getOrPut(screenRecord.screenId) { mutableMapOf() }[element.toLinkKey()] =
@@ -639,16 +695,33 @@ internal class DeepCrawlCoordinator(
                 } else {
                     val childSequence = tracker.nextScreenSequenceNumber()
                     val childScreenId = screenIdFor(childSequence)
+                    val settlement = if (recognition is ScreenRecognition.Result.Collision) {
+                        // Never merged: captured as its own screen, unsettled, and handed to an
+                        // operator with every screen that claimed it.
+                        NewScreenSettlement(
+                            identity = childFullIdentity,
+                            case = PendingIdentityCase(
+                                kind = IdentityCaseKind.UNIQUENESS_COLLISION,
+                                raisedOn = childScreenId,
+                                relatedScreenIds = recognition.screenIds,
+                                detail = collisionDetail(recognition, childScreenName),
+                                rejectedProposal = TraitProposer.propose(childTopRoot),
+                            ),
+                        )
+                    } else {
+                        settleNewScreen(childScreenId, childFullIdentity, childTopRoot, tracker)
+                    }
+                    pendingCase = settlement.case
                     val childFiles = CaptureFileStore.saveScreen(
                         session = session,
                         snapshot = childSnapshot,
                         screenId = childScreenId,
-                        identity = childFullIdentity,
+                        identity = settlement.identity,
                     )
                     tracker.addScreen(
                         screenId = childScreenId,
                         snapshot = childSnapshot,
-                        identity = childFullIdentity,
+                        identity = settlement.identity,
                         files = childFiles,
                         parentScreenId = screenRecord.screenId,
                         triggerElement = element,
@@ -697,6 +770,9 @@ internal class DeepCrawlCoordinator(
                 )
                 rewriteScreenXmlFor(tracker, snapshot, screenRecord.screenId, CrawlRunStatus.IN_PROGRESS)
                 saveManifest(session, tracker, CrawlRunStatus.IN_PROGRESS)
+                pendingCase?.let { case ->
+                    raiseIdentityCase(case, session, tracker, pauseTracker, rootSnapshot, rootFiles)
+                }
             } catch (edgeFailure: RecoverableTraversalException) {
                 crawlLogger?.warn(
                     "edge_failure_recoverable parentScreenId=${edgeFailure.parentScreenId} message=${quote(edgeFailure.message.orEmpty())} " +
@@ -912,6 +988,16 @@ internal class DeepCrawlCoordinator(
                 parentScreenId = screenRecord.parentScreenId ?: screenRecord.screenId,
                 element = routeElement,
                 message = message,
+                // A settled identity that no longer holds is a case for an operator, not only a
+                // failed branch: the crawl's model of this screen and the screen have diverged.
+                identityCase = (arrival as? ReplayArrivalCheck.Verdict.TraitsDoNotHold)?.let { failed ->
+                    PendingIdentityCase(
+                        kind = IdentityCaseKind.SETTLED_DOES_NOT_HOLD,
+                        raisedOn = screenRecord.screenId,
+                        relatedScreenIds = emptyList(),
+                        detail = "settled identity does not hold on replay: ${failed.describe()}",
+                    )
+                },
             )
         }
 
@@ -1658,6 +1744,145 @@ internal class DeepCrawlCoordinator(
         val screenRecord = tracker.findScreen(screenId) ?: return
         val crawlState = buildScreenCrawlState(tracker, snapshot, screenRecord, runStatus)
         CaptureFileStore.rewriteScreenXml(filesFor(screenRecord), snapshot, crawlState)
+        // The saved first viewport may now be a re-scan's, not the capture's: the uniqueness check
+        // must read what is on disk, so the cached tree is dropped and read again when next needed.
+        knownScreenTrees.invalidate(screenId)
+    }
+
+    /**
+     * Proposes an identity for the new screen [screenId] — [named] with its name, built from
+     * [topRoot], its first viewport — and decides whether it holds against every screen the crawl
+     * already knows. A proposal that holds is the identity the screen is captured with; one that does
+     * not leaves the screen unsettled and becomes a case.
+     */
+    private fun settleNewScreen(
+        screenId: String,
+        named: ScreenIdentity,
+        topRoot: AccessibilityNodeSnapshot,
+        tracker: CrawlRunTracker,
+    ): NewScreenSettlement {
+        val proposal = named.copy(traits = TraitProposer.propose(topRoot))
+        val decision = IdentitySettlement.decide(
+            proposal = proposal,
+            ownContext = TraitEvaluationContext.of(topRoot, named.name),
+            others = knownScreenTrees.knownScreens(tracker.allScreens()),
+        )
+        val reason = (decision as? IdentitySettlement.Decision.NotSettled)?.describe()
+        crawlLogger?.info(
+            "identity_settlement screenId=$screenId proposedTraitCount=${proposal.traits.size} " +
+                "decision=${decision::class.simpleName}" + (reason?.let { " reason=${quote(it)}" } ?: "")
+        )
+        return when (decision) {
+            IdentitySettlement.Decision.Settled -> NewScreenSettlement(proposal, case = null)
+            is IdentitySettlement.Decision.NotSettled -> NewScreenSettlement(
+                identity = named.copy(traits = emptyList()),
+                case = PendingIdentityCase(
+                    kind = IdentitySettlement.caseKindFor(decision, named.name),
+                    raisedOn = screenId,
+                    relatedScreenIds = when (decision) {
+                        is IdentitySettlement.Decision.AlsoHolds -> decision.screenIds
+                        is IdentitySettlement.Decision.CannotCheckAgainst -> decision.screenIds
+                        else -> emptyList()
+                    },
+                    detail = decision.describe(),
+                    rejectedProposal = proposal.traits,
+                ),
+            )
+        }
+    }
+
+    /**
+     * A resumed crawl re-scans the root instead of replaying to it, so the replay-arrival check never
+     * sees it. This asks the same question of the root: does its settled identity still hold on the
+     * entry screen in front of the crawler? An unsettled root asserts nothing and is not asked, so a
+     * crawl saved before machine proposals resumes exactly as before.
+     */
+    private fun settledRootDivergence(
+        rootRecord: CrawlScreenRecord,
+        rescannedTop: AccessibilityNodeSnapshot,
+    ): PendingIdentityCase? {
+        val settled = rootRecord.identity
+        if (settled.traits.isEmpty()) return null
+        val context = TraitEvaluationContext.of(rescannedTop, settled.name)
+        if (TraitEvaluator.verdict(settled, context) != TraitVerdict.DOES_NOT_HOLD) return null
+        return PendingIdentityCase(
+            kind = IdentityCaseKind.SETTLED_DOES_NOT_HOLD,
+            raisedOn = rootRecord.screenId,
+            relatedScreenIds = emptyList(),
+            detail = "settled identity does not hold on the entry screen at resume: " +
+                describeFailing(settled.traits.filterNot { trait -> trait.holds(context) }),
+        )
+    }
+
+    private fun collisionDetail(
+        collision: ScreenRecognition.Result.Collision,
+        observedName: ScreenNameIdentity,
+    ): String = if (collision.screenIds.size > 1) {
+        "settled identities of ${collision.screenIds.joinToString(", ")} all hold on this screen"
+    } else {
+        "the settled identity of ${collision.screenIds.single()} holds on this screen, but the name " +
+            "'${observedName.screenName}' is too weak to tell a revisit from a lookalike"
+    }
+
+    /**
+     * Opens [pending] as a case and pauses the crawl on it.
+     *
+     * In this order, so an operator who stops here finds everything on disk: the case goes in the
+     * tracker, the case file is written, every involved screen's pointers are brought up to date,
+     * the manifest is saved, and only then is the operator asked. Continue returns to the caller,
+     * which carries on with the screen unsettled; Stop saves a partial crawl, as a checkpoint Stop
+     * does.
+     */
+    private suspend fun raiseIdentityCase(
+        pending: PendingIdentityCase,
+        session: CrawlSessionDirectory,
+        tracker: CrawlRunTracker,
+        pauseTracker: PauseCheckpointTracker,
+        rootSnapshot: ScreenSnapshot,
+        rootFiles: CapturedScreenFiles,
+    ) {
+        val case = tracker.openCase(
+            kind = pending.kind,
+            raisedOn = pending.raisedOn,
+            relatedScreenIds = pending.relatedScreenIds,
+            detail = pending.detail,
+            rejectedProposal = pending.rejectedProposal,
+        )
+        IdentityCaseStore.write(IdentityCaseStore.fileIn(session.directory), tracker.cases())
+        case.involvedScreenIds.forEach { screenId ->
+            tracker.findScreen(screenId)?.let { record ->
+                IdentityCasePointers.refresh(File(record.xmlPath), tracker.openCaseIdsFor(screenId))
+            }
+        }
+        saveManifest(session, tracker, CrawlRunStatus.IN_PROGRESS)
+        crawlLogger?.warn(
+            "identity_case_opened caseId=${case.id} kind=${case.kind.xmlValue} raisedOn=${case.raisedOn} " +
+                "related=${quote(case.relatedScreenIds.joinToString(","))} detail=${quote(case.detail)}"
+        )
+        val decision = host.awaitIdentityCaseDecision(
+            case = case,
+            snapshot = pauseTracker.progressSnapshot(
+                capturedScreenCount = tracker.capturedScreenCount(),
+                capturedChildScreenCount = tracker.capturedChildScreenCount(),
+            ),
+        )
+        crawlLogger?.info("identity_case_resolved caseId=${case.id} decision=${decision.name.lowercase()}")
+        if (decision == PauseDecision.STOP) {
+            abortPartialCapture(
+                tracker = tracker,
+                failedParentScreenId = case.raisedOn,
+                session = session,
+                rootSnapshot = rootSnapshot,
+                rootFiles = rootFiles,
+                message = "Deep crawl stopped on identity case ${case.id}: ${case.detail}",
+            )
+        }
+    }
+
+    private fun describe(result: ScreenRecognition.Result): String = when (result) {
+        is ScreenRecognition.Result.Link -> "link:${result.screenId}:${result.via.name.lowercase()}"
+        ScreenRecognition.Result.New -> "new"
+        is ScreenRecognition.Result.Collision -> "collision:${result.screenIds.joinToString(",")}"
     }
 
     /**
@@ -1722,6 +1947,7 @@ internal class DeepCrawlCoordinator(
             )
         }.toMap()
         return ScreenCrawlState(
+            openCaseIds = tracker.openCaseIdsFor(screenRecord.screenId),
             screenId = screenRecord.screenId,
             depth = screenRecord.depth,
             expansionStatus = screenRecord.expansionStatus,
@@ -1864,6 +2090,9 @@ internal class DeepCrawlCoordinator(
 
             PauseReason.FAILED_EDGE_COUNT_EXCEEDED ->
                 "Deep crawl stopped after reaching the failed-edge checkpoint."
+
+            PauseReason.IDENTITY_CASE ->
+                "Deep crawl stopped on an identity case."
         }
     }
 
@@ -2104,6 +2333,15 @@ internal class DeepCrawlCoordinator(
             reason: PauseReason,
             snapshot: PauseProgressSnapshot,
         ): PauseDecision
+
+        /**
+         * Pauses on an operator [case] and returns the operator's decision. Separate from
+         * [awaitPauseDecision] so a case can carry what the operator needs to see.
+         */
+        suspend fun awaitIdentityCaseDecision(
+            case: IdentityCase,
+            snapshot: PauseProgressSnapshot,
+        ): PauseDecision
         fun publishProgress(message: String)
         fun setActiveCrawlLogger(logger: CrawlLogger?)
     }
@@ -2138,8 +2376,24 @@ internal class DeepCrawlCoordinator(
             val parentScreenId: String,
             val element: PressableElement,
             val message: String,
+            val identityCase: PendingIdentityCase? = null,
         ) : ScreenPreparationResult()
     }
+
+    /** A case decided on but not yet opened: [raiseIdentityCase] opens, records and pauses on it. */
+    private data class PendingIdentityCase(
+        val kind: IdentityCaseKind,
+        val raisedOn: String,
+        val relatedScreenIds: List<String>,
+        val detail: String,
+        val rejectedProposal: List<Trait> = emptyList(),
+    )
+
+    /** The identity a new screen is captured with, and the case to raise when it did not settle. */
+    private data class NewScreenSettlement(
+        val identity: ScreenIdentity,
+        val case: PendingIdentityCase?,
+    )
 
     private data class OpenedChildDestination(
         val root: AccessibilityNodeSnapshot,
@@ -2170,6 +2424,12 @@ internal class DeepCrawlCoordinator(
             lastFrontierSnapshot = emptyList()
             lastReplayOrRecoveryStage = null
         }
+    }
+
+    /** A [Host] whose captured trees are passed through [xmlRepresentable]; everything else is the host's. */
+    private class XmlRepresentableHost(private val inner: Host) : Host by inner {
+        override suspend fun captureCurrentRootSnapshot(expectedPackageName: String?): AccessibilityNodeSnapshot? =
+            inner.captureCurrentRootSnapshot(expectedPackageName)?.xmlRepresentable()
     }
 
     private class PartialCrawlAbortException(

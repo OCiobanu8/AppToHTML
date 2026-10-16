@@ -266,6 +266,7 @@ private fun AppToHtmlScreen(
         when (crawlerState.phase) {
             CrawlerPhase.PAUSED_FOR_DECISION -> {
                 Text("Deep crawl paused: ${crawlerState.pauseReason?.let(::pauseReasonText) ?: "Waiting for a decision."}")
+                crawlerState.pauseIdentityCase?.let { case -> IdentityCaseDetails(case) }
                 crawlerState.pauseElapsedTimeMs?.let { elapsedTimeMs ->
                     Text("Elapsed time: ${formatPauseElapsedTime(elapsedTimeMs)}")
                 }
@@ -461,6 +462,14 @@ private fun SavedCrawlSection(
     Text("Saved crawl", style = MaterialTheme.typography.titleMedium)
 
     val app = selectedApp
+    val loadError = snapshot?.loadError
+    if (app != null && loadError != null) {
+        Text("The saved crawl cannot be resumed: $loadError")
+        TextButton(onClick = onNewCrawl, enabled = canStartCapture) {
+            Text("New Crawl")
+        }
+        return
+    }
     if (app == null || snapshot == null || snapshot.screens.isEmpty()) {
         Text("No saved crawl. Tap Start Deep Crawl to begin one.")
         return
@@ -586,6 +595,7 @@ private fun PauseDecisionDialog(crawlerState: com.example.apptohtml.crawler.Craw
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text(pauseReasonText(crawlerState.pauseReason))
+                crawlerState.pauseIdentityCase?.let { case -> IdentityCaseDetails(case) }
                 crawlerState.pauseElapsedTimeMs?.let { elapsedTimeMs ->
                     Text("Elapsed time: ${formatPauseElapsedTime(elapsedTimeMs)}")
                 }
@@ -635,8 +645,23 @@ private fun pauseReasonText(reason: PauseReason?): String {
         PauseReason.FAILED_EDGE_COUNT_EXCEEDED ->
             "The crawl reached its failed-edge checkpoint and is waiting for your decision."
 
+        PauseReason.IDENTITY_CASE ->
+            "A screen's identity needs your decision. Continue leaves the case open and carries on; " +
+                "Stop saves the crawl so the case can be settled and the crawl resumed."
+
         null -> "The crawl is paused and waiting for your decision."
     }
+}
+
+/** What an operator needs to act on a case: which screen, what kind, why, and who else is involved. */
+@Composable
+private fun IdentityCaseDetails(case: com.example.apptohtml.crawler.IdentityCase) {
+    Text("Case ${case.id}: ${case.kind.xmlValue.replace('-', ' ')}")
+    Text("Screen: ${case.raisedOn}")
+    if (case.relatedScreenIds.isNotEmpty()) {
+        Text("Also involves: ${case.relatedScreenIds.joinToString(", ")}")
+    }
+    Text(case.detail)
 }
 
 private fun formatPauseElapsedTime(elapsedTimeMs: Long): String {

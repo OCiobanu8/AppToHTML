@@ -115,8 +115,13 @@ class SavedCrawlIdentityLoadTest {
         )
         assertEquals(
             "The screen must still be reachable under the key the crawl indexed it by.",
-            mapOf(DedupPolicy.keyFor(record.identity) to "screen_00000"),
-            loaded.dedupKeyToScreenId,
+            DedupPolicy.keyFor(settledIdentity()),
+            DedupPolicy.keyFor(record.identity),
+        )
+        assertEquals(
+            "Dedup runs the known identities; the loaded screen must be one of them, unchanged.",
+            mapOf("screen_00000" to record.identity),
+            manifestTracker(loaded).knownIdentities(),
         )
     }
 
@@ -224,17 +229,20 @@ class SavedCrawlIdentityLoadTest {
     }
 
     private fun manifestOf(loaded: LoadedCrawlState): CrawlManifest =
+        manifestTracker(loaded).buildManifest(CrawlRunStatus.COMPLETED, finishedAt = 3_000L)
+
+    private fun manifestTracker(loaded: LoadedCrawlState): CrawlRunTracker =
         CrawlRunTracker.fromExistingState(
             sessionId = "session-2",
             packageName = targetPackage,
             startedAt = 2_000L,
             screens = loaded.screens,
             edges = loaded.edges,
-            dedupKeyToScreenId = loaded.dedupKeyToScreenId,
             rootScreenId = loaded.rootScreenId,
             nextScreenSequence = loaded.nextScreenSequence,
             nextEdgeSequence = loaded.nextEdgeSequence,
-        ).buildManifest(CrawlRunStatus.COMPLETED, finishedAt = 3_000L)
+            cases = loaded.cases,
+        )
 
     private companion object {
         const val BASE_NAME = "screen_00000_home"

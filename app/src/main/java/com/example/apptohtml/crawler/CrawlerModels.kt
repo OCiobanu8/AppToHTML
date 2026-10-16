@@ -25,6 +25,8 @@ data class CrawlerUiState(
     val statusMessage: String = "No capture started yet.",
     val pauseDecisionId: Long? = null,
     val pauseReason: PauseReason? = null,
+    /** The operator case the crawl is paused on, when [pauseReason] is [PauseReason.IDENTITY_CASE]. */
+    val pauseIdentityCase: IdentityCase? = null,
     val pauseElapsedTimeMs: Long? = null,
     val pauseFailedEdgeCount: Int? = null,
     val pausedCapturedScreenCount: Int? = null,
@@ -71,6 +73,7 @@ data class CrawlerUiState(
         statusMessage = message,
         pauseDecisionId = null,
         pauseReason = null,
+        pauseIdentityCase = null,
         pauseElapsedTimeMs = null,
         pauseFailedEdgeCount = null,
         pausedCapturedScreenCount = null,
@@ -91,6 +94,7 @@ data class CrawlerUiState(
         statusMessage = message,
         pauseDecisionId = null,
         pauseReason = null,
+        pauseIdentityCase = null,
         pauseElapsedTimeMs = null,
         pauseFailedEdgeCount = null,
         pausedCapturedScreenCount = null,
@@ -116,6 +120,7 @@ data class CrawlerUiState(
         statusMessage = message,
         pauseDecisionId = null,
         pauseReason = null,
+        pauseIdentityCase = null,
         pauseElapsedTimeMs = null,
         pauseFailedEdgeCount = null,
         pausedCapturedScreenCount = null,
@@ -127,11 +132,13 @@ data class CrawlerUiState(
         decisionId: Long,
         reason: PauseReason,
         snapshot: PauseProgressSnapshot,
+        identityCase: IdentityCase? = null,
     ): CrawlerUiState = copy(
         phase = CrawlerPhase.PAUSED_FOR_DECISION,
-        statusMessage = pauseMessage(reason),
+        statusMessage = pauseMessage(reason, identityCase),
         pauseDecisionId = decisionId,
         pauseReason = reason,
+        pauseIdentityCase = identityCase,
         pauseElapsedTimeMs = snapshot.elapsedTimeMs,
         pauseFailedEdgeCount = snapshot.failedEdgeCount,
         pausedCapturedScreenCount = snapshot.capturedScreenCount,
@@ -144,6 +151,7 @@ data class CrawlerUiState(
         statusMessage = "Resuming deep crawl after pause.",
         pauseDecisionId = null,
         pauseReason = null,
+        pauseIdentityCase = null,
         pauseElapsedTimeMs = null,
         pauseFailedEdgeCount = null,
         pausedCapturedScreenCount = null,
@@ -160,6 +168,7 @@ data class CrawlerUiState(
         },
         pauseDecisionId = null,
         pauseReason = null,
+        pauseIdentityCase = null,
         pauseElapsedTimeMs = null,
         pauseFailedEdgeCount = null,
         pausedCapturedScreenCount = null,
@@ -185,6 +194,7 @@ data class CrawlerUiState(
         statusMessage = message,
         pauseDecisionId = null,
         pauseReason = null,
+        pauseIdentityCase = null,
         pauseElapsedTimeMs = null,
         pauseFailedEdgeCount = null,
         pausedCapturedScreenCount = null,
@@ -210,6 +220,7 @@ data class CrawlerUiState(
         statusMessage = message,
         pauseDecisionId = null,
         pauseReason = null,
+        pauseIdentityCase = null,
         pauseElapsedTimeMs = null,
         pauseFailedEdgeCount = null,
         pausedCapturedScreenCount = null,
@@ -234,13 +245,17 @@ data class CrawlerUiState(
         fun idle(): CrawlerUiState = CrawlerUiState()
     }
 
-    private fun pauseMessage(reason: PauseReason): String {
+    private fun pauseMessage(reason: PauseReason, identityCase: IdentityCase?): String {
         return when (reason) {
             PauseReason.ELAPSED_TIME_EXCEEDED ->
                 "Deep crawl paused after reaching the elapsed-time checkpoint."
 
             PauseReason.FAILED_EDGE_COUNT_EXCEEDED ->
                 "Deep crawl paused after reaching the failed-edge checkpoint."
+
+            PauseReason.IDENTITY_CASE ->
+                "Deep crawl paused on identity case ${identityCase?.id ?: "<unknown>"} " +
+                    "for ${identityCase?.raisedOn ?: "<unknown screen>"}."
         }
     }
 }
@@ -501,6 +516,12 @@ data class ScreenCrawlState(
     val route: CrawlRoute,
     val runLevel: RunLevelState? = null,
     val edgesByElement: Map<PressableElementLinkKey, EdgeXmlView> = emptyMap(),
+    /**
+     * The open operator cases involving this screen, written as `<identity-case ref>` pointers.
+     * Derived from the crawl's case file on every write, never stored on its own
+     * ([IdentityCasePointers]).
+     */
+    val openCaseIds: List<String> = emptyList(),
 )
 
 data class CrawlManifest(

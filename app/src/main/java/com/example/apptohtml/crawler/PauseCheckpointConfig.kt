@@ -10,6 +10,9 @@ data class PauseCheckpointConfig(
 enum class PauseReason {
     ELAPSED_TIME_EXCEEDED,
     FAILED_EDGE_COUNT_EXCEEDED,
+
+    /** A screen's identity needs an operator; the case says which and why ([IdentityCase]). */
+    IDENTITY_CASE,
 }
 
 data class PauseProgressSnapshot(

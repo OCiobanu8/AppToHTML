@@ -209,9 +209,14 @@ object CrawlerSession {
         _uiState.value = current.withTraversingChildren(message)
     }
 
+    /**
+     * Pauses the crawl for an operator decision and suspends until it arrives. [identityCase] is the
+     * case shown to the operator when [reason] is [PauseReason.IDENTITY_CASE].
+     */
     suspend fun pauseForDecision(
         reason: PauseReason,
         snapshot: PauseProgressSnapshot,
+        identityCase: IdentityCase? = null,
     ): PauseDecision {
         val deferred = synchronized(this) {
             val current = _uiState.value
@@ -238,6 +243,7 @@ object CrawlerSession {
                 decisionId = decisionId,
                 reason = reason,
                 snapshot = snapshot,
+                identityCase = identityCase,
             )
             logSafely(
                 "Paused deep crawl for requestId=$requestId decisionId=$decisionId reason=${reason.name.lowercase()}."

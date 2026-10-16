@@ -167,10 +167,6 @@ class CrawlRunTrackerTest {
             startedAt = 1L,
             screens = listOf(rootScreen, childScreen),
             edges = listOf(edge),
-            dedupKeyToScreenId = linkedMapOf(
-                testDedupKey(rootScreen.identity) to rootScreen.screenId,
-                testDedupKey(childScreen.identity) to childScreen.screenId,
-            ),
             rootScreenId = "screen_00000",
             nextScreenSequence = 2,
             nextEdgeSequence = 1,
@@ -181,13 +177,14 @@ class CrawlRunTrackerTest {
             ScreenExpansionStatus.IN_PROGRESS,
             tracker.findScreen("screen_00001")?.expansionStatus,
         )
+        // Dedup now runs the known identities against a screen; hydrating must make every loaded
+        // screen one of them, under its own id.
         assertEquals(
-            "screen_00000",
-            tracker.findScreenIdByIdentity(rootScreen.identity),
-        )
-        assertEquals(
-            "screen_00001",
-            tracker.findScreenIdByIdentity(childScreen.identity),
+            mapOf(
+                "screen_00000" to rootScreen.identity,
+                "screen_00001" to childScreen.identity,
+            ),
+            tracker.knownIdentities(),
         )
         assertEquals(listOf("edge_000"), tracker.outboundEdges("screen_00000").map { it.edgeId })
     }
@@ -212,10 +209,6 @@ class CrawlRunTrackerTest {
             startedAt = 1L,
             screens = listOf(rootScreen, laterScreen),
             edges = emptyList(),
-            dedupKeyToScreenId = linkedMapOf(
-                testDedupKey(rootScreen.identity) to rootScreen.screenId,
-                testDedupKey(laterScreen.identity) to laterScreen.screenId,
-            ),
             rootScreenId = "screen_00000",
             nextScreenSequence = 8,
             nextEdgeSequence = 0,
@@ -240,7 +233,6 @@ class CrawlRunTrackerTest {
                 startedAt = 1L,
                 screens = listOf(screen),
                 edges = emptyList(),
-                dedupKeyToScreenId = linkedMapOf(testDedupKey(screen.identity) to screen.screenId),
                 rootScreenId = screen.screenId,
                 nextScreenSequence = 5,
                 nextEdgeSequence = 0,
@@ -274,10 +266,6 @@ class CrawlRunTrackerTest {
                 startedAt = 1L,
                 screens = listOf(s0, s1),
                 edges = emptyList(),
-                dedupKeyToScreenId = linkedMapOf(
-                    testDedupKey(s0.identity) to s0.screenId,
-                    testDedupKey(s1.identity) to s1.screenId,
-                ),
                 rootScreenId = s0.screenId,
                 nextScreenSequence = 2,
                 nextEdgeSequence = 0,

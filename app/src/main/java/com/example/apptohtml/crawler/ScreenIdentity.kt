@@ -79,6 +79,31 @@ data class ScreenIdentity(
 
     fun withName(name: ScreenNameIdentity): ScreenIdentity = copy(name = name)
 
+    /**
+     * Equality treats [traits] as the order-free conjunction [TraitEvaluator] evaluates: two
+     * identities asserting the same things are equal however the list is ordered or repeated. The
+     * list itself keeps its order, so a writer still reproduces what it was given byte for byte.
+     * Every other field compares as a data class would.
+     */
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        return other is ScreenIdentity &&
+            packageName == other.packageName &&
+            rootClassName == other.rootClassName &&
+            elements == other.elements &&
+            name == other.name &&
+            traits.toSet() == other.traits.toSet()
+    }
+
+    override fun hashCode(): Int {
+        var result = packageName.hashCode()
+        result = 31 * result + rootClassName.hashCode()
+        result = 31 * result + elements.hashCode()
+        result = 31 * result + name.hashCode()
+        result = 31 * result + traits.toSet().hashCode()
+        return result
+    }
+
     companion object {
         /**
          * The identity of nothing: no package, no root class, no elements, no traits.

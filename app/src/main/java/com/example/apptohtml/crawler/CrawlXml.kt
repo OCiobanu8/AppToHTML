@@ -12,21 +12,85 @@ import org.w3c.dom.Node
  * write but not the following read.
  */
 
-/** Escapes [input] for use in an XML attribute value or text node. */
+/**
+ * Escapes [input] for use in an XML attribute value or text node.
+ *
+ * Line breaks and tabs are written as character references because an XML parser normalises a raw
+ * one inside an attribute value to a space: a two-line label would otherwise come back as one line,
+ * and an identity settled on it would no longer hold on its own reloaded capture.
+ *
+ * Text is passed through [xmlRepresentable] first, so a character XML 1.0 cannot carry is written as
+ * U+FFFD rather than making the whole file unreadable.
+ */
 internal fun escapeXml(input: String): String = buildString(input.length) {
-    input.forEach { char ->
-        append(
-            when (char) {
-                '&' -> "&amp;"
-                '<' -> "&lt;"
-                '>' -> "&gt;"
-                '"' -> "&quot;"
-                '\'' -> "&apos;"
-                else -> char
-            }
-        )
+    xmlRepresentable(input).forEach { char ->
+        when (char) {
+            '&' -> append("&amp;")
+            '<' -> append("&lt;")
+            '>' -> append("&gt;")
+            '"' -> append("&quot;")
+            '\'' -> append("&apos;")
+            '\n' -> append("&#10;")
+            '\r' -> append("&#13;")
+            '\t' -> append("&#9;")
+            else -> append(char)
+        }
     }
 }
+
+/**
+ * [input] with every character XML 1.0 cannot carry at all — a control character other than tab, line
+ * feed and carriage return, U+FFFE or U+FFFF, or half of a surrogate pair — replaced by U+FFFD. A
+ * complete surrogate pair (an emoji) is kept.
+ *
+ * The one home of that rule. It is applied wherever text enters the crawler from the device — every
+ * tree the crawl receives, and the live attributes a click is matched against — as well as by
+ * [escapeXml]. That is what keeps a screen's saved capture and the crawler's own view of it the same
+ * text: if only the writer replaced these characters, a fresh crawl and a resumed one would judge
+ * different labels.
+ */
+internal fun xmlRepresentable(input: String): String {
+    if (input.none(::isUnrepresentableCandidate)) return input
+    return buildString(input.length) {
+        var index = 0
+        while (index < input.length) {
+            val char = input[index]
+            val pairedSurrogate = char.isHighSurrogate() &&
+                index + 1 < input.length &&
+                input[index + 1].isLowSurrogate()
+            when {
+                pairedSurrogate -> {
+                    append(char).append(input[index + 1])
+                    index += 1
+                }
+                char == '\n' || char == '\r' || char == '\t' -> append(char)
+                isUnrepresentableCandidate(char) -> append('\uFFFD')
+                else -> append(char)
+            }
+            index += 1
+        }
+    }
+}
+
+/** This tree with [xmlRepresentable] applied to every text a node carries. */
+internal fun AccessibilityNodeSnapshot.xmlRepresentable(): AccessibilityNodeSnapshot = copy(
+    className = className?.let(::xmlRepresentable),
+    packageName = packageName?.let(::xmlRepresentable),
+    viewIdResourceName = viewIdResourceName?.let(::xmlRepresentable),
+    text = text?.let(::xmlRepresentable),
+    contentDescription = contentDescription?.let(::xmlRepresentable),
+    children = children.map { child -> child.xmlRepresentable() },
+)
+
+/**
+ * A character XML 1.0 cannot carry on its own. A surrogate may still be half of a valid pair, which
+ * [xmlRepresentable] keeps.
+ */
+private fun isUnrepresentableCandidate(char: Char): Boolean =
+    (char < ' ' && char != '\n' && char != '\r' && char != '\t') ||
+        char.isSurrogate() ||
+        char == '\uFFFE' ||
+        char == '\uFFFF'
 
 /** The attribute [name] when present and non-empty, else null. */
 internal fun Element.optionalAttributeOrNull(name: String): String? {

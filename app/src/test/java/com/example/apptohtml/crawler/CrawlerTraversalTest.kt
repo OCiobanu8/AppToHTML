@@ -309,18 +309,22 @@ class CrawlerTraversalTest {
 
             val secondTrigger = testElement(label = "Open Again", resourceId = "com.example:id/open_again")
             val secondChildSnapshot = testSnapshot("  google   screen ", "Primary Action")
-            val existingScreenId = tracker.findScreenIdByIdentity(
-                ScreenIdentity.fromRoot(
-                    secondChildSnapshot.mergedRoot ?: error("fixture snapshot has no merged root")
-                ).withName(
-                    ScreenNaming.buildScreenNameIdentity(
-                        screenName = secondChildSnapshot.screenName,
-                        packageName = secondChildSnapshot.packageName,
-                        root = secondChildSnapshot.mergedRoot,
-                    )
-                )
+            val secondRoot = secondChildSnapshot.mergedRoot ?: error("fixture snapshot has no merged root")
+            val secondName = ScreenNaming.buildScreenNameIdentity(
+                screenName = secondChildSnapshot.screenName,
+                packageName = secondChildSnapshot.packageName,
+                root = secondChildSnapshot.mergedRoot,
             )
+            // The first child was captured without traits, so it is unsettled and is found by the
+            // unsettled-name rule (a2h-c2b.3 scope call C) — the same strong name, normalized.
+            val recognition = ScreenRecognition.recognize(
+                observed = ScreenIdentity.fromRoot(secondRoot).withName(secondName),
+                observedContext = TraitEvaluationContext.of(secondRoot, secondName),
+                known = tracker.knownIdentities(),
+            )
+            val existingScreenId = (recognition as ScreenRecognition.Result.Link).screenId
 
+            assertEquals(ScreenRecognition.Via.UNSETTLED_NAME, recognition.via)
             assertEquals(firstChildScreenId, existingScreenId)
 
             tracker.addEdge(
