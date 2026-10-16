@@ -30,6 +30,8 @@ import com.example.apptohtml.crawler.CrawlerPhase
 import com.example.apptohtml.crawler.CrawlerSession
 import com.example.apptohtml.crawler.DeepCrawlCoordinator
 import com.example.apptohtml.crawler.EntryScreenResetOutcome
+import com.example.apptohtml.crawler.IdentityCase
+import com.example.apptohtml.crawler.xmlRepresentable
 import com.example.apptohtml.crawler.LiveActionIds
 import com.example.apptohtml.crawler.LiveNodeActions
 import com.example.apptohtml.crawler.LiveNodeAttributes
@@ -105,11 +107,13 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
     private fun AccessibilityNodeInfo.toLiveNodeAttributes(): LiveNodeAttributes {
         val bounds = Rect()
         getBoundsInScreen(bounds)
+        // The same text the crawl's trees carry (DeepCrawlCoordinator sees them through
+        // xmlRepresentable), so a label recorded from a tree still matches the live node to click.
         return LiveNodeAttributes(
-            className = className?.toString(),
-            viewIdResourceName = viewIdResourceName,
-            text = text?.toString(),
-            contentDescription = contentDescription?.toString(),
+            className = className?.toString()?.let(::xmlRepresentable),
+            viewIdResourceName = viewIdResourceName?.let(::xmlRepresentable),
+            text = text?.toString()?.let(::xmlRepresentable),
+            contentDescription = contentDescription?.toString()?.let(::xmlRepresentable),
             boundsShortString = bounds.toShortString(),
             visibleToUser = isVisibleToUser,
             enabled = isEnabled,
@@ -395,6 +399,17 @@ class AppToHtmlAccessibilityService : AccessibilityService() {
                         return CrawlerSession.pauseForDecision(
                             reason = reason,
                             snapshot = snapshot,
+                        )
+                    }
+
+                    override suspend fun awaitIdentityCaseDecision(
+                        case: IdentityCase,
+                        snapshot: PauseProgressSnapshot,
+                    ): PauseDecision {
+                        return CrawlerSession.pauseForDecision(
+                            reason = PauseReason.IDENTITY_CASE,
+                            snapshot = snapshot,
+                            identityCase = case,
                         )
                     }
 

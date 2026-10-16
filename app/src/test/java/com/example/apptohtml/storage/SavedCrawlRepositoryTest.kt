@@ -5,6 +5,7 @@ import com.example.apptohtml.crawler.CrawlEdgeStatus
 import com.example.apptohtml.crawler.CrawlRoute
 import com.example.apptohtml.crawler.CrawlRunStatus
 import com.example.apptohtml.crawler.EdgeXmlView
+import com.example.apptohtml.crawler.IdentityCaseStore
 import com.example.apptohtml.crawler.ParentEdgeRef
 import com.example.apptohtml.crawler.PressableElement
 import com.example.apptohtml.crawler.RunLevelState
@@ -15,6 +16,7 @@ import com.example.apptohtml.crawler.ScreenNaming
 import com.example.apptohtml.crawler.ScreenSnapshot
 import com.example.apptohtml.crawler.toLinkKey
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -95,6 +97,32 @@ class SavedCrawlRepositoryTest {
         assertTrue(snapshot!!.hasPendingWork)
         assertEquals(3, snapshot.screens.size)
         assertEquals(1, snapshot.screens.first { it.screenId == "screen_00000" }.pendingEdgeCount)
+    }
+
+    /**
+     * `a2h-c2b.3` round-1 D4. The loader refuses a case file it cannot trust; the screen listing the
+     * saved crawl must show why rather than crash on it.
+     */
+    @Test
+    fun snapshot_reports_a_refused_case_file_instead_of_throwing() {
+        val crawlDir = tempFolder.newFolder("crawl")
+        writeScreen(
+            dir = crawlDir,
+            screenId = "screen_00000",
+            screenName = "Home",
+            packageName = targetPackage,
+            depth = 0,
+            expansionStatus = ScreenExpansionStatus.COMPLETE,
+            isRoot = true,
+        )
+        File(crawlDir, IdentityCaseStore.FILE_NAME).writeText("not xml", Charsets.UTF_8)
+        val repository = SavedCrawlRepository { crawlDir }
+
+        val snapshot = repository.snapshot(targetPackage)
+
+        assertNotNull(snapshot)
+        assertTrue(snapshot!!.loadError.orEmpty(), snapshot.loadError.orEmpty().contains(IdentityCaseStore.FILE_NAME))
+        assertFalse(snapshot.hasPendingWork)
     }
 
     private fun writeScreen(

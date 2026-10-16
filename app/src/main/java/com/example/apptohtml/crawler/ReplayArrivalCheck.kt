@@ -25,15 +25,7 @@ internal object ReplayArrivalCheck {
          */
         data class TraitsDoNotHold(val failing: List<Trait>) : Verdict {
             /** The failing assertions, for the divergence message. */
-            fun describe(): String = failing.joinToString("; ") { trait ->
-                when (trait) {
-                    is HasList ->
-                        "no list ${trait.containerResourceId} with ${trait.minRows}+ rows carrying " +
-                            trait.rowChildResourceIds.joinToString(", ")
-                    is HasControl -> "missing control ${trait.element.fingerprint.label}"
-                    is LacksControl -> "unexpected control ${trait.element.fingerprint.label}"
-                }
-            }
+            fun describe(): String = describeFailing(failing)
         }
     }
 
@@ -49,10 +41,10 @@ internal object ReplayArrivalCheck {
      * three or more rows carrying these ids" stays true as the rows change — so they add the one
      * signal that is both stronger than the name and stable across visits.
      *
-     * **An unsettled identity is not consulted at all**, and that is what makes this safe to add.
-     * Every identity a capture proposes carries no traits (proposing them is `a2h-c2b.3`), so it is
-     * unsettled, so every existing crawl reaches exactly the verdict it reached before. Only a
-     * screen an operator deliberately settled can newly fail here.
+     * **An unsettled identity is not consulted at all.** A screen settles only when its proposal held
+     * on its own capture ([IdentitySettlement]), and a screen left unsettled — a case was opened, or a
+     * crawl was saved before machine proposals — reaches exactly the verdict the name alone gives.
+     * Traits that do not hold here are a divergence for an operator, which the caller raises as a case.
      */
     fun check(
         expected: ScreenIdentity,

@@ -6,15 +6,23 @@ import java.io.File
 data class LoadedCrawlState(
     val screens: List<CrawlScreenRecord>,
     val edges: List<CrawlEdgeRecord>,
-    val dedupKeyToScreenId: LinkedHashMap<String, String>,
     val rootScreenId: String?,
     val nextScreenSequence: Int,
     val nextEdgeSequence: Int,
     val runLevel: RunLevelState?,
     val resolvedLinks: Map<String, Map<PressableElementLinkKey, String>>,
+    /** Every case in the crawl's case file, open and closed. */
+    val cases: List<IdentityCase> = emptyList(),
 )
 
 object SavedCrawlLoader {
+    /**
+     * The saved crawl in [crawlDir], or null when there is none.
+     *
+     * Throws [MalformedIdentityCases] when the case file cannot be read, or a screen points at a case
+     * the file does not hold open: a resume that dropped a case would carry on past a divergence an
+     * operator was meant to see.
+     */
     fun load(crawlDir: File): LoadedCrawlState? {
         if (!crawlDir.exists() || !crawlDir.isDirectory) return null
         val xmlFiles = crawlDir.listFiles()
@@ -26,12 +34,14 @@ object SavedCrawlLoader {
         data class Loaded(val file: File, val payload: ScreenXmlPayload)
 
         val loadedList = mutableListOf<Loaded>()
+        val unreadable = mutableListOf<File>()
         for (file in xmlFiles) {
             val payload = ScreenXmlReader.readFull(file)
             if (payload == null) {
                 runCatching {
                     DiagnosticLogger.error("Skipping malformed crawl XML: ${file.absolutePath}")
                 }
+                unreadable += file
                 continue
             }
             loadedList += Loaded(file, payload)
@@ -39,7 +49,9 @@ object SavedCrawlLoader {
 
         val screens = mutableListOf<CrawlScreenRecord>()
         val edges = mutableListOf<CrawlEdgeRecord>()
-        val dedupKeyToScreenId = LinkedHashMap<String, String>()
+        val caseFile = IdentityCaseStore.fileIn(crawlDir)
+        val cases = IdentityCaseStore.read(caseFile)
+        val openCasesById = cases.filter { it.status == IdentityCaseStatus.OPEN }.associateBy { it.id }
         val screensById = mutableMapOf<String, CrawlScreenRecord>()
         val htmlFilenameByScreenId = mutableMapOf<String, String>()
         val resolvedLinks = mutableMapOf<String, MutableMap<PressableElementLinkKey, String>>()
@@ -102,8 +114,13 @@ object SavedCrawlLoader {
                 rootScreenId = head.screenId
                 runLevel = head.runLevel
             }
-            DedupPolicy.keyFor(identity)?.let { dedupKey ->
-                dedupKeyToScreenId.putIfAbsent(dedupKey, head.screenId)
+            head.openCaseIds.firstOrNull { id ->
+                openCasesById[id]?.involvedScreenIds?.contains(head.screenId) != true
+            }?.let { dangling ->
+                throw MalformedIdentityCases(
+                    "${xmlFile.absolutePath} points at case $dangling, which ${caseFile.absolutePath} " +
+                        "does not hold open for ${head.screenId}.",
+                )
             }
         }
 
@@ -157,20 +174,43 @@ object SavedCrawlLoader {
             }
         }
 
+        val loadedScreenIds = screens.mapTo(hashSetOf()) { it.screenId }
+        cases.forEach { case ->
+            case.involvedScreenIds.firstOrNull { it !in loadedScreenIds }?.let { missing ->
+                // An operator editing a case's screen and breaking its XML is the likely cause; name
+                // that file rather than blame the case.
+                val brokenFile = unreadable.firstOrNull { it.name.startsWith("${missing}_") }
+                throw MalformedIdentityCases(
+                    if (brokenFile != null) {
+                        "Case ${case.id} in ${caseFile.absolutePath} names $missing, whose XML " +
+                            "${brokenFile.absolutePath} could not be read."
+                    } else {
+                        "Case ${case.id} in ${caseFile.absolutePath} names $missing, which this crawl does not hold."
+                    },
+                )
+            }
+        }
+
         return LoadedCrawlState(
             screens = screens,
             edges = edges,
-            dedupKeyToScreenId = dedupKeyToScreenId,
             rootScreenId = rootScreenId,
             nextScreenSequence = maxScreenSeq + 1,
             nextEdgeSequence = maxEdgeSeq + 1,
             runLevel = runLevel,
             resolvedLinks = resolvedLinks,
+            cases = cases,
         )
     }
 
-    private fun isCrawlScreenXml(file: File): Boolean {
+    /**
+     * Whether [file] is a screen's own XML — not its merged-accessibility sibling, and not the crawl's
+     * case file, which sits in the same folder and would otherwise be parsed as a malformed screen.
+     */
+    internal fun isCrawlScreenXml(file: File): Boolean {
         val name = file.name
-        return name.endsWith(".xml") && !name.endsWith("_merged_accessibility.xml")
+        return name.endsWith(".xml") &&
+            !name.endsWith("_merged_accessibility.xml") &&
+            name != IdentityCaseStore.FILE_NAME
     }
 }

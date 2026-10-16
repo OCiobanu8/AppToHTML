@@ -345,7 +345,9 @@ class ScreenIdentityCharacterizationTest {
             depth = 0,
         )
 
-        assertEquals(null, tracker.findScreenIdByIdentity(weak))
+        // Dedup now resolves through ScreenRecognition. An unsettled, weak-titled screen gets no name
+        // fallback (a2h-c2b.3 scope call C), so an identical one is a new screen, never a link.
+        assertEquals(ScreenRecognition.Result.New, recognize(weak, tracker))
     }
 
     // ---- position must never take part in identity ------------------------------------------
@@ -534,11 +536,24 @@ class ScreenIdentityCharacterizationTest {
             depth = 0,
         )
 
-        assertEquals("screen_1", tracker.findScreenIdByIdentity(withName(identity)))
-        assertEquals(null, tracker.findScreenIdByIdentity(withName(other)))
+        assertEquals(
+            ScreenRecognition.Result.Link("screen_1", ScreenRecognition.Via.UNSETTLED_NAME),
+            recognize(withName(identity), tracker),
+        )
+        assertEquals(ScreenRecognition.Result.New, recognize(withName(other), tracker))
     }
 
     // ---- helpers -------------------------------------------------------------------------
+
+    /** Recognises [observed] against [tracker]'s known screens, on a tree from the target package. */
+    private fun recognize(observed: ScreenIdentity, tracker: CrawlRunTracker): ScreenRecognition.Result {
+        val tree = LifecycleTrees.buttons("probe", packageName = TARGET_PACKAGE)
+        return ScreenRecognition.recognize(
+            observed = observed,
+            observedContext = TraitEvaluationContext.of(tree, observed.name),
+            known = tracker.knownIdentities(),
+        )
+    }
 
     private suspend fun rewind(
         observed: AccessibilityNodeSnapshot,

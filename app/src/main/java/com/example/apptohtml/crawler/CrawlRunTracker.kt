@@ -6,10 +6,11 @@ class CrawlRunTracker private constructor(
     val startedAt: Long,
     private val screens: MutableList<CrawlScreenRecord>,
     private val edges: MutableList<CrawlEdgeRecord>,
-    private val dedupKeyToScreenId: LinkedHashMap<String, String>,
+    private val cases: MutableList<IdentityCase>,
     private var rootScreenId: String?,
     private var nextScreenSequence: Int,
     private var nextEdgeSequence: Int,
+    private var nextCaseSequence: Int,
 ) {
     val currentRootScreenId: String?
         get() = rootScreenId
@@ -24,10 +25,11 @@ class CrawlRunTracker private constructor(
         startedAt = startedAt,
         screens = mutableListOf(),
         edges = mutableListOf(),
-        dedupKeyToScreenId = linkedMapOf(),
+        cases = mutableListOf(),
         rootScreenId = null,
         nextScreenSequence = 0,
         nextEdgeSequence = 0,
+        nextCaseSequence = 0,
     )
 
     fun nextScreenSequenceNumber(): Int = nextScreenSequence++
@@ -59,9 +61,6 @@ class CrawlRunTracker private constructor(
             depth = depth,
             expansionStatus = expansionStatus,
         )
-        DedupPolicy.keyFor(identity)?.let { dedupKey ->
-            dedupKeyToScreenId.putIfAbsent(dedupKey, screenId)
-        }
         if (depth == 0) {
             rootScreenId = screenId
         }
@@ -159,11 +158,72 @@ class CrawlRunTracker private constructor(
         )
     }
 
-    /** Resolves through [DedupPolicy]: null when this screen may not be catalogued at all. */
-    fun findScreenIdByIdentity(identity: ScreenIdentity): String? {
-        val dedupKey = DedupPolicy.keyFor(identity) ?: return null
-        return dedupKeyToScreenId[dedupKey]
+    /**
+     * Every known screen's identity by screen id, in capture order — what [ScreenRecognition] runs
+     * against the screen in front of the crawler. Dedup resolves through these, not a name index.
+     */
+    fun knownIdentities(): Map<String, ScreenIdentity> =
+        screens.associateTo(linkedMapOf()) { it.screenId to it.identity }
+
+    /**
+     * Opens a case raised on [raisedOn], naming every screen in [relatedScreenIds], with the next
+     * case id — unless an open case of the same [kind] on the same screens already exists. That case
+     * keeps its id but takes the new [detail] and [rejectedProposal]: the same divergence seen again
+     * (a replay that fails on every resume) is one case for the operator, not a new one each time, and
+     * it describes what failed this time, not the first time. The caller writes it out; the tracker
+     * only holds it.
+     */
+    fun openCase(
+        kind: IdentityCaseKind,
+        raisedOn: String,
+        relatedScreenIds: List<String>,
+        detail: String,
+        rejectedProposal: List<Trait> = emptyList(),
+    ): IdentityCase {
+        val related = relatedScreenIds.filterNot { it == raisedOn }.distinct().sorted()
+        val existingIndex = cases.indexOfFirst { existing ->
+            existing.status == IdentityCaseStatus.OPEN &&
+                existing.kind == kind &&
+                existing.raisedOn == raisedOn &&
+                existing.relatedScreenIds == related
+        }
+        if (existingIndex >= 0) {
+            val refreshed = cases[existingIndex].copy(detail = detail, rejectedProposal = rejectedProposal)
+            cases[existingIndex] = refreshed
+            return refreshed
+        }
+        val case = IdentityCase(
+            id = "case_%03d".format(nextCaseSequence++),
+            status = IdentityCaseStatus.OPEN,
+            kind = kind,
+            raisedOn = raisedOn,
+            relatedScreenIds = related,
+            detail = detail,
+            rejectedProposal = rejectedProposal,
+        )
+        cases += case
+        return case
     }
+
+    /**
+     * Closes [caseId]: it stays in the case file as history, and every pointer to it disappears on
+     * the involved screens' next write. The contract `a2h-c2b.13` builds on; no crawl path closes a
+     * case yet, so only tests call this.
+     */
+    internal fun closeCase(caseId: String) {
+        val index = cases.indexOfFirst { it.id == caseId }
+        require(index >= 0) { "Unknown case $caseId." }
+        cases[index] = cases[index].copy(status = IdentityCaseStatus.CLOSED)
+    }
+
+    /** Every case, open and closed, sorted by id. */
+    fun cases(): List<IdentityCase> = cases.sortedBy(IdentityCase::id)
+
+    /** The open cases involving [screenId], as the ids its pointers name. */
+    fun openCaseIdsFor(screenId: String): List<String> = cases
+        .filter { it.status == IdentityCaseStatus.OPEN && screenId in it.involvedScreenIds }
+        .map(IdentityCase::id)
+        .sorted()
 
     fun findScreen(screenId: String): CrawlScreenRecord? {
         return screens.firstOrNull { screen -> screen.screenId == screenId }
@@ -206,10 +266,10 @@ class CrawlRunTracker private constructor(
             startedAt: Long,
             screens: List<CrawlScreenRecord>,
             edges: List<CrawlEdgeRecord>,
-            dedupKeyToScreenId: LinkedHashMap<String, String>,
             rootScreenId: String?,
             nextScreenSequence: Int,
             nextEdgeSequence: Int,
+            cases: List<IdentityCase> = emptyList(),
         ): CrawlRunTracker {
             val maxScreenSeq = screens.maxOfOrNull { parseScreenSequence(it.screenId) ?: -1 } ?: -1
             require(nextScreenSequence >= maxScreenSeq + 1) {
@@ -232,10 +292,11 @@ class CrawlRunTracker private constructor(
                 startedAt = startedAt,
                 screens = screens.toMutableList(),
                 edges = edges.toMutableList(),
-                dedupKeyToScreenId = LinkedHashMap(dedupKeyToScreenId),
+                cases = cases.toMutableList(),
                 rootScreenId = rootScreenId,
                 nextScreenSequence = nextScreenSequence,
                 nextEdgeSequence = nextEdgeSequence,
+                nextCaseSequence = (cases.maxOfOrNull { parseCaseSequence(it.id) ?: -1 } ?: -1) + 1,
             )
         }
 
@@ -244,6 +305,9 @@ class CrawlRunTracker private constructor(
             if (!screenId.startsWith(prefix)) return null
             return screenId.removePrefix(prefix).toIntOrNull()
         }
+
+        internal fun parseCaseSequence(caseId: String): Int? =
+            caseId.removePrefix("case_").takeIf { caseId.startsWith("case_") }?.toIntOrNull()
 
         internal fun parseEdgeSequence(edgeId: String): Int? {
             val prefix = "edge_"

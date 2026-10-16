@@ -62,8 +62,14 @@ Survey a whole crawl — every screen validated against its own capture:
 
 ## Settling a screen by hand
 
-1. Run with `-Target` on a fresh capture. It reports `UNSETTLED`: a capture proposes an element set
-   but asserts nothing.
+1. Run with `-Target` on the screen. A crawl capture carries the traits the crawler proposed and
+   settled. A screen the crawler could not settle — it raised a case because its proposal did not
+   hold, or because another screen claimed it — and every `capture-screen` snapshot report
+   `UNSETTLED`: they assert nothing yet. A settled screen whose traits stopped holding keeps them, so
+   it reports `DOES_NOT_HOLD`.
+
+   The crawl's open cases are listed in `identity-cases.xml` in the crawl folder; each screen a case
+   involves carries an `<identity-case ref>` pointer. Resuming the crawl does **not** close a case.
 2. Add a `<traits>` block to the `<screen-identity>` element in **both** the `.xml` and the `.html`.
    The two must agree; if they differ the tool refuses and names the difference rather than picking
    one, because picking one would discard the edit made to the other.
@@ -111,4 +117,5 @@ container and row ids out of the *tree*, which stay stable even when the rows th
   apply, never applied for you.
 - **Never picks a winner** on a uniqueness collision, or between a disagreeing `.xml` and `.html`.
   Both are operator decisions.
-- Does not propose traits. Machine proposal is `a2h-c2b.3`; today every capture starts `UNSETTLED`.
+- Does not propose traits. The crawler does that at capture (see `documentation/screen-identity.md`);
+  this tool only checks what a screen asserts.

@@ -20,6 +20,8 @@ data class ScreenCrawlHead(
     val parent: ParentEdgeRef?,
     val route: CrawlRoute,
     val runLevel: RunLevelState?,
+    /** The case ids this screen's `<identity-case ref>` pointers name, as written. */
+    val openCaseIds: List<String> = emptyList(),
 )
 
 data class ScreenXmlPayload(
@@ -153,6 +155,7 @@ object ScreenXmlReader {
             parent = parent,
             route = route,
             runLevel = runLevel,
+            openCaseIds = IdentityCasePointers.read(crawl),
         )
     }
 

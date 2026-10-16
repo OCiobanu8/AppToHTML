@@ -29,7 +29,11 @@ skipped traversal outcomes.
 - Restores the root entry screen and replays known routes before expanding a discovered screen.
 - Runs breadth-first traversal across safe pressable elements until the frontier is exhausted or the user stops.
 - Persists crawl progress incrementally, including `crawl-index.json`, `crawl-graph.json`, and `crawl-graph.html`.
-- Pauses the crawl for elapsed-time checkpoints and failed-edge checkpoints.
+- Pauses the crawl for elapsed-time checkpoints, failed-edge checkpoints, and identity cases (see
+  [screen-identity.md](screen-identity.md#identity-cases)).
+- Recognises an already-captured screen by running the known identities against it, and proposes an
+  identity for a screen it does not recognise (see
+  [screen-identity.md](screen-identity.md#what-a-capture-proposes)).
 - Skips any click that leaves the target app, automatically and without asking.
 
 ### `PauseCheckpointTracker`

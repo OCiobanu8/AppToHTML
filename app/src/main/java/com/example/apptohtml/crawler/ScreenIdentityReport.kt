@@ -104,11 +104,15 @@ internal object ScreenIdentityReport {
         return Outcome(report.outcome.toStatus(), render(target, report))
     }
 
-    /** Every capture in [dir], each loaded as its own result so one bad pair does not hide the rest. */
+    /**
+     * Every capture in [dir], each loaded as its own result so one bad pair does not hide the rest.
+     * Which files are screens is the crawl loader's rule ([SavedCrawlLoader.isCrawlScreenXml]), so the
+     * tool and the crawler read the same set — the case file and merged siblings are not screens.
+     */
     fun loadKnownScreens(dir: File): List<Result<LoadedCapture>> =
         dir.listFiles()
             .orEmpty()
-            .filter { it.isFile && it.name.endsWith(".xml") && !it.name.endsWith("_merged_accessibility.xml") }
+            .filter { it.isFile && SavedCrawlLoader.isCrawlScreenXml(it) }
             .sortedBy { it.name }
             .map(CaptureIdentitySource::load)
 

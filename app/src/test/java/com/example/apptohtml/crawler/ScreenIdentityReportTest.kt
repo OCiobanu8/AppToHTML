@@ -104,6 +104,34 @@ class ScreenIdentityReportTest {
         assertTrue(outcome.text.contains("beta.html"))
     }
 
+    /**
+     * `a2h-c2b.3` round-4 D1. A crawl that raised a case has `identity-cases.xml` beside its screens;
+     * the tool must read the same screen set as the crawler, or every screen of such a crawl reports
+     * INVALID_INPUT and the operator cannot settle anything with it.
+     */
+    @Test
+    fun `the case file beside a crawl's screens is not taken for a known screen`() {
+        val dir = crawlOf("alpha", "beta")
+        File(dir, IdentityCaseStore.FILE_NAME).writeText(
+            IdentityCaseStore.serialize(
+                listOf(
+                    IdentityCase(
+                        id = "case_000",
+                        status = IdentityCaseStatus.OPEN,
+                        kind = IdentityCaseKind.PROPOSAL_DOES_NOT_HOLD,
+                        raisedOn = "alpha",
+                        relatedScreenIds = emptyList(),
+                        detail = "the proposal asserts nothing",
+                    ),
+                ),
+            ),
+        )
+
+        val loaded = ScreenIdentityReport.loadKnownScreens(dir)
+
+        assertEquals(listOf("alpha", "beta"), loaded.map { it.getOrThrow().screenId })
+    }
+
     @Test
     fun `a screen id is its file name, so two known screens cannot share one`() {
         // The SCOPE asks for duplicate screen ids to be INVALID_INPUT. They are unreachable: the id

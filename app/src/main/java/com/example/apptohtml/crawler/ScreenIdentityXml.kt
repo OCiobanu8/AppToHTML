@@ -77,8 +77,9 @@ internal object ScreenIdentityXml {
      * Writes [traits] as a `<traits>` block, omitted entirely when empty.
      *
      * An absent block and an empty one would mean the same thing — an identity asserting nothing —
-     * so only one of them is ever written. Traits keep the order the identity holds them in; making
-     * that order canonical is `a2h-c2b.10`, deliberately not decided here.
+     * so only one of them is ever written. Traits keep the order the identity holds them in. Equality
+     * ignores that order ([ScreenIdentity.equals]), and [TraitProposer] emits a canonical one, so the
+     * same proposal always writes the same bytes.
      */
     fun appendTraits(
         builder: StringBuilder,

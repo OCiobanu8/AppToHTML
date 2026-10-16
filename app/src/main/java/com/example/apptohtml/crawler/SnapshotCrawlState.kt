@@ -38,8 +38,8 @@ internal object SnapshotCrawlState {
         )
 
         // The content half comes from the FIRST VIEWPORT, deliberately not from the root the name
-        // was derived from — see this function's contract. No traits: proposing them is a2h-c2b.3,
-        // and an operator adds them by hand.
+        // was derived from — see this function's contract. No traits: a snapshot is not a crawl, so
+        // nothing proposes for it ([TraitProposer] runs only in the crawl); an operator adds them by hand.
         val identityRoot = snapshot.stepSnapshots.firstOrNull()?.root ?: root
         val identity = (identityRoot?.let(ScreenIdentity::fromRoot) ?: ScreenIdentity.EMPTY)
             .withName(name)

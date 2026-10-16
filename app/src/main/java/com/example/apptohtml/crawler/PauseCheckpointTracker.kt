@@ -31,6 +31,9 @@ internal class PauseCheckpointTracker(
             PauseReason.FAILED_EDGE_COUNT_EXCEEDED -> {
                 nextFailedEdgeBudget += config.subsequentFailedEdgeThreshold
             }
+
+            // A case is not a budget: continuing past one moves no checkpoint.
+            PauseReason.IDENTITY_CASE -> Unit
         }
     }
 
