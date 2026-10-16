@@ -33,6 +33,21 @@ node "…/cli.js" init code <slug> --gated
 ```
 Creates `.spear/<slug>/` with gated approvals required. Fill `SCOPE.md` before Gate 1.
 
+## Gate briefing (applies to every gate)
+
+A gate is a decision, so give the human what they need to make it, **in the chat**, before the
+approval buttons or question. A link alone is not enough, and neither is a recap.
+
+1. **Summary.** In a few lines: what is being approved, the key decisions or scope calls, what
+   changed since the last gate (amendments, grader findings, owner decisions), and the risks or
+   open questions.
+2. **Links to the full reading material** for this gate, each one clickable:
+   - Gate 1: `SCOPE.md`.
+   - Gate 2: `PLAN.md` and `ASSESS.md`.
+   - Gate 3: the evidence, grader reports, `RESOLVE.md` and the diff.
+3. **Then the choice.** Offer the approve/reject buttons or question after the briefing, never
+   instead of it.
+
 ## 2. ⛔ GATE 1 — Scope
 
 1. Run `spear scope --name <slug>` (exit 0 = valid).
@@ -44,7 +59,7 @@ Creates `.spear/<slug>/` with gated approvals required. Fill `SCOPE.md` before G
      passes) with both runs archived.
    - Set the round cap in `SCOPE.md` in the exact recognized form `` `MAX_ROUNDS = N` ``
      (backticked, `=` not `:`, on its own line). The CLI enforces it — do not hand-track rounds.
-3. **Present the full `SCOPE.md` with a clickable link and STOP for an explicit human "yes."**
+3. **Brief the gate (see "Gate briefing") with `SCOPE.md` and STOP for an explicit human "yes."**
 4. On approval only: `spear approve scope --name <slug>`.
 
 ## 3. ⛔ GATE 2 — Plan
@@ -52,7 +67,8 @@ Creates `.spear/<slug>/` with gated approvals required. Fill `SCOPE.md` before G
 1. Write `PLAN.md` + the feature-specific `ASSESS.md` additions; tick `[x] User confirmed`.
 2. Run `spear plan --name <slug>` (exit 0 = valid; it FAILS while unapproved — that proves the
    gate is real).
-3. **Present `PLAN.md` + the `ASSESS.md` additions with a clickable link and STOP for "yes."**
+3. **Brief the gate (see "Gate briefing") with `PLAN.md` and the `ASSESS.md` additions, and STOP
+   for "yes."**
 4. On approval only: `spear approve plan --name <slug>`.
 
 ## 4. Execute + Assess loop (one round per call)
@@ -82,8 +98,8 @@ Exit codes drive the loop: `0` converged/stop honored · `1` execution failure �
 
 ## 5. ⛔ GATE 3 — Resolve (the output gate + flywheel)
 
-1. After the loop converges, **present the finished work for explicit ACCEPT / REJECT before
-   anything is committed or closed.** For user-visible behavior this means a **real human/device
+1. After the loop converges, **brief the gate (see "Gate briefing") and ask for explicit
+   ACCEPT / REJECT before anything is committed or closed.** For user-visible behavior this means a **real human/device
    check**, recorded under `.spear/<slug>/evidence/`.
 2. **Flywheel item (every cycle).** If the cycle exposed a *recurring or systemic* mistake (a
    human correction at a gate, the same defect count stuck ≥2 rounds, a grader defect with no
@@ -120,5 +136,6 @@ Exit codes drive the loop: `0` converged/stop honored · `1` execution failure �
 - **Worktrees:** run every path relative to the worktree root; prefer
   `git rev-parse --show-toplevel` over hard-coded paths, and never `cd` into a sibling checkout.
 
-**Non-negotiables:** gates are unconditional and machine-checked; present a clickable link every
-time; never approve on silence; scoped commits only; vendored code stays read-only.
+**Non-negotiables:** gates are unconditional and machine-checked; brief every gate with a
+summary and clickable links; never approve on silence; scoped commits only; vendored code stays
+read-only.

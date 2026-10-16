@@ -482,22 +482,31 @@ internal class DeepCrawlCoordinator(
                 )
             }
         }
+        // The whole plan is recorded before the first save, so a Stop at any edge leaves the
+        // targets not yet reached on disk as pending, for the resume to visit. Empty on a resume.
+        val plannedWorkItems = traversalPlan.eligibleElements.map { element ->
+            EdgeWorkItem(
+                edgeId = tracker.addPendingEdge(
+                    parentScreenId = screenRecord.screenId,
+                    element = element,
+                ),
+                element = element,
+            )
+        }
         rewriteScreenXmlFor(tracker, snapshot, screenRecord.screenId, CrawlRunStatus.IN_PROGRESS)
         saveManifest(session, tracker, CrawlRunStatus.IN_PROGRESS)
 
         val edgeWorkItems = if (isResumeExpansion) {
+            // Edge ids were minted in plan order, so a resume visits in the order an
+            // uninterrupted crawl would have, and numbers the child screens the same way.
             resumeEdgeWorkItems(
                 tracker = tracker,
                 screenRecord = screenRecord,
                 snapshot = snapshot,
-            )
+                blacklist = blacklist,
+            ).sortedBy { CrawlRunTracker.parseEdgeSequence(it.edgeId) ?: Int.MAX_VALUE }
         } else {
-            traversalPlan.eligibleElements.map { element ->
-                EdgeWorkItem(
-                    edgeId = null,
-                    element = element,
-                )
-            }
+            plannedWorkItems
         }
 
         if (edgeWorkItems.isEmpty()) {
@@ -517,10 +526,7 @@ internal class DeepCrawlCoordinator(
         edgeWorkItems.forEachIndexed { index, workItem ->
             val element = workItem.element
             rememberElement(element)
-            val currentEdgeId = workItem.edgeId ?: tracker.addPendingEdge(
-                parentScreenId = screenRecord.screenId,
-                element = element,
-            )
+            val currentEdgeId = workItem.edgeId
             tracker.updateEdgeStatus(
                 edgeId = currentEdgeId,
                 status = CrawlEdgeStatus.IN_PROGRESS,
@@ -826,6 +832,7 @@ internal class DeepCrawlCoordinator(
         tracker: CrawlRunTracker,
         screenRecord: CrawlScreenRecord,
         snapshot: ScreenSnapshot,
+        blacklist: CrawlBlacklist,
     ): List<EdgeWorkItem> {
         val pendingEdges = tracker.outboundEdges(screenRecord.screenId)
             .filter { edge ->
@@ -845,12 +852,26 @@ internal class DeepCrawlCoordinator(
                     "resume_edge_missing screenId=${screenRecord.screenId} screenName=${quote(screenRecord.screenName)} " +
                         "edgeId=${edge.edgeId} element=${formatEdgeRecord(edge)}"
                 )
-            } else {
-                workItems += EdgeWorkItem(
-                    edgeId = edge.edgeId,
-                    element = liveElement,
-                )
+                return@forEach
             }
+            // The blacklist may have changed since the edge was recorded; the one in force now wins.
+            val skipReason = blacklist.skipReason(liveElement)
+            if (skipReason != null) {
+                tracker.updateEdgeStatus(
+                    edgeId = edge.edgeId,
+                    status = CrawlEdgeStatus.SKIPPED_BLACKLIST,
+                    message = skipReason,
+                )
+                crawlLogger?.info(
+                    "edge_skipped_blacklist parentScreenId=${screenRecord.screenId} parentScreenName=${quote(screenRecord.screenName)} " +
+                        "reason=${quote(skipReason)} resume=true element=${formatElement(liveElement)}"
+                )
+                return@forEach
+            }
+            workItems += EdgeWorkItem(
+                edgeId = edge.edgeId,
+                element = liveElement,
+            )
         }
         return workItems
     }
@@ -2406,7 +2427,7 @@ internal class DeepCrawlCoordinator(
     )
 
     private data class EdgeWorkItem(
-        val edgeId: String?,
+        val edgeId: String,
         val element: PressableElement,
     )
 

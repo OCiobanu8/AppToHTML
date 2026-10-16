@@ -1,6 +1,7 @@
 package com.example.apptohtml.crawler
 
 import com.example.apptohtml.model.SelectedAppRef
+import com.example.apptohtml.storage.SavedCrawlRepository
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
 import org.junit.Assert.assertEquals
@@ -3359,6 +3360,345 @@ class DeepCrawlCoordinatorTest {
         ),
         "C" to fakeScreen("C", "Legal info", elements = listOf(fakeElement("Licenses", 0)), transitions = emptyMap()),
     )
+
+    /**
+     * a2h-c2b.15, probe P1 of the a2h-c2b.3 round-2 grader: a Stop on an identity case while the root
+     * still has targets to visit must leave them on disk as pending, and the resume must visit them.
+     */
+    @Test
+    fun resume_afterStopOnAnIdentityCaseMidExpansion_visitsTheUnvisitedSiblings() = runBlocking {
+        val tempDir = Files.createTempDirectory("stop-mid-expansion-case").toFile()
+        try {
+            val screens = mapOf(
+                "A" to fakeScreen(
+                    id = "A",
+                    screenName = "Home",
+                    elements = listOf(
+                        fakeElement("Open About", 0),
+                        fakeElement("Skip Me", 1, editable = true),
+                        fakeElement("Open C", 2),
+                        fakeElement("Open D", 3),
+                    ),
+                    transitions = mapOf("Open About" to "B", "Open C" to "C", "Open D" to "D"),
+                ),
+                "B" to fakeScreen("B", "About phone", elements = listOf(idlessElement("Legal", 0)), transitions = emptyMap()),
+                "C" to fakeScreen("C", "Orders", elements = listOf(fakeElement("Track", 0)), transitions = emptyMap()),
+                "D" to fakeScreen("D", "Profile", elements = listOf(fakeElement("Edit", 0)), transitions = emptyMap()),
+            )
+            val first = ClickRecordingHost(entryScreenId = "A", screens = screens)
+            first.identityCaseDecision = PauseDecision.STOP
+            val stopped = coordinator(first, tempDir, timeProvider = { 1_000L }).crawl(
+                initialRoot = first.captureCurrentRootSnapshot("com.example.target")!!,
+                eventClassName = "Home",
+            )
+            assertTrue(stopped is DeepCrawlCoordinator.DeepCrawlOutcome.PartialAbort)
+            assertEquals("the crawl stopped on About's case", 1, first.identityCases.size)
+            val sessionDir = File(tempDir, "session-1000")
+
+            val rootXml = screenXmls(sessionDir).single { it.name.startsWith("screen_00000") }.readText()
+            assertTrue(rootXml, rootXml.contains("""expansion-status="in_progress""""))
+            assertEquals(
+                listOf(
+                    Triple("edge_000", "Skip Me", CrawlEdgeStatus.SKIPPED_BLACKLIST),
+                    Triple("edge_001", "Open About", CrawlEdgeStatus.CAPTURED),
+                    Triple("edge_002", "Open C", CrawlEdgeStatus.PENDING),
+                    Triple("edge_003", "Open D", CrawlEdgeStatus.PENDING),
+                ),
+                rootEdges(sessionDir),
+            )
+            val savedRoot = SavedCrawlRepository { sessionDir }.snapshot("com.example.target")!!
+                .screens.single { it.screenId == "screen_00000" }
+            assertEquals("the resume picker must show the unvisited targets", 2, savedRoot.pendingEdgeCount)
+
+            val second = ClickRecordingHost(entryScreenId = "A", screens = screens)
+            val resumed = coordinator(second, tempDir, timeProvider = { 1_000L }).crawl(
+                initialRoot = second.captureCurrentRootSnapshot("com.example.target")!!,
+                eventClassName = "Home",
+                intent = CrawlStartIntent.RESUME,
+                resumeMode = ResumeMode.ContinueAuto,
+            )
+
+            val summary = (resumed as DeepCrawlCoordinator.DeepCrawlOutcome.Completed).summary
+            assertEquals(4, summary.capturedScreenCount)
+            assertTrue(second.clicks.toString(), second.clicks.containsAll(listOf("Open C", "Open D")))
+            assertEquals("About is not captured a second time", 4, screenXmls(sessionDir).size)
+            assertFalse("a blacklisted target is never clicked", (first.clicks + second.clicks).contains("Skip Me"))
+            assertEquals(
+                "one edge per target, ids from before the Stop kept, none minted twice",
+                listOf(
+                    Triple("edge_000", "Skip Me", CrawlEdgeStatus.SKIPPED_BLACKLIST),
+                    Triple("edge_001", "Open About", CrawlEdgeStatus.CAPTURED),
+                    Triple("edge_002", "Open C", CrawlEdgeStatus.CAPTURED),
+                    Triple("edge_003", "Open D", CrawlEdgeStatus.CAPTURED),
+                ),
+                rootEdges(sessionDir),
+            )
+            assertEquals(
+                "the manifest, which lists every edge the tracker holds, has no duplicate",
+                listOf("edge_000", "edge_001", "edge_002", "edge_003"),
+                manifestEdgeIds(summary.manifestFile, parentScreenId = "screen_00000").sorted(),
+            )
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    /**
+     * a2h-c2b.15 round-1 D2: a resume visits the targets it kept in plan order, not tree order, so the
+     * child screens get the same ids as in a crawl that was never stopped.
+     */
+    @Test
+    fun resume_visitsKeptTargetsInPlanOrder_andNumbersChildrenAsAnUninterruptedCrawl() = runBlocking {
+        val screens = mapOf(
+            "A" to fakeScreen(
+                id = "A",
+                screenName = "Home",
+                // Tree order differs from plan order, which is by position: About, C, D.
+                elements = listOf(fakeElement("Open D", 3), fakeElement("Open About", 0), fakeElement("Open C", 2)),
+                transitions = mapOf("Open About" to "B", "Open C" to "C", "Open D" to "D"),
+            ),
+            "B" to fakeScreen("B", "About phone", elements = listOf(idlessElement("Legal", 0)), transitions = emptyMap()),
+            "C" to fakeScreen("C", "Orders", elements = listOf(fakeElement("Track", 0)), transitions = emptyMap()),
+            "D" to fakeScreen("D", "Profile", elements = listOf(fakeElement("Edit", 0)), transitions = emptyMap()),
+        )
+        fun childrenOfRoot(sessionDir: File) = SavedCrawlLoader.load(sessionDir)!!.edges
+            .filter { it.parentScreenId == "screen_00000" }
+            .sortedBy { it.edgeId }
+            .map { Triple(it.edgeId, it.label, it.childScreenId) }
+
+        val referenceDir = Files.createTempDirectory("resume-plan-order-reference").toFile()
+        val tempDir = Files.createTempDirectory("resume-plan-order").toFile()
+        try {
+            val reference = ClickRecordingHost(entryScreenId = "A", screens = screens)
+            coordinator(reference, referenceDir, timeProvider = { 1_000L }).crawl(
+                initialRoot = reference.captureCurrentRootSnapshot("com.example.target")!!,
+                eventClassName = "Home",
+            )
+            val uninterrupted = childrenOfRoot(File(referenceDir, "session-1000"))
+
+            val first = ClickRecordingHost(entryScreenId = "A", screens = screens)
+            first.identityCaseDecision = PauseDecision.STOP
+            coordinator(first, tempDir, timeProvider = { 1_000L }).crawl(
+                initialRoot = first.captureCurrentRootSnapshot("com.example.target")!!,
+                eventClassName = "Home",
+            )
+            val second = ClickRecordingHost(entryScreenId = "A", screens = screens)
+            coordinator(second, tempDir, timeProvider = { 1_000L }).crawl(
+                initialRoot = second.captureCurrentRootSnapshot("com.example.target")!!,
+                eventClassName = "Home",
+                intent = CrawlStartIntent.RESUME,
+                resumeMode = ResumeMode.ContinueAuto,
+            )
+
+            assertEquals(
+                listOf("Open C", "Open D"),
+                second.clicks.filter { it == "Open C" || it == "Open D" }.distinct(),
+            )
+            assertEquals(uninterrupted, childrenOfRoot(File(tempDir, "session-1000")))
+        } finally {
+            referenceDir.deleteRecursively()
+            tempDir.deleteRecursively()
+        }
+    }
+
+    /**
+     * a2h-c2b.15 scope call E (round-1 D1): a target kept pending across a Stop is checked against the
+     * blacklist in force at the resume, and is never clicked when that blacklist now forbids it.
+     */
+    @Test
+    fun resume_skipsAPendingTargetTheCurrentBlacklistNowForbids() = runBlocking {
+        val tempDir = Files.createTempDirectory("resume-current-blacklist").toFile()
+        try {
+            val screens = mapOf(
+                "A" to fakeScreen(
+                    id = "A",
+                    screenName = "Home",
+                    elements = listOf(fakeElement("Open About", 0), fakeElement("Open C", 1), fakeElement("Open D", 2)),
+                    transitions = mapOf("Open About" to "B", "Open C" to "C", "Open D" to "D"),
+                ),
+                "B" to fakeScreen("B", "About phone", elements = listOf(idlessElement("Legal", 0)), transitions = emptyMap()),
+                "C" to fakeScreen("C", "Orders", elements = listOf(fakeElement("Track", 0)), transitions = emptyMap()),
+                "D" to fakeScreen("D", "Profile", elements = listOf(fakeElement("Edit", 0)), transitions = emptyMap()),
+            )
+            val first = ClickRecordingHost(entryScreenId = "A", screens = screens)
+            first.identityCaseDecision = PauseDecision.STOP
+            coordinator(first, tempDir, timeProvider = { 1_000L }).crawl(
+                initialRoot = first.captureCurrentRootSnapshot("com.example.target")!!,
+                eventClassName = "Home",
+            )
+            val sessionDir = File(tempDir, "session-1000")
+            assertEquals(CrawlEdgeStatus.PENDING, rootEdges(sessionDir).single { it.second == "Open D" }.third)
+
+            val second = ClickRecordingHost(entryScreenId = "A", screens = screens)
+            val resumed = coordinator(
+                second,
+                tempDir,
+                blacklist = CrawlBlacklist(labelTokens = setOf("open d"), skipCheckable = false),
+                timeProvider = { 1_000L },
+            ).crawl(
+                initialRoot = second.captureCurrentRootSnapshot("com.example.target")!!,
+                eventClassName = "Home",
+                intent = CrawlStartIntent.RESUME,
+                resumeMode = ResumeMode.ContinueAuto,
+            )
+
+            val summary = (resumed as DeepCrawlCoordinator.DeepCrawlOutcome.Completed).summary
+            assertFalse("a target the current blacklist forbids is never clicked", second.clicks.contains("Open D"))
+            assertTrue(second.clicks.toString(), second.clicks.contains("Open C"))
+            assertEquals(
+                listOf(
+                    Triple("edge_000", "Open About", CrawlEdgeStatus.CAPTURED),
+                    Triple("edge_001", "Open C", CrawlEdgeStatus.CAPTURED),
+                    Triple("edge_002", "Open D", CrawlEdgeStatus.SKIPPED_BLACKLIST),
+                ),
+                rootEdges(sessionDir),
+            )
+            assertEquals(3, summary.capturedScreenCount)
+            assertTrue(
+                "the skip names its reason",
+                Regex(""""label": "Open D",[^}]*?"status": "skipped_blacklist",\s+"message": "[^"]+"""")
+                    .containsMatchIn(summary.manifestFile.readText()),
+            )
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    /** a2h-c2b.15: the same loss through a Stop at the failed-edge checkpoint. */
+    @Test
+    fun resume_afterStopAtTheFailedEdgeCheckpointMidExpansion_visitsTheUnvisitedSiblings() = runBlocking {
+        val tempDir = Files.createTempDirectory("stop-mid-expansion-checkpoint").toFile()
+        try {
+            val screens = mapOf(
+                "A" to fakeScreen(
+                    id = "A",
+                    screenName = "Screen A",
+                    elements = listOf(fakeElement("Broken", 0), fakeElement("Open B", 1), fakeElement("Open C", 2)),
+                    transitions = mapOf("Open B" to "B", "Open C" to "C"),
+                ),
+                "B" to fakeScreen("B", "Screen B", elements = listOf(fakeElement("Share", 0)), transitions = emptyMap()),
+                "C" to fakeScreen("C", "Screen C", elements = listOf(fakeElement("Print", 0)), transitions = emptyMap()),
+            )
+            val first = ClickRecordingHost(entryScreenId = "A", screens = screens, failingLabels = setOf("Broken"))
+            first.pauseDecision = PauseDecision.STOP
+            val stopped = coordinator(
+                first,
+                tempDir,
+                pauseConfig = PauseCheckpointConfig(
+                    initialTimeThresholdMs = 60_000L,
+                    subsequentTimeThresholdMs = 60_000L,
+                    initialFailedEdgeThreshold = 1,
+                    subsequentFailedEdgeThreshold = 10,
+                ),
+                timeProvider = { 1_000L },
+            ).crawl(
+                initialRoot = first.captureCurrentRootSnapshot("com.example.target")!!,
+                eventClassName = "ScreenA",
+            )
+            assertTrue(stopped is DeepCrawlCoordinator.DeepCrawlOutcome.PartialAbort)
+            assertEquals(listOf("Broken"), first.clicks)
+
+            val second = ClickRecordingHost(entryScreenId = "A", screens = screens, failingLabels = setOf("Broken"))
+            val resumed = coordinator(second, tempDir, timeProvider = { 1_000L }).crawl(
+                initialRoot = second.captureCurrentRootSnapshot("com.example.target")!!,
+                eventClassName = "ScreenA",
+                intent = CrawlStartIntent.RESUME,
+                resumeMode = ResumeMode.ContinueAuto,
+            )
+
+            val summary = (resumed as DeepCrawlCoordinator.DeepCrawlOutcome.Completed).summary
+            assertEquals(3, summary.capturedScreenCount)
+            assertTrue(second.clicks.toString(), second.clicks.containsAll(listOf("Open B", "Open C")))
+            assertEquals(listOf("edge_000", "edge_001", "edge_002"), rootEdges(File(tempDir, "session-1000")).map { it.first })
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    /**
+     * a2h-c2b.15 characterization: a crawl run to completion numbers its edges blacklisted first,
+     * then eligible in plan order. This held before the fix and must hold after it.
+     */
+    @Test
+    fun edgeIds_forACompletedCrawl_followTheBlacklistedThenPlanOrder() = runBlocking {
+        val tempDir = Files.createTempDirectory("edge-order-characterization").toFile()
+        try {
+            val host = ClickRecordingHost(
+                entryScreenId = "A",
+                screens = mapOf(
+                    "A" to fakeScreen(
+                        id = "A",
+                        screenName = "Home",
+                        elements = listOf(
+                            fakeElement("Open B", 0),
+                            fakeElement("Skip Me", 1, editable = true),
+                            fakeElement("Open C", 2),
+                            fakeElement("Open D", 3),
+                        ),
+                        transitions = mapOf("Open B" to "B", "Open C" to "C", "Open D" to "D"),
+                    ),
+                    "B" to fakeScreen("B", "Orders", elements = listOf(fakeElement("Track", 0)), transitions = emptyMap()),
+                    "C" to fakeScreen("C", "Profile", elements = listOf(fakeElement("Edit", 0)), transitions = emptyMap()),
+                    "D" to fakeScreen("D", "Wallet", elements = listOf(fakeElement("Pay", 0)), transitions = emptyMap()),
+                ),
+            )
+
+            val summary = crawlCompleted(host, tempDir)
+
+            assertEquals(
+                listOf(
+                    Triple("edge_000", "Skip Me", CrawlEdgeStatus.SKIPPED_BLACKLIST),
+                    Triple("edge_001", "Open B", CrawlEdgeStatus.CAPTURED),
+                    Triple("edge_002", "Open C", CrawlEdgeStatus.CAPTURED),
+                    Triple("edge_003", "Open D", CrawlEdgeStatus.CAPTURED),
+                ),
+                rootEdges(summary.sessionDir),
+            )
+            assertEquals(
+                "the root's targets are first visited in plan order",
+                listOf("Open B", "Open C", "Open D"),
+                host.clicks.filter { it.startsWith("Open ") }.distinct(),
+            )
+            assertFalse("a blacklisted target is never clicked", host.clicks.contains("Skip Me"))
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    /** The root's saved edges as (id, label, status), in id order. */
+    private fun rootEdges(sessionDir: File): List<Triple<String, String, CrawlEdgeStatus>> =
+        SavedCrawlLoader.load(sessionDir)!!.edges
+            .filter { it.parentScreenId == "screen_00000" }
+            .sortedBy { it.edgeId }
+            .map { Triple(it.edgeId, it.label, it.status) }
+
+    /** Every edge id the manifest records under [parentScreenId], duplicates included, in file order. */
+    private fun manifestEdgeIds(manifestFile: File, parentScreenId: String): List<String> =
+        Regex(""""edgeId": "(edge_\d+)",\s+"parentScreenId": "${Regex.escape(parentScreenId)}"""")
+            .findAll(manifestFile.readText())
+            .map { it.groupValues[1] }
+            .toList()
+
+    /** A [FakeHost] that records every click, fails the [failingLabels], and answers checkpoints. */
+    private class ClickRecordingHost(
+        entryScreenId: String,
+        screens: Map<String, FakeScreen>,
+        private val failingLabels: Set<String> = emptySet(),
+    ) : FakeHost(entryScreenId = entryScreenId, screens = screens) {
+        val clicks = mutableListOf<String>()
+        var pauseDecision: PauseDecision = PauseDecision.CONTINUE
+
+        override fun click(element: PressableElement): Boolean {
+            clicks += element.label
+            if (element.label in failingLabels) return false
+            return super.click(element)
+        }
+
+        override suspend fun awaitPauseDecision(
+            reason: PauseReason,
+            snapshot: PauseProgressSnapshot,
+        ): PauseDecision = pauseDecision
+    }
 
     private fun idlessElement(label: String, index: Int): PressableElement =
         fakeElement(label, index).copy(resourceId = null)
