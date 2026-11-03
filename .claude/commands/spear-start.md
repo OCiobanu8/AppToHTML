@@ -133,6 +133,9 @@ Exit codes drive the loop: `0` converged/stop honored · `1` execution failure �
   hits in `tools/spear-cli/**` and other in-flight work. Document those under an `ASSESS.md`
   "Known acceptable" section and register the stop with `--allow-fast-convergence` — never edit
   third-party source to force a zero count.
+- **Keep the mutation harness under `.spear/<slug>/evidence/`**, never in a session scratchpad.
+  A scratchpad is wiped when the session restarts, and the harness must be re-run at the final
+  state and by the grader. Evidence folders are git-ignored, so it stays out of the commit.
 - **Worktrees:** run every path relative to the worktree root; prefer
   `git rev-parse --show-toplevel` over hard-coded paths, and never `cd` into a sibling checkout.
 
