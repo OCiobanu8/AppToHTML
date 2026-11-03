@@ -4,8 +4,8 @@ import android.content.Context
 import com.example.apptohtml.crawler.CaptureFileStore
 import com.example.apptohtml.crawler.CrawlEdgeStatus
 import com.example.apptohtml.crawler.CrawlScreenRecord
-import com.example.apptohtml.crawler.MalformedIdentityCases
 import com.example.apptohtml.crawler.PressableElementLinkKey
+import com.example.apptohtml.crawler.RefusedSavedCrawl
 import com.example.apptohtml.crawler.SavedCrawlLoader
 import com.example.apptohtml.crawler.ScreenExpansionStatus
 import kotlinx.coroutines.flow.Flow
@@ -16,8 +16,9 @@ import java.io.File
 data class SavedCrawlSnapshot(
     val screens: List<SavedScreenSummary>,
     /**
-     * Why the saved crawl cannot be resumed, when it cannot — a case file or case pointer the loader
-     * refused. Shown to the operator instead of crashing the screen that lists the crawl.
+     * Why the saved crawl cannot be resumed, when it cannot — a case file, a case pointer or a screen
+     * identity the loader refused. Shown to the operator instead of crashing the screen that lists
+     * the crawl.
      */
     val loadError: String? = null,
 ) {
@@ -50,7 +51,7 @@ class SavedCrawlRepository(
         val crawlDir = crawlDir(packageName)
         val loaded = try {
             SavedCrawlLoader.load(crawlDir)
-        } catch (refused: MalformedIdentityCases) {
+        } catch (refused: RefusedSavedCrawl) {
             return SavedCrawlSnapshot(screens = emptyList(), loadError = refused.message)
         } ?: return null
         if (loaded.screens.isEmpty()) return null

@@ -521,7 +521,7 @@ data class ScreenCrawlState(
      * Derived from the crawl's case file on every write, never stored on its own
      * ([IdentityCasePointers]).
      */
-    val openCaseIds: List<String> = emptyList(),
+    val activeCaseIds: List<String> = emptyList(),
 )
 
 data class CrawlManifest(

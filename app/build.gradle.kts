@@ -74,6 +74,16 @@ val validationProperties = listOf(
     "a2h.known",
     "a2h.crawl",
     "a2h.root",
+    "a2h.survey",
+    "a2h.settle",
+    "a2h.traits",
+    "a2h.dryRun",
+    "a2h.push",
+    "a2h.port",
+    "a2h.tokenFile",
+    "a2h.adb",
+    "a2h.serial",
+    "a2h.remoteRoot",
 )
 
 tasks.withType<Test>().configureEach {

@@ -70,16 +70,17 @@ The accessibility service keeps short-lived runtime facts such as:
 
 Every captured screen's `.xml` and `.html` carry the screen's whole identity — name, element set and
 traits — in a `<screen-identity>` block. This is the one part of a crawl's content that survives a
-resume and that an operator is expected to **edit**: `SavedCrawlLoader` reads it back, and
-route-replay arrival consults a settled screen's traits.
+resume and that an operator settles, through the validation tool rather than by hand:
+`SavedCrawlLoader` reads it back, and route-replay arrival consults a settled screen's traits.
 
 See [screen-identity.md](screen-identity.md) for the format, what a capture proposes, and the
 validation tool.
 
 ### Identity cases
 
-`identity-cases.xml` in the crawl folder holds every operator case the crawl raised, open and closed;
-each involved screen's XML carries only a pointer to it. It survives Stop and resume. See
+`identity-cases.xml` in the crawl folder holds every operator case the crawl raised, open, handled
+and closed; each involved screen's XML carries only a pointer to each case that is not closed. It
+survives Stop and resume, and the validation tool's settle writes it. See
 [screen-identity.md](screen-identity.md#identity-cases).
 
 ### HTML output

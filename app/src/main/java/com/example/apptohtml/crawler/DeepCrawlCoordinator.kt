@@ -123,6 +123,9 @@ internal class DeepCrawlCoordinator(
             val rootSnapshot: ScreenSnapshot
             val entryScreenIdentity: ScreenIdentity
             var rootCase: PendingIdentityCase? = null
+            // A handled root is confirmed at the re-scan: null when it has no handled case, else the
+            // reason its identity does not hold there, or "" when it does.
+            var rootConfirmation: String? = null
 
             if (loaded != null) {
                 val loadedRoot = loaded.screens.firstOrNull { it.depth == 0 }
@@ -139,10 +142,12 @@ internal class DeepCrawlCoordinator(
                 entryScreenIdentity = ScreenIdentity.fromRoot(
                     rootSnapshot.stepSnapshots.firstOrNull()?.root ?: liveEntryRoot
                 )
-                rootCase = settledRootDivergence(
-                    rootRecord = loadedRoot,
-                    rescannedTop = rootSnapshot.stepSnapshots.firstOrNull()?.root ?: liveEntryRoot,
-                )
+                val rescannedTop = rootSnapshot.stepSnapshots.firstOrNull()?.root ?: liveEntryRoot
+                if (tracker.handledCasesOn(rootScreenId).isNotEmpty()) {
+                    rootConfirmation = liveIdentityFailure(loadedRoot.identity, rescannedTop).orEmpty()
+                } else {
+                    rootCase = settledRootDivergence(rootRecord = loadedRoot, rescannedTop = rescannedTop)
+                }
                 rememberScreen(rootScreenId, loadedRoot.screenName)
                 logger.info(
                     "crawl_resume_hydrated rootScreenId=$rootScreenId rootScreenName=${quote(loadedRoot.screenName)} " +
@@ -214,10 +219,20 @@ internal class DeepCrawlCoordinator(
             rootCase?.let { case ->
                 raiseIdentityCase(case, session, tracker, pauseTracker, rootSnapshot, rootFiles)
             }
+            rootConfirmation?.let { failure ->
+                if (failure.isEmpty()) {
+                    closeHandledCases(rootScreenId, session, tracker)
+                } else {
+                    reopenHandledCases(rootScreenId, failure, session, tracker, pauseTracker, rootSnapshot, rootFiles)
+                }
+            }
 
             val frontier = ArrayDeque<String>()
+            // Screens queued only to confirm a handled case: already expanded, so not expanded again.
+            val confirmOnly = mutableSetOf<String>()
             if (loaded != null) {
                 seedResumeFrontier(frontier, tracker, resumeMode)
+                queueHandledScreens(frontier, confirmOnly, tracker, rootScreenId)
                 if (frontier.isEmpty()) {
                     logger.info(
                         "crawl_resume_complete reason=no_pending_screens resumeMode=${resumeMode.toLogString()}"
@@ -276,19 +291,46 @@ internal class DeepCrawlCoordinator(
                         screenRecord = screenRecord,
                         entryScreenIdentity = entryScreenIdentity,
                     )) {
-                        is ScreenPreparationResult.Success -> prepared.snapshot
-                        is ScreenPreparationResult.Failure -> {
-                            prepared.identityCase?.let { case ->
-                                raiseIdentityCase(case, session, tracker, pauseTracker, rootSnapshot, rootFiles)
+                        is ScreenPreparationResult.Success -> {
+                            // The replay arrived and the identity was checked on the live screen:
+                            // that is the confirmation a handled case waits for.
+                            if (tracker.handledCasesOn(screenId).isNotEmpty()) {
+                                val failure = liveIdentityFailure(screenRecord.identity, prepared.arrivalRoot)
+                                if (failure == null) {
+                                    closeHandledCases(screenId, session, tracker)
+                                } else {
+                                    reopenHandledCases(screenId, failure, session, tracker, pauseTracker, rootSnapshot, rootFiles)
+                                }
                             }
-                            handlePreparationFailure(
-                                tracker = tracker,
-                                session = session,
-                                rootSnapshot = rootSnapshot,
-                                rootFiles = rootFiles,
-                                failure = prepared,
-                                entryScreenIdentity = entryScreenIdentity,
-                            )
+                            if (screenId in confirmOnly) {
+                                crawlLogger?.info("resume_confirm_done screenId=$screenId expanded=false")
+                                continue
+                            }
+                            prepared.snapshot
+                        }
+                        is ScreenPreparationResult.Failure -> {
+                            val handled = tracker.handledCasesOn(screenId).isNotEmpty()
+                            prepared.identityCase?.let { case ->
+                                if (handled) {
+                                    // The operator's own identity failed live: their case reopens,
+                                    // rather than a second case being opened for the same screen.
+                                    reopenHandledCases(screenId, case.detail, session, tracker, pauseTracker, rootSnapshot, rootFiles)
+                                } else {
+                                    raiseIdentityCase(case, session, tracker, pauseTracker, rootSnapshot, rootFiles)
+                                }
+                            }
+                            if (screenId in confirmOnly) {
+                                recoverAfterConfirmOnlyFailure(tracker, session, rootSnapshot, rootFiles, prepared, entryScreenIdentity)
+                            } else {
+                                handlePreparationFailure(
+                                    tracker = tracker,
+                                    session = session,
+                                    rootSnapshot = rootSnapshot,
+                                    rootFiles = rootFiles,
+                                    failure = prepared,
+                                    entryScreenIdentity = entryScreenIdentity,
+                                )
+                            }
                             continue
                         }
                     }
@@ -1022,7 +1064,7 @@ internal class DeepCrawlCoordinator(
             )
         }
 
-        return ScreenPreparationResult.Success(snapshot)
+        return ScreenPreparationResult.Success(snapshot, arrivalRoot)
     }
 
     private suspend fun handlePreparationFailure(
@@ -1794,7 +1836,10 @@ internal class DeepCrawlCoordinator(
                 "decision=${decision::class.simpleName}" + (reason?.let { " reason=${quote(it)}" } ?: "")
         )
         return when (decision) {
-            IdentitySettlement.Decision.Settled -> NewScreenSettlement(proposal, case = null)
+            IdentitySettlement.Decision.Settled -> NewScreenSettlement(
+                identity = proposal.copy(settledBy = IdentityOrigin.MACHINE),
+                case = null,
+            )
             is IdentitySettlement.Decision.NotSettled -> NewScreenSettlement(
                 identity = named.copy(traits = emptyList()),
                 case = PendingIdentityCase(
@@ -1869,17 +1914,144 @@ internal class DeepCrawlCoordinator(
             detail = pending.detail,
             rejectedProposal = pending.rejectedProposal,
         )
-        IdentityCaseStore.write(IdentityCaseStore.fileIn(session.directory), tracker.cases())
-        case.involvedScreenIds.forEach { screenId ->
-            tracker.findScreen(screenId)?.let { record ->
-                IdentityCasePointers.refresh(File(record.xmlPath), tracker.openCaseIdsFor(screenId))
-            }
-        }
-        saveManifest(session, tracker, CrawlRunStatus.IN_PROGRESS)
+        recordCases(listOf(case), session, tracker)
         crawlLogger?.warn(
             "identity_case_opened caseId=${case.id} kind=${case.kind.xmlValue} raisedOn=${case.raisedOn} " +
                 "related=${quote(case.relatedScreenIds.joinToString(","))} detail=${quote(case.detail)}"
         )
+        pauseOnCase(case, session, tracker, pauseTracker, rootSnapshot, rootFiles)
+    }
+
+    /**
+     * Writes the case file and brings every screen [cases] involve up to date with its pointers, then
+     * saves the manifest — so whatever happens next, the operator finds the cases on disk as the
+     * tracker holds them.
+     */
+    private fun recordCases(cases: List<IdentityCase>, session: CrawlSessionDirectory, tracker: CrawlRunTracker) {
+        IdentityCaseStore.write(IdentityCaseStore.fileIn(session.directory), tracker.cases())
+        cases.flatMap(IdentityCase::involvedScreenIds).distinct().sorted().forEach { screenId ->
+            tracker.findScreen(screenId)?.let { record ->
+                IdentityCasePointers.refresh(File(record.xmlPath), tracker.activeCaseIdsFor(screenId))
+            }
+        }
+        saveManifest(session, tracker, CrawlRunStatus.IN_PROGRESS)
+    }
+
+    /**
+     * Why [identity] does not hold on [liveTop], a live first viewport, or null when it holds. The
+     * confirmation a handled case waits for: only [TraitVerdict.HOLDS] confirms it, so traits that
+     * assert nothing on the live screen are a failure here, not a pass.
+     */
+    private fun liveIdentityFailure(identity: ScreenIdentity, liveTop: AccessibilityNodeSnapshot): String? {
+        val context = TraitEvaluationContext.of(liveTop, identity.name)
+        return when (TraitEvaluator.verdict(identity, context)) {
+            TraitVerdict.HOLDS -> null
+            TraitVerdict.UNSETTLED -> "the settled identity asserts nothing present on the live screen at resume"
+            TraitVerdict.DOES_NOT_HOLD -> "settled identity does not hold on the live screen at resume: " +
+                describeFailing(identity.traits.filterNot { trait -> trait.holds(context) })
+        }
+    }
+
+    /** Closes the handled cases raised on [screenId]: their identity held on the live screen. */
+    private fun closeHandledCases(screenId: String, session: CrawlSessionDirectory, tracker: CrawlRunTracker) {
+        val closed = tracker.handledCasesOn(screenId).map { case -> tracker.closeCase(case.id) }
+        if (closed.isEmpty()) return
+        recordCases(closed, session, tracker)
+        closed.forEach { case ->
+            crawlLogger?.info("identity_case_closed caseId=${case.id} confirmedOn=$screenId")
+        }
+    }
+
+    /**
+     * Reopens the handled cases raised on [screenId] with [detail] — their identity did not hold on
+     * the live screen — and pauses on each, as the crawl pauses on any case.
+     */
+    private suspend fun reopenHandledCases(
+        screenId: String,
+        detail: String,
+        session: CrawlSessionDirectory,
+        tracker: CrawlRunTracker,
+        pauseTracker: PauseCheckpointTracker,
+        rootSnapshot: ScreenSnapshot,
+        rootFiles: CapturedScreenFiles,
+    ) {
+        val reopened = tracker.handledCasesOn(screenId).map { case -> tracker.reopenCase(case.id, detail) }
+        if (reopened.isEmpty()) return
+        recordCases(reopened, session, tracker)
+        reopened.forEach { case ->
+            crawlLogger?.warn("identity_case_reopened caseId=${case.id} screenId=$screenId detail=${quote(detail)}")
+            pauseOnCase(case, session, tracker, pauseTracker, rootSnapshot, rootFiles)
+        }
+    }
+
+    /**
+     * Queues every screen a handled case is raised on, other than the root (confirmed at the re-scan),
+     * that the resume would not visit anyway. One already expanded goes in [confirmOnly]: it is
+     * revisited to confirm the case, never expanded again.
+     */
+    private fun queueHandledScreens(
+        frontier: ArrayDeque<String>,
+        confirmOnly: MutableSet<String>,
+        tracker: CrawlRunTracker,
+        rootScreenId: String,
+    ) {
+        tracker.cases()
+            .filter { it.status == IdentityCaseStatus.HANDLED && it.raisedOn != rootScreenId }
+            .map(IdentityCase::raisedOn)
+            .distinct()
+            .sorted()
+            .forEach { screenId ->
+                val record = tracker.findScreen(screenId) ?: return@forEach
+                if (screenId in frontier) return@forEach
+                frontier.add(screenId)
+                if (record.expansionStatus == ScreenExpansionStatus.COMPLETE) confirmOnly += screenId
+                crawlLogger?.info(
+                    "resume_confirm_queued screenId=$screenId confirmOnly=${screenId in confirmOnly}"
+                )
+            }
+    }
+
+    /**
+     * A confirm-only visit that did not reach its screen. The screen is already expanded and its
+     * parent's edges are settled, so unlike [handlePreparationFailure] nothing is added to the graph:
+     * the crawler only gets back to a replayable state, and the case stays handled for the next resume.
+     */
+    private suspend fun recoverAfterConfirmOnlyFailure(
+        tracker: CrawlRunTracker,
+        session: CrawlSessionDirectory,
+        rootSnapshot: ScreenSnapshot,
+        rootFiles: CapturedScreenFiles,
+        failure: ScreenPreparationResult.Failure,
+        entryScreenIdentity: ScreenIdentity,
+    ) {
+        crawlLogger?.warn(
+            "resume_confirm_failed parentScreenId=${failure.parentScreenId} message=${quote(failure.message)}"
+        )
+        if (!recoverToReplayableState(entryScreenIdentity)) {
+            abortPartialCapture(
+                tracker = tracker,
+                failedParentScreenId = failure.parentScreenId,
+                session = session,
+                rootSnapshot = rootSnapshot,
+                rootFiles = rootFiles,
+                message = failure.message,
+                failedElement = failure.element,
+            )
+        }
+    }
+
+    /**
+     * Pauses the crawl on [case], already recorded on disk, and acts on the operator's decision:
+     * Continue returns, Stop saves a partial crawl, as a checkpoint Stop does.
+     */
+    private suspend fun pauseOnCase(
+        case: IdentityCase,
+        session: CrawlSessionDirectory,
+        tracker: CrawlRunTracker,
+        pauseTracker: PauseCheckpointTracker,
+        rootSnapshot: ScreenSnapshot,
+        rootFiles: CapturedScreenFiles,
+    ) {
         val decision = host.awaitIdentityCaseDecision(
             case = case,
             snapshot = pauseTracker.progressSnapshot(
@@ -1968,7 +2140,7 @@ internal class DeepCrawlCoordinator(
             )
         }.toMap()
         return ScreenCrawlState(
-            openCaseIds = tracker.openCaseIdsFor(screenRecord.screenId),
+            activeCaseIds = tracker.activeCaseIdsFor(screenRecord.screenId),
             screenId = screenRecord.screenId,
             depth = screenRecord.depth,
             expansionStatus = screenRecord.expansionStatus,
@@ -2391,7 +2563,11 @@ internal class DeepCrawlCoordinator(
     }
 
     private sealed class ScreenPreparationResult {
-        data class Success(val snapshot: ScreenSnapshot) : ScreenPreparationResult()
+        /** [arrivalRoot] is the first viewport the arrival check judged, for confirming a handled case. */
+        data class Success(
+            val snapshot: ScreenSnapshot,
+            val arrivalRoot: AccessibilityNodeSnapshot,
+        ) : ScreenPreparationResult()
 
         data class Failure(
             val parentScreenId: String,

@@ -456,6 +456,7 @@ class ScreenIdentityValidatorTest {
             rootClassName = rootClassName,
             elements = elements,
             traits = traits,
+            settledBy = IdentityOrigin.OPERATOR.takeIf { traits.isNotEmpty() },
         ).withName(
             ScreenNameIdentity(
                 packageName = "com_example_target",

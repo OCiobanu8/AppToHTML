@@ -135,6 +135,7 @@ internal object ScreenIdentityReport {
         appendLine(report.outcome.name)
         appendLine("  screen: ${target.screenId}")
         appendLine("  traits: ${report.traitVerdict} (${target.identity.traits.size} asserted)")
+        appendLine("  settled by: ${target.identity.settledBy?.xmlValue ?: "nobody (the identity asserts nothing)"}")
         report.failingTraits.forEach { trait -> appendLine("    failed: ${describe(trait)}") }
 
         // Uniqueness, spelled out — a collision names every screen, because choosing between them

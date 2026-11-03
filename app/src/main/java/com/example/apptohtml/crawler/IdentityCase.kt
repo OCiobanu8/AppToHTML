@@ -28,11 +28,21 @@ enum class IdentityCaseKind(val xmlValue: String) {
     }
 }
 
-/** Whether a case still needs an operator. Closing one is `a2h-c2b.13`'s; nothing here closes one. */
+/**
+ * Where a case stands: `open -> handled -> closed`.
+ *
+ * [OPEN] needs an operator. [HANDLED] means an operator settled the screen and the validation tool
+ * confirmed, against the crawl's saved captures, that the identity holds; the resumed crawl still has
+ * to confirm it on the live screen. [CLOSED] means it did, and the case is kept as history.
+ */
 enum class IdentityCaseStatus(val xmlValue: String) {
     OPEN("open"),
+    HANDLED("handled"),
     CLOSED("closed"),
     ;
+
+    /** Whether the case is unfinished, so every screen it involves still points at it. */
+    val isActive: Boolean get() = this != CLOSED
 
     companion object {
         /** The status written as [value] in the case file, or null when no status is written that way. */
@@ -47,7 +57,9 @@ enum class IdentityCaseStatus(val xmlValue: String) {
  * involves carries only a pointer to it ([IdentityCasePointers]). [relatedScreenIds] are the other
  * screens the case names: every screen a collision found, never narrowed to one.
  * [rejectedProposal] is the identity the crawler proposed and could not settle, kept so an operator
- * can see what was tried; empty when nothing was proposed.
+ * can see what was tried; empty when nothing was proposed. [replaced] is the settled identity an
+ * operator's settle replaced on the raised-on screen, so a replacement is on the record and never
+ * silent; null when the screen asserted nothing before.
  */
 data class IdentityCase(
     val id: String,
@@ -57,11 +69,32 @@ data class IdentityCase(
     val relatedScreenIds: List<String>,
     val detail: String,
     val rejectedProposal: List<Trait> = emptyList(),
+    val replaced: ReplacedIdentity? = null,
 ) {
     /** Every screen this case involves, sorted: the one it was raised on and the related ones. */
     val involvedScreenIds: List<String>
         get() = (relatedScreenIds + raisedOn).distinct().sorted()
 }
+
+/** The traits a settle replaced, and who had settled them. */
+data class ReplacedIdentity(
+    val traits: List<Trait>,
+    val settledBy: IdentityOrigin,
+) {
+    init {
+        require(traits.isNotEmpty()) { "A replaced identity asserted something; it had traits." }
+    }
+}
+
+/**
+ * A saved crawl the resume refuses to load, with a message naming the file and what is wrong.
+ *
+ * Refused rather than repaired or skipped: every subtype is a place where carrying on would silently
+ * drop or overwrite something an operator wrote or was meant to see. The saved-crawl panel shows the
+ * message instead of offering the resume.
+ */
+open class RefusedSavedCrawl(message: String, cause: Throwable? = null) :
+    IllegalStateException(message, cause)
 
 /**
  * A case file that cannot be trusted, or a screen pointing at a case the file does not hold.
@@ -71,7 +104,17 @@ data class IdentityCase(
  * location is not actionable.
  */
 class MalformedIdentityCases(message: String, cause: Throwable? = null) :
-    IllegalStateException(message, cause)
+    RefusedSavedCrawl(message, cause)
+
+/**
+ * A screen whose identity the resume cannot use as written: refused by the reader, or different in
+ * its `.xml` and its `.html`.
+ *
+ * Skipping the screen would drop an operator's edit, and loading one copy would let the next rewrite
+ * overwrite the other, so the resume stops and names the files instead.
+ */
+class RefusedScreenIdentity(message: String, cause: Throwable? = null) :
+    RefusedSavedCrawl(message, cause)
 
 /**
  * The crawl's one case file, `identity-cases.xml` — written and read here and nowhere else.
@@ -87,6 +130,14 @@ object IdentityCaseStore {
 
     /** The case file inside [crawlDirectory]. */
     fun fileIn(crawlDirectory: File): File = File(crawlDirectory, FILE_NAME)
+
+    private val CASE_ID = Regex("^[A-Za-z0-9_-]+$")
+
+    /**
+     * Whether [id] can be a case id: letters, digits, `_` and `-` only. Ids name folders and URLs, so
+     * nothing that could step out of a folder (`/`, `..`) is ever accepted from a case file.
+     */
+    fun isCaseId(id: String): Boolean = CASE_ID.matches(id)
 
     /**
      * Writes [cases] to [file], replacing it through a temporary sibling so a reader never sees half
@@ -119,6 +170,11 @@ object IdentityCaseStore {
                 append("""    <screen screen-id="${escapeXml(screenId)}" role="$role" />""").append('\n')
             }
             ScreenIdentityXml.appendTraits(this, case.rejectedProposal, depth = 2)
+            case.replaced?.let { replaced ->
+                append("""    <replaced ${ScreenIdentityXml.SETTLED_BY_ATTRIBUTE}="${replaced.settledBy.xmlValue}">""").append('\n')
+                ScreenIdentityXml.appendTraits(this, replaced.traits, depth = 3)
+                append("    </replaced>").append('\n')
+            }
             append("  </case>").append('\n')
         }
         append("</identity-cases>").append('\n')
@@ -179,12 +235,13 @@ object IdentityCaseStore {
         fun fail(what: String): Nothing =
             throw MalformedIdentityCases("Case ${id.ifBlank { "<no id>" }} in ${file.absolutePath}: $what")
         if (id.isBlank()) fail("missing id")
+        if (!isCaseId(id)) fail("\"$id\" is not a case id: only letters, digits, '_' and '-' are allowed")
         val status = IdentityCaseStatus.fromXml(element.getAttribute("status"))
             ?: fail("unknown status \"${element.getAttribute("status")}\"")
         val kind = IdentityCaseKind.fromXml(element.getAttribute("kind"))
             ?: fail("unknown kind \"${element.getAttribute("kind")}\"")
         val raisedOn = element.getAttribute("raised-on").ifBlank { fail("missing raised-on") }
-        element.childElements().firstOrNull { it.tagName != "screen" && it.tagName != "traits" }?.let { stray ->
+        element.childElements().firstOrNull { it.tagName !in CASE_CHILDREN }?.let { stray ->
             fail("unknown <${stray.tagName}>")
         }
         val screens = element.childElementsNamed("screen")
@@ -205,12 +262,28 @@ object IdentityCaseStore {
             .map { it.getAttribute("screen-id") }
         if (raisedOn in related || related.size != related.distinct().size) fail("a screen is listed twice")
         val rejected = try {
-            ScreenIdentityXml.parseTraits(element)
+            ScreenIdentityXml.parseTraits(element, ScreenIdentityXml.TraitsStamp.FORBIDDEN).traits
         } catch (e: MalformedScreenIdentity) {
             throw MalformedIdentityCases(
                 "Case $id in ${file.absolutePath}: rejected proposal unreadable: ${e.message}",
                 e,
             )
+        }
+        val replacedElements = element.childElementsNamed("replaced")
+        if (replacedElements.size > 1) fail("it records ${replacedElements.size} <replaced> identities, not one")
+        val replaced = replacedElements.singleOrNull()?.let { replacedElement ->
+            val origin = IdentityOrigin.fromXml(replacedElement.getAttribute(ScreenIdentityXml.SETTLED_BY_ATTRIBUTE))
+                ?: fail("its <replaced> identity does not say who settled it")
+            val traits = try {
+                ScreenIdentityXml.parseTraits(replacedElement, ScreenIdentityXml.TraitsStamp.FORBIDDEN).traits
+            } catch (e: MalformedScreenIdentity) {
+                throw MalformedIdentityCases(
+                    "Case $id in ${file.absolutePath}: replaced identity unreadable: ${e.message}",
+                    e,
+                )
+            }
+            if (traits.isEmpty()) fail("its <replaced> identity asserts nothing")
+            ReplacedIdentity(traits, origin)
         }
         return IdentityCase(
             id = id,
@@ -220,21 +293,24 @@ object IdentityCaseStore {
             relatedScreenIds = related.sorted(),
             detail = element.getAttribute("detail"),
             rejectedProposal = rejected,
+            replaced = replaced,
         )
     }
+
+    private val CASE_CHILDREN = setOf("screen", "traits", "replaced")
 }
 
 /**
- * The `<identity-case ref="…"/>` pointers a screen's XML carries — one per **open** case involving it.
+ * The `<identity-case ref="…"/>` pointers a screen's XML carries — one per **active** case involving
+ * it, open or handled.
  *
- * Pointers are references, never a second copy: they are always derived from the open cases, written
+ * Pointers are references, never a second copy: they are always derived from the active cases, written
  * by [append] when a screen is serialized, and brought up to date by [refresh] on a screen whose
  * snapshot is no longer in memory. Both produce the same lines in the same place, so a refreshed
  * file is byte-identical to one serialized afresh.
  */
 object IdentityCasePointers {
-    private val POINTER_LINE = Regex("""^[ ]*<identity-case ref="[^"]*" />\n""", RegexOption.MULTILINE)
-    private const val CRLF = "\r\n"
+    private val POINTER_LINE = Regex("""^[ ]*<identity-case ref="[^"]*" />\r?\n""", RegexOption.MULTILINE)
 
     /** Writes a pointer line per id in [caseIds], sorted, at [depth]. Writes nothing when empty. */
     fun append(builder: StringBuilder, caseIds: List<String>, depth: Int) {
@@ -256,10 +332,8 @@ object IdentityCasePointers {
      * it has no `<screen-identity>` element inside a `<crawl>` block.
      */
     fun refresh(xml: String, caseIds: List<String>): String {
-        // A file an operator saved with Windows line endings is refreshed in kind, not skipped.
-        if (CRLF in xml) {
-            return refresh(xml.replace(CRLF, "\n"), caseIds).replace("\n", CRLF)
-        }
+        // Only the pointer lines are touched, written with the line break the identity block uses, so a
+        // file saved with Windows line endings — or with mixed ones — keeps every other byte.
         val crawlStart = xml.indexOf("<crawl ")
         val crawlEnd = xml.indexOf("</crawl>")
         if (crawlStart < 0 || crawlEnd < crawlStart) return xml
@@ -267,21 +341,10 @@ object IdentityCasePointers {
         val block = POINTER_LINE.replace(xml.substring(crawlStart, crawlEnd), "")
         val tail = xml.substring(crawlEnd)
 
-        val identityStart = block.indexOf("<screen-identity")
-        if (identityStart < 0) return xml
-        val selfClosingEnd = block.indexOf("/>\n", identityStart)
-        val tagEnd = block.indexOf(">", identityStart)
-        val identityEnd = if (selfClosingEnd >= 0 && selfClosingEnd + 1 == tagEnd) {
-            selfClosingEnd + "/>\n".length
-        } else {
-            val closing = block.indexOf("</screen-identity>\n", identityStart)
-            if (closing < 0) return xml
-            closing + "</screen-identity>\n".length
-        }
-        val lineStart = block.lastIndexOf('\n', identityStart) + 1
-        val depth = (identityStart - lineStart) / 2
-        val pointers = StringBuilder().also { append(it, caseIds, depth) }
-        return head + block.substring(0, identityEnd) + pointers + block.substring(identityEnd) + tail
+        val span = ScreenIdentitySpan.find(block) ?: return xml
+        val lineBreak = ScreenIdentitySpan.lineBreakAt(block, span.lineStart)
+        val pointers = StringBuilder().also { append(it, caseIds, span.depth) }.toString().replace("\n", lineBreak)
+        return head + block.substring(0, span.end) + pointers + block.substring(span.end) + tail
     }
 
     /** Rewrites [xmlFile]'s pointers in place to [caseIds]. Does nothing when the file is missing. */

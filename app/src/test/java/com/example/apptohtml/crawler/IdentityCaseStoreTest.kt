@@ -114,9 +114,9 @@ class IdentityCaseStoreTest {
         val first = tracker.openCase(IdentityCaseKind.UNIQUENESS_COLLISION, "screen_00007", listOf("screen_00002"), "x")
         val second = tracker.openCase(IdentityCaseKind.PROPOSAL_DOES_NOT_HOLD, "screen_00002", emptyList(), "y")
 
-        assertEquals(listOf(first.id), tracker.openCaseIdsFor("screen_00007"))
-        assertEquals(listOf(first.id, second.id), tracker.openCaseIdsFor("screen_00002"))
-        assertEquals(emptyList<String>(), tracker.openCaseIdsFor("screen_00009"))
+        assertEquals(listOf(first.id), tracker.activeCaseIdsFor("screen_00007"))
+        assertEquals(listOf(first.id, second.id), tracker.activeCaseIdsFor("screen_00002"))
+        assertEquals(emptyList<String>(), tracker.activeCaseIdsFor("screen_00009"))
     }
 
     @Test
@@ -126,8 +126,8 @@ class IdentityCaseStoreTest {
 
         tracker.closeCase(case.id)
 
-        assertEquals(emptyList<String>(), tracker.openCaseIdsFor("screen_00007"))
-        assertEquals(emptyList<String>(), tracker.openCaseIdsFor("screen_00002"))
+        assertEquals(emptyList<String>(), tracker.activeCaseIdsFor("screen_00007"))
+        assertEquals(emptyList<String>(), tracker.activeCaseIdsFor("screen_00002"))
         assertEquals(IdentityCaseStatus.CLOSED, tracker.cases().single().status)
         assertTrue(IdentityCaseStore.serialize(tracker.cases()).contains("""status="closed""""))
     }
@@ -154,14 +154,14 @@ class IdentityCaseStoreTest {
 
     @Test
     fun a_screen_with_no_open_case_gets_no_pointer() {
-        val xml = serialize(identity = settledIdentity(), openCaseIds = emptyList())
+        val xml = serialize(identity = settledIdentity(), activeCaseIds = emptyList())
 
         assertFalse(xml.contains("<identity-case"))
     }
 
     @Test
     fun pointers_sit_right_after_the_identity_sorted() {
-        val xml = serialize(identity = settledIdentity(), openCaseIds = listOf("case_003", "case_001"))
+        val xml = serialize(identity = settledIdentity(), activeCaseIds = listOf("case_003", "case_001"))
 
         val afterIdentity = xml.substringAfter("</screen-identity>\n")
         assertTrue(
@@ -224,7 +224,7 @@ class IdentityCaseStoreTest {
             cases = loaded.cases,
         )
         IdentityCaseStore.write(caseFile, tracker.cases())
-        screenXml.writeText(serialize(settledIdentity(), tracker.openCaseIdsFor("screen_00000")))
+        screenXml.writeText(serialize(settledIdentity(), tracker.activeCaseIdsFor("screen_00000")))
 
         assertEquals(listOf(case), loaded.cases)
         assertEquals(caseText, caseFile.readText())
@@ -416,7 +416,7 @@ class IdentityCaseStoreTest {
     private fun settledIdentity(): ScreenIdentity =
         Lifecycle.settled(LifecycleTrees.cart(), Lifecycle.name("Cart"))
 
-    private fun serialize(identity: ScreenIdentity, openCaseIds: List<String>): String {
+    private fun serialize(identity: ScreenIdentity, activeCaseIds: List<String>): String {
         val root = LifecycleTrees.cart()
         val snapshot = ScreenSnapshot(
             screenName = "Cart",
@@ -443,7 +443,7 @@ class IdentityCaseStoreTest {
                     status = CrawlRunStatus.IN_PROGRESS,
                     maxDepthReached = 0,
                 ),
-                openCaseIds = openCaseIds,
+                activeCaseIds = activeCaseIds,
             ),
         )
     }

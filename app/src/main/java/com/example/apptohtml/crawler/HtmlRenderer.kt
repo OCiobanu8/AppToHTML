@@ -49,7 +49,8 @@ $elementMarkup
     }
 
     /**
-     * The identity block, indented into `<head>`.
+     * The identity block, indented into `<head>`, from the newline before `<script` to `</script>`.
+     * Internal so a settle can splice exactly what a fresh render would write.
      *
      * The text comes from the XML serializer, so the screen's two files publish one identity from
      * one producer. Only the indentation added here differs between them.
@@ -58,7 +59,7 @@ $elementMarkup
      * is XML-escaped before it reaches this point — but the check is here rather than assumed,
      * because the failure mode is a silently truncated identity rather than an error.
      */
-    private fun renderIdentityBlock(identity: ScreenIdentity): String {
+    internal fun renderIdentityBlock(identity: ScreenIdentity): String {
         val block = AccessibilityXmlSerializer.screenIdentityBlock(identity)
         check(!block.contains("</script", ignoreCase = true)) {
             "Screen identity would terminate its own script block: $block"

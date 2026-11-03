@@ -2194,7 +2194,7 @@ class DeepCrawlCoordinatorTest {
             assertFalse(IdentityCaseStore.fileIn(sessionDir).exists())
             assertEquals(3, summary.capturedScreenCount)
             screenXmls(sessionDir).forEach { xml ->
-                assertTrue("${xml.name} carries no proposed traits", xml.readText().contains("<traits>"))
+                assertTrue("${xml.name} carries no proposed traits", xml.readText().contains("<traits settled-by=\"machine\">"))
                 assertFalse("${xml.name} points at a case", xml.readText().contains("<identity-case"))
             }
             assertTrue(crawlLog(sessionDir).contains("decision=Settled"))
@@ -2242,6 +2242,30 @@ class DeepCrawlCoordinatorTest {
     }
 
     @Test
+    fun identityOrigin_theCrawlerStampsWhatItSettles_inBothFiles_andNothingElse() = runBlocking {
+        val tempDir = Files.createTempDirectory("lifecycle-origin").toFile()
+        try {
+            val host = FakeHost(entryScreenId = "A", screens = aboutPhoneScreens())
+
+            val sessionDir = crawlCompleted(host, tempDir).sessionDir
+            val home = CaptureIdentitySource.load(screenXmls(sessionDir).single { it.name.startsWith("screen_00000") })
+                .getOrThrow()
+            val aboutXml = screenXmls(sessionDir).single { it.name.startsWith("screen_00001") }
+            val about = CaptureIdentitySource.load(aboutXml).getOrThrow()
+
+            assertTrue(home.identity.traits.isNotEmpty())
+            assertEquals(IdentityOrigin.MACHINE, home.identity.settledBy)
+            assertTrue(home.htmlFile.readText().contains("""<traits settled-by="machine">"""))
+            assertEquals(emptyList<Trait>(), about.identity.traits)
+            assertEquals(null, about.identity.settledBy)
+            assertFalse(aboutXml.readText().contains("settled-by"))
+            assertFalse(about.htmlFile.readText().contains("settled-by"))
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
     fun identityCase_proposalDoesNotHold_continue_capturesUnsettled_andStillExpandsIt() = runBlocking {
         val tempDir = Files.createTempDirectory("lifecycle-proposal-continue").toFile()
         try {
@@ -2252,7 +2276,7 @@ class DeepCrawlCoordinatorTest {
             val aboutXml = screenXmls(sessionDir).single { it.name.startsWith("screen_00001") }.readText()
 
             assertEquals(3, summary.capturedScreenCount)
-            assertFalse("unsettled screen carries traits", aboutXml.contains("<traits>"))
+            assertFalse("unsettled screen carries traits", aboutXml.contains("<traits"))
             assertTrue(aboutXml.contains("""<identity-case ref="case_000" />"""))
             assertTrue("the unsettled screen was not expanded", aboutXml.contains("""expansion-status="complete""""))
             assertEquals(
@@ -2338,7 +2362,7 @@ class DeepCrawlCoordinatorTest {
             )
             assertFalse(
                 "a collided screen must be captured unsettled",
-                screenXmls(sessionDir).single { it.name.startsWith("screen_00002") }.readText().contains("<traits>"),
+                screenXmls(sessionDir).single { it.name.startsWith("screen_00002") }.readText().contains("<traits"),
             )
             assertEquals("the lookalike was merged", 3, summary.capturedScreenCount)
             assertFalse(summary.manifestFile.readText().contains("linked_existing"))
@@ -2517,6 +2541,459 @@ class DeepCrawlCoordinatorTest {
             val recovery = log.indexOf("screen_preparation_failure")
             assertTrue("no case opened:\n$log", opened >= 0)
             assertTrue("recovery ran before the pause:\n$log", recovery > opened)
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    // ---- a2h-c2b.13: a resumed crawl confirms handled cases on the live screen ------------------
+
+    /** Home -> B -> C, with an optional second target on Home that also opens B. */
+    private fun handledScreens(withAlsoB: Boolean = false): Map<String, FakeScreen> {
+        val openB = fakeElement("Open B", 0)
+        val alsoB = fakeElement("Also B", 1)
+        return mapOf(
+            "A" to fakeScreen(
+                "A",
+                "Screen A",
+                elements = if (withAlsoB) listOf(openB, alsoB) else listOf(openB),
+                transitions = if (withAlsoB) mapOf("Open B" to "B", "Also B" to "B") else mapOf("Open B" to "B"),
+            ),
+            "B" to fakeScreen("B", "Screen B", elements = listOf(fakeElement("Open C", 0)), transitions = mapOf("Open C" to "C")),
+            "C" to fakeScreen("C", "Screen C", elements = listOf(fakeElement("Done", 0)), transitions = emptyMap()),
+        )
+    }
+
+    /**
+     * A saved crawl: the root A, fully expanded, whose "Open B" was captured as screen_00001, and B
+     * saved with [bStatus], carrying [bTraits] settled by the operator, with case_000 handled on it.
+     * [extraCases] are written to the case file too, and their pointers onto the screens they name.
+     */
+    private suspend fun writeHandledCrawl(
+        sessionDir: File,
+        screens: Map<String, FakeScreen>,
+        bStatus: ScreenExpansionStatus,
+        bTraits: List<Trait>,
+        rootTraits: List<Trait> = emptyList(),
+        rootCases: List<IdentityCase> = emptyList(),
+        extraCases: List<IdentityCase> = emptyList(),
+        alsoBPending: Boolean = false,
+    ) {
+        val openB = fakeElement("Open B", 0)
+        val alsoB = fakeElement("Also B", 1)
+        val openC = fakeElement("Open C", 0)
+        val handled = IdentityCase(
+            id = "case_000",
+            status = IdentityCaseStatus.HANDLED,
+            kind = IdentityCaseKind.PROPOSAL_DOES_NOT_HOLD,
+            raisedOn = "screen_00001",
+            relatedScreenIds = emptyList(),
+            detail = "the proposal asserts nothing",
+        )
+        val cases = listOf(handled) + rootCases + extraCases
+        fun pointersFor(screenId: String) = cases.filter { it.status.isActive && screenId in it.involvedScreenIds }.map { it.id }
+        writeIdentityScreenXml(
+            dir = sessionDir,
+            screenId = "screen_00000",
+            screenName = "Screen A",
+            root = liveRoot(screens),
+            depth = 0,
+            expansionStatus = if (alsoBPending) ScreenExpansionStatus.IN_PROGRESS else ScreenExpansionStatus.COMPLETE,
+            elements = if (alsoBPending) listOf(openB, alsoB) else listOf(openB),
+            traits = rootTraits,
+            settledBy = IdentityOrigin.OPERATOR.takeIf { rootTraits.isNotEmpty() },
+            route = CrawlRoute(),
+            edgesByElement = buildMap {
+                put(openB.toLinkKey(), EdgeXmlView(edgeId = "edge_000", status = CrawlEdgeStatus.CAPTURED, childScreenId = "screen_00001"))
+                if (alsoBPending) put(alsoB.toLinkKey(), EdgeXmlView(edgeId = "edge_001", status = CrawlEdgeStatus.PENDING))
+            },
+            activeCaseIds = pointersFor("screen_00000"),
+            realPage = true,
+        )
+        writeIdentityScreenXml(
+            dir = sessionDir,
+            screenId = "screen_00001",
+            screenName = "Screen B",
+            root = liveRoot(screens, openB),
+            depth = 1,
+            expansionStatus = bStatus,
+            elements = listOf(openC),
+            traits = bTraits,
+            settledBy = IdentityOrigin.OPERATOR.takeIf { bTraits.isNotEmpty() },
+            route = CrawlRoute(listOf(openB.toRouteStep())),
+            parent = ParentEdgeRef("screen_00000", "Open B", openB.resourceId),
+            edgesByElement = if (bStatus == ScreenExpansionStatus.COMPLETE) {
+                mapOf(openC.toLinkKey() to EdgeXmlView(edgeId = "edge_002", status = CrawlEdgeStatus.SKIPPED_NO_NAVIGATION))
+            } else {
+                emptyMap()
+            },
+            activeCaseIds = pointersFor("screen_00001"),
+            realPage = true,
+        )
+        IdentityCaseStore.write(IdentityCaseStore.fileIn(sessionDir), cases)
+    }
+
+    private suspend fun bControlTrait(screens: Map<String, FakeScreen>, label: String): HasControl =
+        HasControl(ScreenIdentity.fromRoot(liveRoot(screens, fakeElement("Open B", 0))).elements.single { it.fingerprint.label == label.lowercase() })
+
+    private fun absentTrait(): HasControl = HasControl(
+        ScreenIdentity.fromRoot(fakeRoot("X", "com.example.target", listOf(fakeElement("Gift wrap", 0)))).elements.single(),
+    )
+
+    private suspend fun resume(host: FakeHost, tempDir: File): DeepCrawlCoordinator.DeepCrawlOutcome =
+        coordinator(host, tempDir, timeProvider = { 1_000L }).crawl(
+            initialRoot = host.captureCurrentRootSnapshot("com.example.target")!!,
+            eventClassName = "ScreenA",
+            intent = CrawlStartIntent.RESUME,
+            resumeMode = ResumeMode.ContinueAuto,
+        )
+
+    private fun casesOn(sessionDir: File): Map<String, IdentityCase> =
+        IdentityCaseStore.read(IdentityCaseStore.fileIn(sessionDir)).associateBy { it.id }
+
+    private fun screenFile(sessionDir: File, prefix: String, extension: String = "xml"): File =
+        sessionDir.listFiles()!!.single { it.name.startsWith(prefix) && it.name.endsWith(".$extension") && !it.name.contains("_merged_") }
+
+    private fun identityBlockOf(text: String): String =
+        text.substring(text.indexOf("<screen-identity"), text.indexOf("</screen-identity>"))
+
+    @Test
+    fun resume_overAHandledCase_revisitsItsScreenAndClosesTheCaseWhenItHoldsLive() = runBlocking {
+        val tempDir = Files.createTempDirectory("handled-close").toFile()
+        try {
+            val sessionDir = File(tempDir, "session-1000").apply { mkdirs() }
+            val screens = handledScreens()
+            writeHandledCrawl(sessionDir, screens, ScreenExpansionStatus.NOT_STARTED, listOf(bControlTrait(screens, "Open C")))
+            val host = FakeHost(entryScreenId = "A", screens = screens)
+
+            val outcome = resume(host, tempDir)
+
+            assertTrue("$outcome", outcome is DeepCrawlCoordinator.DeepCrawlOutcome.Completed)
+            assertEquals(IdentityCaseStatus.CLOSED, casesOn(sessionDir).getValue("case_000").status)
+            sessionDir.listFiles()!!.filter { it.name.startsWith("screen_") && it.name.endsWith(".xml") }.forEach { xml ->
+                assertFalse("${xml.name} still points at the closed case", xml.readText().contains("case_000"))
+            }
+            assertEquals(emptyList<IdentityCase>(), host.identityCases)
+            assertTrue("B was not expanded after the close", screenFile(sessionDir, "screen_00002").exists())
+            assertTrue(crawlLog(sessionDir).contains("identity_case_closed caseId=case_000"))
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun resume_overAHandledCaseOnAnExpandedScreen_confirmsIt_withoutExpandingItOrTouchingEdges() = runBlocking {
+        val tempDir = Files.createTempDirectory("handled-confirm-only").toFile()
+        try {
+            val sessionDir = File(tempDir, "session-1000").apply { mkdirs() }
+            val screens = handledScreens()
+            writeHandledCrawl(sessionDir, screens, ScreenExpansionStatus.COMPLETE, listOf(bControlTrait(screens, "Open C")))
+            val edgesBefore = SavedCrawlLoader.load(sessionDir)!!.edges
+            val host = ClickRecordingHost(entryScreenId = "A", screens = screens)
+
+            val outcome = resume(host, tempDir)
+
+            assertTrue("$outcome", outcome is DeepCrawlCoordinator.DeepCrawlOutcome.Completed)
+            assertEquals(IdentityCaseStatus.CLOSED, casesOn(sessionDir).getValue("case_000").status)
+            assertEquals("only the replay to B may click", listOf("Open B"), host.clicks)
+            assertEquals(edgesBefore, SavedCrawlLoader.load(sessionDir)!!.edges)
+            assertFalse(sessionDir.listFiles()!!.any { it.name.startsWith("screen_00002") })
+            assertTrue(screenFile(sessionDir, "screen_00001").readText().contains("""expansion-status="complete""""))
+            val log = crawlLog(sessionDir)
+            assertTrue(log, log.contains("resume_confirm_done screenId=screen_00001 expanded=false"))
+            assertFalse("B was expanded again:\n$log", log.contains("traversal_resume_plan screenId=screen_00001"))
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun resume_aReopenedCaseLeftOpen_isTheOneCaseAgainOnTheNextResume_notASecondOne() = runBlocking {
+        val tempDir = Files.createTempDirectory("handled-reopen-twice").toFile()
+        try {
+            val sessionDir = File(tempDir, "session-1000").apply { mkdirs() }
+            val screens = handledScreens()
+            writeHandledCrawl(sessionDir, screens, ScreenExpansionStatus.NOT_STARTED, listOf(absentTrait()))
+            val first = FakeHost(entryScreenId = "A", screens = screens).apply { identityCaseDecision = PauseDecision.STOP }
+            resume(first, tempDir)
+            assertEquals(listOf("case_000"), casesOn(sessionDir).keys.toList())
+
+            val second = FakeHost(entryScreenId = "A", screens = screens)
+            resume(second, tempDir)
+
+            val onFile = casesOn(sessionDir)
+            assertEquals("the same divergence opened a second case", setOf("case_000"), onFile.keys)
+            assertEquals(IdentityCaseStatus.OPEN, onFile.getValue("case_000").status)
+            assertTrue(onFile.getValue("case_000").detail, onFile.getValue("case_000").detail.contains("missing control gift wrap"))
+            assertEquals(listOf("case_000"), second.identityCases.map { it.id })
+            assertEquals(1, Regex("""<identity-case ref=""").findAll(screenFile(sessionDir, "screen_00001").readText()).count())
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun resume_overAHandledCaseWhoseIdentityFailsLive_reopensItWithTheLiveReason_andPausesOnIt() = runBlocking {
+        val tempDir = Files.createTempDirectory("handled-reopen").toFile()
+        try {
+            val sessionDir = File(tempDir, "session-1000").apply { mkdirs() }
+            val screens = handledScreens()
+            writeHandledCrawl(sessionDir, screens, ScreenExpansionStatus.NOT_STARTED, listOf(absentTrait()))
+            val host = FakeHost(entryScreenId = "A", screens = screens)
+
+            resume(host, tempDir)
+
+            val paused = host.identityCases.single()
+            assertEquals("case_000", paused.id)
+            assertEquals(IdentityCaseStatus.OPEN, paused.status)
+            assertTrue(paused.detail, paused.detail.contains("missing control gift wrap"))
+            val onFile = casesOn(sessionDir)
+            assertEquals("no second case was opened", setOf("case_000"), onFile.keys)
+            assertEquals(IdentityCaseStatus.OPEN, onFile.getValue("case_000").status)
+            assertEquals(IdentityCaseKind.PROPOSAL_DOES_NOT_HOLD, onFile.getValue("case_000").kind)
+            assertTrue(screenFile(sessionDir, "screen_00001").readText().contains("""<identity-case ref="case_000" />"""))
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun resume_confirmsAHandledRootAtTheRescan_closingWhenItHolds_andReopeningWhenItDoesNot() = runBlocking {
+        listOf(true, false).forEach { holds ->
+            val tempDir = Files.createTempDirectory("handled-root").toFile()
+            try {
+                val sessionDir = File(tempDir, "session-1000").apply { mkdirs() }
+                val screens = handledScreens()
+                val rootTrait = if (holds) {
+                    HasControl(ScreenIdentity.fromRoot(liveRoot(screens)).elements.single { it.fingerprint.label == "open b" })
+                } else {
+                    absentTrait()
+                }
+                val rootCase = IdentityCase(
+                    id = "case_001",
+                    status = IdentityCaseStatus.HANDLED,
+                    kind = IdentityCaseKind.SETTLED_DOES_NOT_HOLD,
+                    raisedOn = "screen_00000",
+                    relatedScreenIds = emptyList(),
+                    detail = "settled identity does not hold on the entry screen at resume",
+                )
+                writeHandledCrawl(
+                    sessionDir,
+                    screens,
+                    ScreenExpansionStatus.COMPLETE,
+                    listOf(bControlTrait(screens, "Open C")),
+                    rootTraits = listOf(rootTrait),
+                    rootCases = listOf(rootCase),
+                )
+                val host = FakeHost(entryScreenId = "A", screens = screens)
+
+                resume(host, tempDir)
+
+                val onFile = casesOn(sessionDir)
+                assertEquals(setOf("case_000", "case_001"), onFile.keys)
+                if (holds) {
+                    assertEquals(IdentityCaseStatus.CLOSED, onFile.getValue("case_001").status)
+                    assertEquals(emptyList<IdentityCase>(), host.identityCases)
+                } else {
+                    assertEquals(IdentityCaseStatus.OPEN, onFile.getValue("case_001").status)
+                    assertTrue(onFile.getValue("case_001").detail, onFile.getValue("case_001").detail.contains("missing control gift wrap"))
+                    assertEquals(listOf("case_001"), host.identityCases.map { it.id })
+                }
+            } finally {
+                tempDir.deleteRecursively()
+            }
+        }
+    }
+
+    @Test
+    fun resume_whoseReplayCannotReachTheHandledScreen_leavesTheCaseHandled() = runBlocking {
+        val tempDir = Files.createTempDirectory("handled-unreachable").toFile()
+        try {
+            val sessionDir = File(tempDir, "session-1000").apply { mkdirs() }
+            val screens = handledScreens()
+            writeHandledCrawl(sessionDir, screens, ScreenExpansionStatus.COMPLETE, listOf(bControlTrait(screens, "Open C")))
+            val edgesBefore = SavedCrawlLoader.load(sessionDir)!!.edges
+            val host = ClickRecordingHost(entryScreenId = "A", screens = screens, failingLabels = setOf("Open B"))
+
+            resume(host, tempDir)
+
+            assertEquals(IdentityCaseStatus.HANDLED, casesOn(sessionDir).getValue("case_000").status)
+            assertEquals("a confirm-only visit added or changed an edge", edgesBefore, SavedCrawlLoader.load(sessionDir)!!.edges)
+            // The saved XML keeps only the first edge per element, so a stray edge is visible only in
+            // the tracker's own record: the manifest.
+            assertEquals(listOf("edge_000"), manifestEdgeIds(File(sessionDir, "crawl-index.json"), "screen_00000"))
+            assertTrue(crawlLog(sessionDir).contains("resume_confirm_failed"))
+            assertTrue(screenFile(sessionDir, "screen_00001").readText().contains("""<identity-case ref="case_000" />"""))
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun resume_afterClosingAHandledCase_linksALaterVisitToThatScreen() = runBlocking {
+        val tempDir = Files.createTempDirectory("handled-link").toFile()
+        try {
+            val sessionDir = File(tempDir, "session-1000").apply { mkdirs() }
+            val screens = handledScreens(withAlsoB = true)
+            writeHandledCrawl(
+                sessionDir,
+                screens,
+                ScreenExpansionStatus.COMPLETE,
+                listOf(bControlTrait(screens, "Open C")),
+                alsoBPending = true,
+            )
+            val host = FakeHost(entryScreenId = "A", screens = screens)
+
+            resume(host, tempDir)
+
+            val alsoB = SavedCrawlLoader.load(sessionDir)!!.edges.single { it.label == "Also B" }
+            assertEquals(CrawlEdgeStatus.LINKED_EXISTING, alsoB.status)
+            assertEquals("screen_00001", alsoB.childScreenId)
+            assertEquals(IdentityCaseStatus.CLOSED, casesOn(sessionDir).getValue("case_000").status)
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun resume_inReExpandMode_stillExpandsAHandledScreenThatWasNotExpanded() = runBlocking {
+        val tempDir = Files.createTempDirectory("handled-reexpand").toFile()
+        try {
+            val sessionDir = File(tempDir, "session-1000").apply { mkdirs() }
+            val screens = handledScreens()
+            writeHandledCrawl(sessionDir, screens, ScreenExpansionStatus.NOT_STARTED, listOf(bControlTrait(screens, "Open C")))
+            val host = FakeHost(entryScreenId = "A", screens = screens)
+
+            // ReExpand(root) queues only the root; B joins the frontier because its case is handled, and
+            // because B was never expanded it must be expanded, not merely confirmed.
+            coordinator(host, tempDir, timeProvider = { 1_000L }).crawl(
+                initialRoot = host.captureCurrentRootSnapshot("com.example.target")!!,
+                eventClassName = "ScreenA",
+                intent = CrawlStartIntent.RESUME,
+                resumeMode = ResumeMode.ReExpand("screen_00000"),
+            )
+
+            assertEquals(IdentityCaseStatus.CLOSED, casesOn(sessionDir).getValue("case_000").status)
+            assertTrue(screenFile(sessionDir, "screen_00001").readText().contains("""expansion-status="complete""""))
+            assertTrue("B's child was not captured", sessionDir.listFiles()!!.any { it.name.startsWith("screen_00002") })
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun resume_neverRevisitsAScreenForItsOpenCase() = runBlocking {
+        val tempDir = Files.createTempDirectory("handled-open-not-revisited").toFile()
+        try {
+            val sessionDir = File(tempDir, "session-1000").apply { mkdirs() }
+            val screens = handledScreens()
+            writeHandledCrawl(sessionDir, screens, ScreenExpansionStatus.COMPLETE, listOf(bControlTrait(screens, "Open C")))
+            // Turn B's case back to open: a resume must leave it, and B, alone.
+            IdentityCaseStore.write(
+                IdentityCaseStore.fileIn(sessionDir),
+                casesOn(sessionDir).values.map { it.copy(status = IdentityCaseStatus.OPEN) },
+            )
+            val host = ClickRecordingHost(entryScreenId = "A", screens = screens)
+
+            resume(host, tempDir)
+
+            assertEquals("B was revisited for an open case", emptyList<String>(), host.clicks)
+            assertFalse(crawlLog(sessionDir).contains("resume_confirm_queued"))
+            assertEquals(IdentityCaseStatus.OPEN, casesOn(sessionDir).getValue("case_000").status)
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun resume_closingAHandledCollision_removesItsPointerFromTheRelatedScreenToo() = runBlocking {
+        val tempDir = Files.createTempDirectory("handled-collision-close").toFile()
+        try {
+            val sessionDir = File(tempDir, "session-1000").apply { mkdirs() }
+            val screens = handledScreens()
+            writeHandledCrawl(sessionDir, screens, ScreenExpansionStatus.COMPLETE, listOf(bControlTrait(screens, "Open C")))
+            val collision = casesOn(sessionDir).getValue("case_000")
+                .copy(kind = IdentityCaseKind.UNIQUENESS_COLLISION, relatedScreenIds = listOf("screen_00000"))
+            IdentityCaseStore.write(IdentityCaseStore.fileIn(sessionDir), listOf(collision))
+            IdentityCasePointers.refresh(screenFile(sessionDir, "screen_00000"), listOf("case_000"))
+            assertTrue(screenFile(sessionDir, "screen_00000").readText().contains("""<identity-case ref="case_000" />"""))
+            val host = FakeHost(entryScreenId = "A", screens = screens)
+
+            resume(host, tempDir)
+
+            assertEquals(IdentityCaseStatus.CLOSED, casesOn(sessionDir).getValue("case_000").status)
+            listOf("screen_00000", "screen_00001").forEach { id ->
+                assertFalse("$id still points at the closed case", screenFile(sessionDir, id).readText().contains("case_000"))
+            }
+            assertEquals(2, SavedCrawlLoader.load(sessionDir)!!.screens.size)
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun resume_leavesAnOpenCaseExactlyAsItWas() = runBlocking {
+        val tempDir = Files.createTempDirectory("handled-open-untouched").toFile()
+        try {
+            val sessionDir = File(tempDir, "session-1000").apply { mkdirs() }
+            val screens = handledScreens()
+            val open = IdentityCase(
+                id = "case_001",
+                status = IdentityCaseStatus.OPEN,
+                kind = IdentityCaseKind.PROPOSAL_DOES_NOT_HOLD,
+                raisedOn = "screen_00000",
+                relatedScreenIds = listOf("screen_00001"),
+                detail = "the proposal also holds on screen_00001",
+                rejectedProposal = listOf(absentTrait()),
+            )
+            writeHandledCrawl(
+                sessionDir,
+                screens,
+                ScreenExpansionStatus.COMPLETE,
+                listOf(bControlTrait(screens, "Open C")),
+                extraCases = listOf(open),
+            )
+            val host = FakeHost(entryScreenId = "A", screens = screens)
+
+            resume(host, tempDir)
+
+            assertEquals(open, casesOn(sessionDir).getValue("case_001"))
+            assertTrue(screenFile(sessionDir, "screen_00000").readText().contains("""<identity-case ref="case_001" />"""))
+            assertTrue(screenFile(sessionDir, "screen_00001").readText().contains("""<identity-case ref="case_001" />"""))
+            assertEquals(emptyList<IdentityCase>(), host.identityCases)
+        } finally {
+            tempDir.deleteRecursively()
+        }
+    }
+
+    @Test
+    fun resume_keepsAnOperatorIdentityByteForByte_inBothFiles_throughRescanExpansionLinkAndClose() = runBlocking {
+        val tempDir = Files.createTempDirectory("handled-bytes").toFile()
+        try {
+            val sessionDir = File(tempDir, "session-1000").apply { mkdirs() }
+            val screens = handledScreens(withAlsoB = true)
+            val rootTrait = HasControl(ScreenIdentity.fromRoot(liveRoot(screens)).elements.single { it.fingerprint.label == "open b" })
+            writeHandledCrawl(
+                sessionDir,
+                screens,
+                ScreenExpansionStatus.NOT_STARTED,
+                listOf(bControlTrait(screens, "Open C")),
+                rootTraits = listOf(rootTrait),
+                alsoBPending = true,
+            )
+            val before = listOf("screen_00000", "screen_00001").flatMap { id ->
+                listOf("xml", "html").map { ext -> "$id.$ext" to identityBlockOf(screenFile(sessionDir, id, ext).readText()) }
+            }.toMap()
+            val host = FakeHost(entryScreenId = "A", screens = screens)
+
+            resume(host, tempDir)
+
+            assertEquals(IdentityCaseStatus.CLOSED, casesOn(sessionDir).getValue("case_000").status)
+            before.forEach { (key, block) ->
+                val (id, ext) = key.split(".")
+                assertEquals("$key's identity changed", block, identityBlockOf(screenFile(sessionDir, id, ext).readText()))
+                assertTrue(block.contains("""settled-by="operator""""))
+            }
         } finally {
             tempDir.deleteRecursively()
         }
@@ -2745,7 +3222,7 @@ class DeepCrawlCoordinatorTest {
             assertFalse(summary.manifestFile.readText().contains("linked_existing"))
             assertFalse(
                 "the collided screen must be captured unsettled",
-                screenXmls(sessionDir).single { it.name.startsWith("screen_00003") }.readText().contains("<traits>"),
+                screenXmls(sessionDir).single { it.name.startsWith("screen_00003") }.readText().contains("<traits"),
             )
         } finally {
             tempDir.deleteRecursively()
@@ -2835,7 +3312,7 @@ class DeepCrawlCoordinatorTest {
                 traits = emptyList(),
                 route = CrawlRoute(listOf(openB.toRouteStep())),
                 parent = ParentEdgeRef("screen_00000", "Open B", openB.resourceId),
-                openCaseIds = listOf("case_001"),
+                activeCaseIds = listOf("case_001"),
             )
             val host = FakeHost(entryScreenId = "A", screens = screens)
 
@@ -2918,7 +3395,7 @@ class DeepCrawlCoordinatorTest {
             assertEquals(listOf("case_000 involves [screen_00000]; pointers on [screen_00000]"), seenAtPause.lines)
             assertEquals("the root was not crawled after Continue", 2, summary.capturedScreenCount)
             val rootXml = screenXmls(sessionDir).single { it.name.startsWith("screen_00000") }.readText()
-            assertFalse(rootXml.contains("<traits>"))
+            assertFalse(rootXml.contains("<traits"))
             assertTrue(rootXml.contains("""<identity-case ref="case_000" />"""))
         } finally {
             tempDir.deleteRecursively()
@@ -3732,7 +4209,7 @@ class DeepCrawlCoordinatorTest {
     private fun crawlLog(sessionDir: File): String = File(sessionDir, "crawl.log").readText()
 
     private fun traitsBlockOf(xml: String): String =
-        xml.substringAfter("<screen-identity").substringBefore("</screen-identity>").substringAfter("<traits>")
+        xml.substringAfter("<screen-identity").substringBefore("</screen-identity>").substringAfter("<traits")
 
     private fun identityAndPointersOf(xml: String): String =
         xml.substringAfter("<screen-identity").substringBefore("<route>")
@@ -3763,11 +4240,13 @@ class DeepCrawlCoordinatorTest {
         route: CrawlRoute,
         edgesByElement: Map<PressableElementLinkKey, EdgeXmlView> = emptyMap(),
         parent: ParentEdgeRef? = null,
-        openCaseIds: List<String> = emptyList(),
+        activeCaseIds: List<String> = emptyList(),
+        settledBy: IdentityOrigin? = IdentityOrigin.MACHINE.takeIf { traits.isNotEmpty() },
+        realPage: Boolean = false,
     ) {
         val identity = ScreenIdentity.fromRoot(root)
             .withName(ScreenNaming.buildScreenNameIdentity(screenName, "com.example.target", root))
-            .copy(traits = traits)
+            .copy(traits = traits, settledBy = settledBy)
         val snapshot = ScreenSnapshot(
             screenName = screenName,
             packageName = "com.example.target",
@@ -3796,10 +4275,13 @@ class DeepCrawlCoordinatorTest {
                 null
             },
             edgesByElement = edgesByElement,
-            openCaseIds = openCaseIds,
+            activeCaseIds = activeCaseIds,
         )
         val baseName = "${screenId}_${ScreenNaming.toFileBase(screenName)}"
-        File(dir, "$baseName.html").writeText("<html></html>", Charsets.UTF_8)
+        File(dir, "$baseName.html").writeText(
+            if (realPage) HtmlRenderer.render(snapshot, emptyMap(), identity) else "<html></html>",
+            Charsets.UTF_8,
+        )
         File(dir, "$baseName.xml").writeText(
             AccessibilityXmlSerializer.serialize(snapshot, crawlState),
             Charsets.UTF_8,

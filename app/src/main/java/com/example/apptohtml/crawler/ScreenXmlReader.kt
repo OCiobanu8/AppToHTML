@@ -21,7 +21,7 @@ data class ScreenCrawlHead(
     val route: CrawlRoute,
     val runLevel: RunLevelState?,
     /** The case ids this screen's `<identity-case ref>` pointers name, as written. */
-    val openCaseIds: List<String> = emptyList(),
+    val activeCaseIds: List<String> = emptyList(),
 )
 
 data class ScreenXmlPayload(
@@ -53,9 +53,20 @@ object ScreenXmlReader {
         return parseHead(document, file)
     }
 
-    fun readFull(file: File): ScreenXmlPayload? {
+    fun readFull(file: File): ScreenXmlPayload? = readFullWith(file) { document -> parseHeadSafely(document, file) }
+
+    /**
+     * Like [readFull], but lets a [MalformedScreenIdentity] out instead of swallowing it — for the
+     * crawler's resume, which refuses a screen it cannot rebuild rather than dropping it. Returns
+     * null only when the file is not readable crawl XML at all.
+     */
+    fun readFullReportingRefusals(file: File): ScreenXmlPayload? = readFullWith(file) { document ->
+        parseHead(document, file)
+    }
+
+    private fun readFullWith(file: File, readHead: (Document) -> ScreenCrawlHead?): ScreenXmlPayload? {
         val document = parseUpTo(file, SCROLL_STEPS_TAG) ?: return null
-        val head = parseHeadSafely(document, file) ?: return null
+        val head = readHead(document) ?: return null
         val (elements, edgeByElement) = parseMergedElements(document)
         return ScreenXmlPayload(
             head = head,
@@ -155,7 +166,7 @@ object ScreenXmlReader {
             parent = parent,
             route = route,
             runLevel = runLevel,
-            openCaseIds = IdentityCasePointers.read(crawl),
+            activeCaseIds = IdentityCasePointers.read(crawl),
         )
     }
 

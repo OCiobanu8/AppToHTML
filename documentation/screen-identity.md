@@ -18,7 +18,7 @@ rather than a flattened string, and what each comparison policy is for) lives wi
                  root-class="android.widget.FrameLayout">
   <element label="internet" resource-id="" class="android.widget.LinearLayout"
            list-item="true" checkable="false" editable="false" back="false" />
-  <traits>
+  <traits settled-by="machine">
     <has-list container-resource-id="com.android.settings:id/recycler_view" min-rows="5">
       <row-child resource-id="android:id/title" />
       <row-child resource-id="android:id/summary" />
@@ -37,6 +37,10 @@ rather than a flattened string, and what each comparison policy is for) lives wi
   bytes and a rewrite stays diff-clean.
 - `<traits>` is omitted entirely when empty. An absent block and an empty one would mean the same
   thing, so only one of them is ever written.
+- `settled-by` on `<traits>` records who settled them: `machine` when the crawler's own proposal held,
+  `operator` when the validation tool settled a case. A block without a known stamp is refused, by
+  the tool and by the crawler's resume, rather than credited to anyone (`ScreenIdentityXml`). A case's
+  rejected or replaced traits carry no stamp, because they are not settled.
 
 The page carries the same block as an XML data block in `<head>`:
 
@@ -78,6 +82,10 @@ known identity against the screen (`ScreenRecognition`). **Route-replay arrival*
 to still be called what it was called and, if its identity is settled, its traits to hold there.
 **Resume** asks the same of the root, which is re-scanned rather than replayed.
 
+A resume refuses, naming the files, a screen whose identity is refused or whose `.xml` and `.html`
+identities disagree (`RefusedScreenIdentity`, shown in the saved-crawl panel). Skipping the screen
+would drop a hand edit, and loading one copy would let the next rewrite overwrite the other.
+
 - The **element set is deliberately not compared** at that site. A screen's content legitimately
   churns between visits, and requiring byte equality of it is the brittleness the identity redesign
   exists to remove.
@@ -96,8 +104,24 @@ case left open; Stop saves the crawl so the case can be settled and the crawl re
 
 A case lives in exactly one place: the crawl folder's `identity-cases.xml`, written and read by
 `IdentityCaseStore`. Each screen a case involves carries only an `<identity-case ref="…"/>` pointer,
-derived from the open cases (`IdentityCasePointers`). Closing a case — marking it `closed`, which keeps
-it as history and removes its pointers — is bead `a2h-c2b.13`.
+derived from the active cases (`IdentityCasePointers`).
+
+A case moves `open → handled → closed` (`IdentityCaseStatus`):
+
+- **handled**: an operator settled the screen with the validation tool, which first checked offline,
+  against the crawl's saved captures, that the identity holds there and nowhere else
+  (`OperatorSettlement`), then wrote it into both files and marked the case (`SettleWriter`).
+- **closed**: the resumed crawl revisited the screen and the identity held on the live screen. The
+  case stays in the file as history and its pointers go. If the identity does not hold live, the case
+  goes back to **open** with the live reason, and the crawl pauses on it.
+
+A resume confirms only handled cases and never revisits a screen for an open one. An open case changes
+only when a settled identity fails where the crawl already checks it — at replay arrival, or on the
+root at the resume re-scan — and then only its detail is refreshed: the same kind of divergence on the
+same screens refreshes the existing case, and a settled identity failing on a screen that already has
+an open case raised on it refreshes that case rather than opening a second (`CrawlRunTracker.openCase`).
+The operator's
+process, step by step, is in the skill's `SKILL.md`.
 
 ## The validation tool
 
@@ -110,7 +134,9 @@ The headline is the **trait** answer — `HOLDS`, `NOT_UNIQUE`, `DOES_NOT_HOLD`,
 element-set answer travels beside it, never folded in. They answer different questions, and blending
 them would hide a failing one behind a passing one.
 
-See the skill's `SKILL.md` for invocation, exit codes and the hand-settling workflow.
+It also serves the **case overview**, where an operator checks and settles a case in the browser,
+and it can settle from the command line. Both go through the same engine, `CaseSettleService`. See
+the skill's `SKILL.md` for invocation, exit codes and the settling process.
 
 ### Authoring traits
 

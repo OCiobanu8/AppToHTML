@@ -76,7 +76,7 @@ object AccessibilityXmlSerializer {
         builder.append('\n')
 
         appendScreenIdentity(builder, crawlState.screenIdentity, depth + 1)
-        IdentityCasePointers.append(builder, crawlState.openCaseIds, depth + 1)
+        IdentityCasePointers.append(builder, crawlState.activeCaseIds, depth + 1)
 
         crawlState.parent?.let { parent ->
             appendParent(builder, parent, depth + 1)
@@ -98,6 +98,14 @@ object AccessibilityXmlSerializer {
      */
     fun screenIdentityBlock(identity: ScreenIdentity): String =
         buildString { appendScreenIdentity(this, identity, depth = 0) }.trimEnd('\n')
+
+    /**
+     * The `<screen-identity>` element exactly as the screen's XML carries it at [depth], trailing
+     * newline included: what a settle splices in place of the old one, so a settled file is
+     * byte-identical to one the crawler serialized afresh.
+     */
+    fun screenIdentityLines(identity: ScreenIdentity, depth: Int): String =
+        buildString { appendScreenIdentity(this, identity, depth) }
 
     /**
      * The screen's whole identity: the name attributes, the root class and element set in the same
@@ -139,7 +147,12 @@ object AccessibilityXmlSerializer {
         builder.append(">")
         builder.append('\n')
         ScreenIdentityXml.appendElements(builder, elements, depth + 1)
-        ScreenIdentityXml.appendTraits(builder, identity.traits, depth + 1)
+        // A screen's traits are always someone's settled assertion. Writing them unstamped would
+        // produce a file every reader refuses, so a path that forgot the origin fails here instead.
+        check(identity.traits.isEmpty() || identity.settledBy != null) {
+            "A screen identity with traits must record who settled them."
+        }
+        ScreenIdentityXml.appendTraits(builder, identity.traits, depth + 1, identity.settledBy)
         builder.append(indent)
         builder.append("</screen-identity>")
         builder.append('\n')

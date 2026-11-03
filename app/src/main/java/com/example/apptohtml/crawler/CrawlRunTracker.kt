@@ -170,8 +170,10 @@ class CrawlRunTracker private constructor(
      * case id — unless an open case of the same [kind] on the same screens already exists. That case
      * keeps its id but takes the new [detail] and [rejectedProposal]: the same divergence seen again
      * (a replay that fails on every resume) is one case for the operator, not a new one each time, and
-     * it describes what failed this time, not the first time. The caller writes it out; the tracker
-     * only holds it.
+     * it describes what failed this time, not the first time. A settled identity failing on a screen
+     * that already has an open case raised on it — a case the operator settled and the live screen then
+     * refused — refreshes that case too, whatever its kind. The caller writes it out; the tracker only
+     * holds it.
      */
     fun openCase(
         kind: IdentityCaseKind,
@@ -186,9 +188,21 @@ class CrawlRunTracker private constructor(
                 existing.kind == kind &&
                 existing.raisedOn == raisedOn &&
                 existing.relatedScreenIds == related
-        }
+        }.takeIf { it >= 0 }
+            // A settled identity that fails on a screen already carrying an open case raised on it is
+            // that case again: the operator settled it, the live screen refused it, and the case was
+            // reopened. Opening a second case would hand the operator one divergence twice.
+            ?: cases.indexOfFirst { existing ->
+                kind == IdentityCaseKind.SETTLED_DOES_NOT_HOLD &&
+                    existing.status == IdentityCaseStatus.OPEN &&
+                    existing.raisedOn == raisedOn
+            }
         if (existingIndex >= 0) {
-            val refreshed = cases[existingIndex].copy(detail = detail, rejectedProposal = rejectedProposal)
+            // A divergence that proposes nothing keeps the proposal already on the record.
+            val refreshed = cases[existingIndex].copy(
+                detail = detail,
+                rejectedProposal = rejectedProposal.ifEmpty { cases[existingIndex].rejectedProposal },
+            )
             cases[existingIndex] = refreshed
             return refreshed
         }
@@ -206,22 +220,39 @@ class CrawlRunTracker private constructor(
     }
 
     /**
-     * Closes [caseId]: it stays in the case file as history, and every pointer to it disappears on
-     * the involved screens' next write. The contract `a2h-c2b.13` builds on; no crawl path closes a
-     * case yet, so only tests call this.
+     * Closes [caseId]: the resumed crawl confirmed its identity on the live screen. It stays in the
+     * case file as history, and every pointer to it goes; the caller rewrites the case file and the
+     * involved screens' pointers.
      */
-    internal fun closeCase(caseId: String) {
+    fun closeCase(caseId: String): IdentityCase = setStatus(caseId, IdentityCaseStatus.CLOSED, detail = null)
+
+    /**
+     * Reopens a handled [caseId] whose identity did not hold on the live screen, with [detail] saying
+     * why. It keeps its id: it is the same divergence, and the operator's settle is undone, not lost:
+     * the identity they wrote stays on the screen for them to revise.
+     */
+    fun reopenCase(caseId: String, detail: String): IdentityCase =
+        setStatus(caseId, IdentityCaseStatus.OPEN, detail)
+
+    /** The handled cases raised on [screenId], sorted by id: what a resumed crawl confirms there. */
+    fun handledCasesOn(screenId: String): List<IdentityCase> = cases
+        .filter { it.status == IdentityCaseStatus.HANDLED && it.raisedOn == screenId }
+        .sortedBy(IdentityCase::id)
+
+    private fun setStatus(caseId: String, status: IdentityCaseStatus, detail: String?): IdentityCase {
         val index = cases.indexOfFirst { it.id == caseId }
         require(index >= 0) { "Unknown case $caseId." }
-        cases[index] = cases[index].copy(status = IdentityCaseStatus.CLOSED)
+        val updated = cases[index].copy(status = status, detail = detail ?: cases[index].detail)
+        cases[index] = updated
+        return updated
     }
 
     /** Every case, open and closed, sorted by id. */
     fun cases(): List<IdentityCase> = cases.sortedBy(IdentityCase::id)
 
-    /** The open cases involving [screenId], as the ids its pointers name. */
-    fun openCaseIdsFor(screenId: String): List<String> = cases
-        .filter { it.status == IdentityCaseStatus.OPEN && screenId in it.involvedScreenIds }
+    /** The active cases, open or handled, involving [screenId], as the ids its pointers name. */
+    fun activeCaseIdsFor(screenId: String): List<String> = cases
+        .filter { it.status.isActive && screenId in it.involvedScreenIds }
         .map(IdentityCase::id)
         .sorted()
 

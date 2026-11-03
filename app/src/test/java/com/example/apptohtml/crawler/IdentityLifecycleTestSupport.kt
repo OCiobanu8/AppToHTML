@@ -19,7 +19,8 @@ internal object Lifecycle {
         tree: AccessibilityNodeSnapshot,
         name: ScreenNameIdentity,
         traits: List<Trait>,
-    ): ScreenIdentity = ScreenIdentity.fromRoot(tree).withName(name).copy(traits = traits)
+    ): ScreenIdentity = ScreenIdentity.fromRoot(tree).withName(name)
+        .copy(traits = traits, settledBy = IdentityOrigin.MACHINE.takeIf { traits.isNotEmpty() })
 
     /** The identity a capture of [tree] would carry once its proposal settled. */
     fun settled(tree: AccessibilityNodeSnapshot, name: ScreenNameIdentity): ScreenIdentity =
