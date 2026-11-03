@@ -141,7 +141,8 @@ When the rubric is satisfied, add `<spear-complete/>` on its own line above the 
 - Red→green archives: `evidence/02`/`03`, `04`/`05` and `12`.
 - Device (`evidence/09-device`): on the owner's emulator run, a fresh crawl with machine stamps; Continue
   and Stop at case pauses; an offline settle of Battery that holds, with `case_000` handled.
-  **Not shown:** the push of the settled files and the resume that closes `case_000`.
+  Shown after Gate 3 (`evidence/19-device-push-resume`): the push, and a resume that closes both
+  cases on the live screens.
 
 ### Scope amendments (recorded in PLAN)
 - `openCase` refreshes an open case on a live failure instead of opening a duplicate (round 2). This

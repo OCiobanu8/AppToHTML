@@ -194,6 +194,9 @@ if ($Crawl) {
         $argList = @($gradleArgs + $properties) | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }
         $gradle = Start-Process -FilePath $gradlew -ArgumentList $argList -WorkingDirectory $repoRoot `
             -NoNewWindow -PassThru -RedirectStandardOutput $log -RedirectStandardError "$log.err"
+        # Windows PowerShell 5.1 leaves ExitCode empty for a redirected Start-Process unless the
+        # handle is read before the process exits, which reported every clean Done as an error.
+        $null = $gradle.Handle
 
         $url = "http://127.0.0.1:$port/?token=$token"
         Write-Host "Starting the case tool (the first start builds the tool; this can take a minute)..." -ForegroundColor Cyan

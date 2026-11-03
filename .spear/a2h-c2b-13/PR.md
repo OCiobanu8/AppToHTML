@@ -80,9 +80,14 @@ The same engine also runs from the command line for scripts: `-Settle <case> -Tr
   - Rounds 5–8 failed only on unpinned operator-visible outputs, and each round's findings were fixed
     and pinned.
   - Round 7 checked base `e9c6fe5`'s suite against the new sources: no change for ordinary crawls.
-- **Device** (owner, emulator): a fresh Settings crawl with machine stamps; Continue and Stop at case
-  pauses; an offline settle of Battery that holds, with `case_000` handled.
-  **Not yet shown:** the push of the settled files and the resume that closes `case_000`.
+- **Device** (owner, emulator, a fresh Settings crawl):
+  - Battery and SIMs were settled and pushed in the case page; the device's copies matched the local
+    files.
+  - A resume closed both cases on the live screens (`identity_case_closed … confirmedOn=…`) and
+    removed their pointers. The operator stamps were kept.
+  - The crawl carried on along Battery.
+- **Found on the device run and fixed:** the script reported a clean Done as an error. Windows
+  PowerShell 5.1 leaves the exit code empty unless the process handle is read first.
 
 ## Known limits, filed
 
