@@ -376,7 +376,7 @@ class ScreenIdentityReportTest {
 
         /** A list assertion no fixture screen can satisfy, so the trait verdict is DOES_NOT_HOLD. */
         val IMPOSSIBLE_LIST = """
-            <traits>
+            <traits settled-by="operator">
               <has-list container-resource-id="com.example.target:id/nonexistent" min-rows="3">
                 <row-child resource-id="com.example.target:id/title" />
               </has-list>
@@ -385,7 +385,7 @@ class ScreenIdentityReportTest {
 
         /** A shape `HasList` refuses: with no minimum, any container with a child would satisfy it. */
         val MIN_ROWS_ZERO = """
-            <traits>
+            <traits settled-by="operator">
               <has-list container-resource-id="com.example.target:id/list" min-rows="0">
                 <row-child resource-id="com.example.target:id/title" />
               </has-list>

@@ -74,21 +74,26 @@ internal object ScreenIdentityXml {
     }
 
     /**
-     * Writes [traits] as a `<traits>` block, omitted entirely when empty.
+     * Writes [traits] as a `<traits>` block, omitted entirely when empty, stamped
+     * `settled-by="…"` when [settledBy] is given.
      *
      * An absent block and an empty one would mean the same thing — an identity asserting nothing —
      * so only one of them is ever written. Traits keep the order the identity holds them in. Equality
      * ignores that order ([ScreenIdentity.equals]), and [TraitProposer] emits a canonical one, so the
-     * same proposal always writes the same bytes.
+     * same proposal always writes the same bytes. A screen's identity is always stamped; a block that
+     * records traits nobody settled — a case's rejected proposal — is not.
      */
     fun appendTraits(
         builder: StringBuilder,
         traits: List<Trait>,
         depth: Int,
+        settledBy: IdentityOrigin? = null,
     ) {
         if (traits.isEmpty()) return
         val indent = "  ".repeat(depth)
-        builder.append(indent).append("<traits>").append('\n')
+        builder.append(indent).append("<traits")
+        settledBy?.let { builder.append(""" $SETTLED_BY_ATTRIBUTE="${it.xmlValue}"""") }
+        builder.append(">").append('\n')
         traits.forEach { trait -> appendTrait(builder, trait, depth + 1) }
         builder.append(indent).append("</traits>").append('\n')
     }
@@ -162,13 +167,32 @@ internal object ScreenIdentityXml {
         )
     }
 
-    /** Rebuilds the identity [element] carries. The inverse of [append]. */
-    fun parse(element: Element): ScreenIdentity = ScreenIdentity(
-        packageName = element.getAttribute("package").takeIf { it.isNotBlank() },
-        rootClassName = element.getAttribute("root-class"),
-        elements = parseElements(element),
-        traits = parseTraits(element),
-    )
+    /**
+     * Rebuilds the identity [element] carries. The inverse of [append] and of the screen identity
+     * block: a `<traits>` block, when present, must say who settled it.
+     */
+    fun parse(element: Element): ScreenIdentity {
+        val traits = parseTraits(element, TraitsStamp.REQUIRED)
+        return ScreenIdentity(
+            packageName = element.getAttribute("package").takeIf { it.isNotBlank() },
+            rootClassName = element.getAttribute("root-class"),
+            elements = parseElements(element),
+            traits = traits.traits,
+            settledBy = traits.settledBy,
+        )
+    }
+
+    /** Whether a `<traits>` block must, or must not, carry a `settled-by` stamp. */
+    enum class TraitsStamp {
+        /** A screen's settled identity: someone settled it, so the block says who. */
+        REQUIRED,
+
+        /** Traits nobody settled — a rejected proposal, an operator's draft: a stamp is refused. */
+        FORBIDDEN,
+    }
+
+    /** A `<traits>` block's assertions and the origin its stamp names, null when unstamped or absent. */
+    data class ParsedTraits(val traits: List<Trait>, val settledBy: IdentityOrigin?)
 
     /**
      * The traits of [parent]'s `<traits>` block, or empty when it has none. The inverse of
@@ -177,9 +201,10 @@ internal object ScreenIdentityXml {
      * Throws [MalformedScreenIdentity] rather than guessing: a trait the reader cannot build is a
      * question for whoever wrote it. [HasList] refuses its own degenerate shapes at construction, so
      * a `min-rows="0"` or an empty schema surfaces here as a refusal — never as a trait that would
-     * hold on every screen.
+     * hold on every screen. The stamp is held to [stamp] the same way: a missing or unknown
+     * `settled-by` on a screen identity is refused rather than credited to anyone.
      */
-    fun parseTraits(parent: Element): List<Trait> {
+    fun parseTraits(parent: Element, stamp: TraitsStamp): ParsedTraits {
         // A second <traits> block is refused rather than ignored. Pasting one in is the natural
         // mistake when following the tool's own "paste these into BOTH files" advice, and silently
         // keeping only the first would hand back a weaker identity than the operator wrote — the
@@ -190,8 +215,8 @@ internal object ScreenIdentityXml {
                 "${blocks.size} <traits> blocks; a screen identity asserts one set. Merge them."
             )
         }
-        val block = blocks.firstOrNull() ?: return emptyList()
-        return block.childElements().map { child ->
+        val block = blocks.firstOrNull() ?: return ParsedTraits(emptyList(), settledBy = null)
+        val traits = block.childElements().map { child ->
             when (child.tagName) {
                 "has-list" -> parseHasList(child)
                 "has-control" -> HasControl(singleElementOf(child, "has-control"))
@@ -201,7 +226,46 @@ internal object ScreenIdentityXml {
                 )
             }
         }
+        // An empty block asserts nothing, exactly as an absent one does, so it has nobody to credit. Its
+        // stamp is still held to the rule — missing or unknown where one is required, present where none
+        // is allowed — but a valid one credits nobody. The writer never produces an empty block.
+        if (traits.isEmpty()) {
+            if (block.hasAttribute(SETTLED_BY_ATTRIBUTE) || stamp == TraitsStamp.REQUIRED) parseStamp(block, stamp)
+            return ParsedTraits(emptyList(), settledBy = null)
+        }
+        return ParsedTraits(traits, parseStamp(block, stamp))
     }
+
+    private fun parseStamp(block: Element, stamp: TraitsStamp): IdentityOrigin? {
+        val written = block.getAttribute(SETTLED_BY_ATTRIBUTE)
+        return when (stamp) {
+            TraitsStamp.FORBIDDEN -> {
+                if (block.hasAttribute(SETTLED_BY_ATTRIBUTE)) {
+                    throw MalformedScreenIdentity(
+                        "<traits $SETTLED_BY_ATTRIBUTE=\"$written\">: these traits were never settled, " +
+                            "so they carry no $SETTLED_BY_ATTRIBUTE. Remove it; the tool records who settles them."
+                    )
+                }
+                null
+            }
+            TraitsStamp.REQUIRED -> IdentityOrigin.fromXml(written)
+                ?: throw MalformedScreenIdentity(
+                    if (block.hasAttribute(SETTLED_BY_ATTRIBUTE)) {
+                        "<traits $SETTLED_BY_ATTRIBUTE=\"$written\"> names nobody this crawl knows; " +
+                            "it must be \"${IdentityOrigin.OPERATOR.xmlValue}\" or \"${IdentityOrigin.MACHINE.xmlValue}\"."
+                    } else {
+                        "<traits> has no $SETTLED_BY_ATTRIBUTE stamp, so nobody is credited with these traits. " +
+                            "If the screen has a case, settle it with the validation tool; otherwise restore the block " +
+                            "the crawler wrote, or crawl again with the current build. The tool checks " +
+                            "the traits against the whole crawl and stamps them. Traits stamped by hand are checked only " +
+                            "when the crawl next stands on the screen."
+                    }
+                )
+        }
+    }
+
+    /** The `<traits>` attribute naming who settled them. */
+    const val SETTLED_BY_ATTRIBUTE = "settled-by"
 
     private fun parseHasList(element: Element): HasList {
         val minRowsText = element.getAttribute("min-rows")

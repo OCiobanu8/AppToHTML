@@ -11,8 +11,29 @@ param(
     # skill. No second device round trip is implemented here.
     [switch]$Live,
 
-    # Validate every screen in a crawl directory against its own capture.
+    # A crawl directory. On its own, opens the case overview in the browser; with -Survey, prints
+    # the text survey; with -Settle and -Traits, settles one case from the command line.
     [string]$Crawl,
+
+    # With -Crawl: print the text survey (every screen validated against its own capture, then the
+    # crawl's cases) instead of opening the case overview.
+    [switch]$Survey,
+
+    # With -Crawl and -Traits: the case to settle from the command line.
+    [string]$Settle,
+
+    # With -Settle: a file holding one <traits> block, unstamped.
+    [string]$Traits,
+
+    # With -Settle: check the traits and write nothing.
+    [switch]$DryRun,
+
+    # With -Settle: push the three changed files to the device, refused if the device copy changed
+    # since the pull.
+    [switch]$Push,
+
+    # The adb to push with. Defaults to the one on PATH, then the Android SDK.
+    [string]$AdbPath,
 
     # The screens uniqueness is decided among. Defaults to the directory holding -Target.
     [string]$KnownScreens,
@@ -37,6 +58,7 @@ $EXIT = @{
     UNSETTLED     = 3
     INVALID_INPUT = 4
     USAGE         = 5
+    SETTLE_FAILED = 6
 }
 
 function Fail-Usage([string]$message) {
@@ -59,7 +81,22 @@ function Get-RepoRoot {
 }
 
 if (-not $Target -and -not $Crawl) {
-    Fail-Usage "Pass -Target <screen.xml> to validate one screen, or -Crawl <dir> to survey a crawl."
+    Fail-Usage "Pass -Target <screen.xml> to validate one screen, or -Crawl <dir> to open the case overview (add -Survey for the text survey)."
+}
+if (($Survey -or $Settle) -and -not $Crawl) {
+    Fail-Usage "-Survey and -Settle work on a crawl; pass -Crawl <dir>."
+}
+if ($Survey -and $Settle) {
+    Fail-Usage "-Survey and -Settle are alternatives; pass one."
+}
+if ($Settle -and -not $Traits) {
+    Fail-Usage "-Settle needs -Traits <file>. To write traits in the browser, run -Crawl <dir> alone and pick the case."
+}
+if (($Traits -or $DryRun -or $Push) -and -not $Settle) {
+    Fail-Usage "-Traits, -DryRun and -Push go with -Settle <case>."
+}
+if ($DryRun -and $Push) {
+    Fail-Usage "-DryRun writes nothing, so there is nothing to -Push."
 }
 if ($Target -and $Crawl) {
     Fail-Usage "-Target and -Crawl are alternatives; pass one."
@@ -71,6 +108,31 @@ if ($Live -and $Crawl) {
     Fail-Usage "-Live validates one screen; it cannot be combined with -Crawl."
 }
 
+function Get-LocalPropertiesSdkDir([string]$root) {
+    $file = Join-Path $root "local.properties"
+    if (-not (Test-Path -LiteralPath $file)) { return $null }
+    $line = Get-Content -LiteralPath $file | Where-Object { $_ -match '^\s*sdk\.dir\s*=' } | Select-Object -First 1
+    if (-not $line) { return $null }
+    return ($line -replace '^\s*sdk\.dir\s*=\s*', '') -replace '\\:', ':' -replace '\\\\', '\'
+}
+
+# The adb the pull-crawl skill would use: -AdbPath, PATH, then the SDK locations. Null when none.
+function Find-Adb([string]$root) {
+    if ($AdbPath) {
+        if (-not (Test-Path -LiteralPath $AdbPath)) { Fail-Usage "No adb at $AdbPath." }
+        return (Resolve-Path -LiteralPath $AdbPath).Path
+    }
+    $onPath = Get-Command adb -ErrorAction SilentlyContinue
+    if ($onPath) { return $onPath.Source }
+    $sdkDirs = @($env:ANDROID_SDK_ROOT, $env:ANDROID_HOME, (Get-LocalPropertiesSdkDir $root), (Join-Path $env:LOCALAPPDATA "Android\Sdk")) |
+        Where-Object { $_ }
+    foreach ($sdk in $sdkDirs) {
+        $candidate = Join-Path $sdk "platform-tools\adb.exe"
+        if (Test-Path -LiteralPath $candidate) { return (Resolve-Path -LiteralPath $candidate).Path }
+    }
+    return $null
+}
+
 $repoRoot = Get-RepoRoot
 $gradlew = Join-Path $repoRoot "gradlew.bat"
 if (-not (Test-Path -LiteralPath $gradlew)) {
@@ -79,9 +141,94 @@ if (-not (Test-Path -LiteralPath $gradlew)) {
 
 $properties = New-Object System.Collections.Generic.List[string]
 
+$gradleArgs = @(
+    "testDebugUnitTest",
+    "--tests", "*ScreenIdentityValidationEntryPoint",
+    "--console=plain"
+)
+
 if ($Crawl) {
     if (-not (Test-Path -LiteralPath $Crawl)) { Fail-Usage "No such crawl directory: $Crawl" }
-    $properties.Add("-Da2h.crawl=$((Resolve-Path -LiteralPath $Crawl).Path)")
+    $crawlPath = (Resolve-Path -LiteralPath $Crawl).Path
+    $properties.Add("-Da2h.crawl=$crawlPath")
+
+    if ($Survey) {
+        $properties.Add("-Da2h.survey=true")
+    } elseif ($Settle) {
+        if (-not (Test-Path -LiteralPath $Traits)) { Fail-Usage "No such traits file: $Traits" }
+        $properties.Add("-Da2h.settle=$Settle")
+        $properties.Add("-Da2h.traits=$((Resolve-Path -LiteralPath $Traits).Path)")
+        if ($DryRun) { $properties.Add("-Da2h.dryRun=true") }
+        if ($Push) {
+            $adb = Find-Adb $repoRoot
+            if (-not $adb) { Fail-Usage "-Push needs adb; none was found. Pass -AdbPath." }
+            $properties.Add("-Da2h.push=true")
+            $properties.Add("-Da2h.adb=$adb")
+            if ($DeviceSerial) { $properties.Add("-Da2h.serial=$DeviceSerial") }
+        }
+    } else {
+        # The case overview: the JVM entry point serves it on 127.0.0.1 for as long as the operator
+        # works, so Gradle starts once and every check after the first answers at once.
+        $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+        $listener.Start()
+        $port = $listener.LocalEndpoint.Port
+        $listener.Stop()
+        $token = [guid]::NewGuid().ToString("N")
+        # The token travels in a one-time file the tool deletes on reading, never as a -D value: Gradle
+        # records -D values as task inputs on disk.
+        $tokenFile = Join-Path ([System.IO.Path]::GetTempPath()) ("a2h-token-" + [guid]::NewGuid().ToString("N"))
+        [System.IO.File]::WriteAllText($tokenFile, $token)
+        $properties.Add("-Da2h.port=$port")
+        $properties.Add("-Da2h.tokenFile=$tokenFile")
+        $adb = Find-Adb $repoRoot
+        if ($adb) {
+            $properties.Add("-Da2h.adb=$adb")
+            if ($DeviceSerial) { $properties.Add("-Da2h.serial=$DeviceSerial") }
+        } else {
+            Write-Host "No adb found: the pages will settle files locally and say they still need pushing." -ForegroundColor Yellow
+        }
+
+        $log = Join-Path ([System.IO.Path]::GetTempPath()) "a2h-case-tool-$port.log"
+        # Windows PowerShell 5.1 joins -ArgumentList with spaces and does not quote, so an argument
+        # holding a space (a crawl under "My Documents") is quoted here.
+        $argList = @($gradleArgs + $properties) | ForEach-Object { if ($_ -match '\s') { '"' + $_ + '"' } else { $_ } }
+        $gradle = Start-Process -FilePath $gradlew -ArgumentList $argList -WorkingDirectory $repoRoot `
+            -NoNewWindow -PassThru -RedirectStandardOutput $log -RedirectStandardError "$log.err"
+        # Windows PowerShell 5.1 leaves ExitCode empty for a redirected Start-Process unless the
+        # handle is read before the process exits, which reported every clean Done as an error.
+        $null = $gradle.Handle
+
+        $url = "http://127.0.0.1:$port/?token=$token"
+        Write-Host "Starting the case tool (the first start builds the tool; this can take a minute)..." -ForegroundColor Cyan
+        $deadline = (Get-Date).AddSeconds(300)
+        $ready = $false
+        while ((Get-Date) -lt $deadline) {
+            if ($gradle.HasExited) { break }
+            try {
+                $reply = Invoke-WebRequest -UseBasicParsing -TimeoutSec 2 -Uri "http://127.0.0.1:$port/health?token=$token"
+                if ($reply.StatusCode -eq 200) { $ready = $true; break }
+            } catch {
+                Start-Sleep -Milliseconds 750
+            }
+        }
+        Remove-Item -LiteralPath $tokenFile -Force -ErrorAction SilentlyContinue
+        if (-not $ready) {
+            [Console]::Error.WriteLine("The case tool did not start. Gradle output: $log")
+            if (Test-Path -LiteralPath $log) { Get-Content -LiteralPath $log -Tail 40 | ForEach-Object { [Console]::Error.WriteLine($_) } }
+            if (-not $gradle.HasExited) { Stop-Process -Id $gradle.Id -Force -ErrorAction SilentlyContinue }
+            exit $EXIT.USAGE
+        }
+        Write-Host "Case overview: $url" -ForegroundColor Green
+        Write-Host "Press Done on the page when you have finished; the tool then exits." -ForegroundColor Cyan
+        Start-Process $url
+        $gradle.WaitForExit()
+        if ($gradle.ExitCode -ne 0) {
+            [Console]::Error.WriteLine("The case tool ended with an error (Gradle exit $($gradle.ExitCode)). Output: $log")
+            exit $EXIT.USAGE
+        }
+        Remove-Item -LiteralPath $log, "$log.err" -Force -ErrorAction SilentlyContinue
+        exit 0
+    }
 } else {
     if (-not (Test-Path -LiteralPath $Target)) { Fail-Usage "No such capture: $Target" }
     $targetPath = (Resolve-Path -LiteralPath $Target).Path
@@ -118,11 +265,7 @@ if ($Crawl) {
     if ($IsRootScreen) { $properties.Add("-Da2h.root=true") }
 }
 
-$gradleArgs = @(
-    "testDebugUnitTest",
-    "--tests", "*ScreenIdentityValidationEntryPoint",
-    "--console=plain"
-) + $properties
+$gradleArgs = $gradleArgs + $properties
 
 # Gradle's stderr is deliberately NOT redirected into the success stream. In Windows PowerShell
 # 5.1, `2>&1` on a native executable wraps each stderr line in an ErrorRecord, which under

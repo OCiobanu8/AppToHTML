@@ -206,6 +206,7 @@ class ScreenIdentityHtmlBlockTest {
                 rowChildResourceIds = setOf("$PACKAGE:id/title"),
             ),
         ),
+        settledBy = IdentityOrigin.MACHINE,
     ).withName(
         ScreenNameIdentity(
             packageName = "com_example_target",

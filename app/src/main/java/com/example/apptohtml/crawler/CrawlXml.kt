@@ -2,6 +2,7 @@ package com.example.apptohtml.crawler
 
 import org.w3c.dom.Element
 import org.w3c.dom.Node
+import javax.xml.parsers.DocumentBuilderFactory
 
 /**
  * The XML primitives shared by the crawl serializer and reader.
@@ -11,6 +12,21 @@ import org.w3c.dom.Node
  * them would be invisible in either file alone and would only surface as a value that survives a
  * write but not the following read.
  */
+
+/**
+ * The root element of the XML in [text], parsed with doctypes refused. Throws when [text] is not
+ * well-formed XML. The one parser setup for identity text an operator supplies or a page embeds.
+ */
+internal fun parseXmlElement(text: String): Element =
+    DocumentBuilderFactory.newInstance()
+        .apply {
+            isNamespaceAware = false
+            isValidating = false
+            runCatching { setFeature("http://apache.org/xml/features/disallow-doctype-decl", true) }
+        }
+        .newDocumentBuilder()
+        .parse(text.byteInputStream(Charsets.UTF_8))
+        .documentElement
 
 /**
  * Escapes [input] for use in an XML attribute value or text node.

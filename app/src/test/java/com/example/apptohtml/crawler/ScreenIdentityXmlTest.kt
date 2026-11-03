@@ -111,7 +111,7 @@ class ScreenIdentityXmlTest {
         // min-rows="0" would hold on any container with a child, which HasList refuses to be.
         val file = writeRaw(
             """
-            <traits>
+            <traits settled-by="operator">
               <has-list container-resource-id="com.example.target:id/list" min-rows="0">
                 <row-child resource-id="com.example.target:id/title" />
               </has-list>
@@ -211,6 +211,7 @@ class ScreenIdentityXmlTest {
         rootClassName = ROOT_CLASS,
         elements = elements,
         traits = traits,
+        settledBy = IdentityOrigin.OPERATOR.takeIf { traits.isNotEmpty() },
     ).withName(
         ScreenNameIdentity(
             packageName = "com_example_target",

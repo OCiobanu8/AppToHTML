@@ -20,8 +20,10 @@ object SavedCrawlLoader {
      * The saved crawl in [crawlDir], or null when there is none.
      *
      * Throws [MalformedIdentityCases] when the case file cannot be read, or a screen points at a case
-     * the file does not hold open: a resume that dropped a case would carry on past a divergence an
-     * operator was meant to see.
+     * the file does not hold open or handled: a resume that dropped a case would carry on past a divergence an
+     * operator was meant to see. Throws [RefusedScreenIdentity] when a screen's identity is refused,
+     * or its `.xml` and `.html` disagree: skipping the screen, or loading one copy, would drop or
+     * overwrite an operator's edit.
      */
     fun load(crawlDir: File): LoadedCrawlState? {
         if (!crawlDir.exists() || !crawlDir.isDirectory) return null
@@ -36,7 +38,28 @@ object SavedCrawlLoader {
         val loadedList = mutableListOf<Loaded>()
         val unreadable = mutableListOf<File>()
         for (file in xmlFiles) {
-            val payload = ScreenXmlReader.readFull(file)
+            val payload = try {
+                ScreenXmlReader.readFullReportingRefusals(file)
+            } catch (refused: MalformedScreenIdentity) {
+                // An identity the reader refuses is almost always a hand edit. Skipping the screen
+                // would drop it and let the crawl capture the screen again under a new id.
+                throw RefusedScreenIdentity(
+                    "${file.absolutePath}: its screen identity is refused — ${refused.message}",
+                    refused,
+                )
+            }
+            if (payload != null) {
+                CaptureIdentitySource.pageProblem(file, payload.head.screenIdentity)?.let { problem ->
+                    throw RefusedScreenIdentity(
+                        if (problem.file == file) {
+                            problem.detail
+                        } else {
+                            "${file.absolutePath}: its page ${problem.file.absolutePath} has an unusable " +
+                                "screen identity — ${problem.detail}"
+                        },
+                    )
+                }
+            }
             if (payload == null) {
                 runCatching {
                     DiagnosticLogger.error("Skipping malformed crawl XML: ${file.absolutePath}")
@@ -51,7 +74,7 @@ object SavedCrawlLoader {
         val edges = mutableListOf<CrawlEdgeRecord>()
         val caseFile = IdentityCaseStore.fileIn(crawlDir)
         val cases = IdentityCaseStore.read(caseFile)
-        val openCasesById = cases.filter { it.status == IdentityCaseStatus.OPEN }.associateBy { it.id }
+        val activeCasesById = cases.filter { it.status.isActive }.associateBy { it.id }
         val screensById = mutableMapOf<String, CrawlScreenRecord>()
         val htmlFilenameByScreenId = mutableMapOf<String, String>()
         val resolvedLinks = mutableMapOf<String, MutableMap<PressableElementLinkKey, String>>()
@@ -114,12 +137,12 @@ object SavedCrawlLoader {
                 rootScreenId = head.screenId
                 runLevel = head.runLevel
             }
-            head.openCaseIds.firstOrNull { id ->
-                openCasesById[id]?.involvedScreenIds?.contains(head.screenId) != true
+            head.activeCaseIds.firstOrNull { id ->
+                activeCasesById[id]?.involvedScreenIds?.contains(head.screenId) != true
             }?.let { dangling ->
                 throw MalformedIdentityCases(
                     "${xmlFile.absolutePath} points at case $dangling, which ${caseFile.absolutePath} " +
-                        "does not hold open for ${head.screenId}.",
+                        "does not hold open or handled for ${head.screenId}.",
                 )
             }
         }

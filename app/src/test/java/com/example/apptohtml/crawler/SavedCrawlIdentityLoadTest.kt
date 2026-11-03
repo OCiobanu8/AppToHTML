@@ -171,6 +171,7 @@ class SavedCrawlIdentityLoadTest {
             ),
             HasControl(element("Open", "$targetPackage:id/open")),
         ),
+        settledBy = IdentityOrigin.OPERATOR,
     ).withName(
         ScreenNameIdentity(
             packageName = ScreenNaming.normalizeIdentityToken(targetPackage),

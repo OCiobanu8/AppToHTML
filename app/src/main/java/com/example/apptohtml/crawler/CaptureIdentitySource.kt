@@ -2,7 +2,6 @@ package com.example.apptohtml.crawler
 
 import org.w3c.dom.Element
 import java.io.File
-import javax.xml.parsers.DocumentBuilderFactory
 
 /**
  * One captured screen, loaded from the pair of files that describe it.
@@ -44,10 +43,28 @@ internal data class CaptureProblem(
  */
 internal object CaptureIdentitySource {
 
-    fun load(xmlFile: File): Result<LoadedCapture> {
+    /**
+     * The capture whose XML is [xmlFile], read with its page. With [requirePage] — validating one
+     * screen — a missing page or one with no identity block is refused. Without it — reading a whole
+     * crawl, as the settle does — such a page is read as the crawler's resume reads it ([pageProblem]):
+     * the XML alone, because the next rewrite writes the page from it and no edit can be lost.
+     */
+    fun load(xmlFile: File, requirePage: Boolean = true): Result<LoadedCapture> {
         val htmlFile = File(xmlFile.parentFile, xmlFile.name.removeSuffix(".xml") + ".html")
 
         val fromXml = readXmlIdentity(xmlFile).getOrElse { return Result.failure(it) }
+        val pageHasBlock = htmlFile.isFile && embeddedBlock(htmlFile.readText(Charsets.UTF_8)) != null
+        if (!requirePage && !pageHasBlock) {
+            return Result.success(
+                LoadedCapture(
+                    screenId = xmlFile.name.removeSuffix(".xml"),
+                    identity = fromXml,
+                    firstViewport = CaptureTreeReader.readFirstViewport(xmlFile),
+                    xmlFile = xmlFile,
+                    htmlFile = htmlFile,
+                )
+            )
+        }
         val fromHtml = readHtmlIdentity(htmlFile).getOrElse { return Result.failure(it) }
 
         differenceBetween(fromXml, fromHtml)?.let { difference ->
@@ -67,6 +84,32 @@ internal object CaptureIdentitySource {
                 htmlFile = htmlFile,
             )
         )
+    }
+
+    /**
+     * Why the page beside [xmlFile] cannot stand next to [xmlIdentity] — the identity read from that
+     * XML — or null when they agree.
+     *
+     * For the crawler's resume, which reads only the XML: a page whose identity differs would be
+     * overwritten by the next rewrite, and a page whose identity block is refused holds an edit the
+     * crawler would discard. A missing page, or one with no identity block, is not a problem here:
+     * the next rewrite writes it from the XML and no edit is lost. The same comparison [load] uses, and
+     * the same missing-page rule its crawl-wide read (`requirePage = false`) uses.
+     */
+    fun pageProblem(xmlFile: File, xmlIdentity: ScreenIdentity): CaptureProblem? {
+        val htmlFile = File(xmlFile.parentFile, xmlFile.name.removeSuffix(".xml") + ".html")
+        if (!htmlFile.isFile) return null
+        if (embeddedBlock(htmlFile.readText(Charsets.UTF_8)) == null) return null
+        val fromHtml = readHtmlIdentity(htmlFile).getOrElse { error ->
+            return (error as? CaptureProblemException)?.problem ?: CaptureProblem(htmlFile, error.message.orEmpty())
+        }
+        return differenceBetween(xmlIdentity, fromHtml)?.let { difference ->
+            CaptureProblem(
+                xmlFile,
+                "the identity in ${xmlFile.absolutePath} and ${htmlFile.absolutePath} disagree — $difference. " +
+                    "Neither is preferred; make them match before resuming.",
+            )
+        }
     }
 
     private fun readXmlIdentity(xmlFile: File): Result<ScreenIdentity> {
@@ -111,27 +154,28 @@ internal object CaptureIdentitySource {
         }
     }
 
-    private fun embeddedBlock(html: String): String? {
+    /**
+     * Where a page's identity block sits: [openStart] is the `<script` tag, [contentStart] the first
+     * character after it, [closeStart] the `</script>` that ends it. The one place a page's block is
+     * found, for reading it here and for replacing it in a settle.
+     */
+    data class PageBlock(val openStart: Int, val contentStart: Int, val closeStart: Int)
+
+    /** The identity block in [html], or null when the page has none. */
+    fun locatePageBlock(html: String): PageBlock? {
         val open = """<script type="application/xml" id="${HtmlRenderer.SCREEN_IDENTITY_ELEMENT_ID}">"""
         val start = html.indexOf(open)
         if (start < 0) return null
         val from = start + open.length
         val end = html.indexOf("</script>", from)
         if (end < 0) return null
-        return html.substring(from, end)
+        return PageBlock(start, from, end)
     }
 
-    private fun parseElement(xml: String): Element? = runCatching {
-        DocumentBuilderFactory.newInstance()
-            .apply {
-                isNamespaceAware = false
-                isValidating = false
-                runCatching { setFeature("http://apache.org/xml/features/disallow-doctype-decl", true) }
-            }
-            .newDocumentBuilder()
-            .parse(xml.trim().byteInputStream(Charsets.UTF_8))
-            .documentElement
-    }.getOrNull()
+    private fun embeddedBlock(html: String): String? =
+        locatePageBlock(html)?.let { block -> html.substring(block.contentStart, block.closeStart) }
+
+    private fun parseElement(xml: String): Element? = runCatching { parseXmlElement(xml.trim()) }.getOrNull()
 
     /** The first real difference, phrased for someone about to edit a file, or null when they agree. */
     private fun differenceBetween(xml: ScreenIdentity, html: ScreenIdentity): String? {
@@ -158,6 +202,10 @@ internal object CaptureIdentitySource {
         }
         if (xml.traits != html.traits) {
             return describeTraitDifference(xml.traits, html.traits)
+        }
+        if (xml.settledBy != html.settledBy) {
+            return "settled by ${xml.settledBy?.xmlValue ?: "nobody"} in the XML but " +
+                "${html.settledBy?.xmlValue ?: "nobody"} in the page"
         }
         if (DedupPolicy.nameKey(xml) != DedupPolicy.nameKey(html)) {
             return "name \"${DedupPolicy.nameKey(xml)}\" vs \"${DedupPolicy.nameKey(html)}\""

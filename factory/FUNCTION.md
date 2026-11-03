@@ -21,6 +21,14 @@
   its pins by what they *assert* — the fixture they build, the outcome they demand — not by
   grepping test names for the feature. A pin written under one feature is often named for another,
   and the ones a name-search misses are exactly the ones that still pass for the wrong reason.
+- **A pin asserts inside the thing it pins.** Scope each check to the element, line or field it
+  is about — never "appears somewhere in the output". Output repeats itself (a value echoed in a
+  heading, a name in a log line), so a match anywhere stays green after the thing it pins breaks.
+- **List the operator-visible surface before review, and mutate every item.** Before the first
+  independent review, enumerate every message, exit code, page section and branch an operator
+  sees that the change adds, and give each a mutation in a harness kept with the change's
+  evidence. Pinning only what a reviewer happens to find leaves the rest for the next reviewer,
+  one round at a time.
 
 - **Prefer executable checks to inspection.** Any acceptance criterion that *can* be a
   test/build/lint check *must* be one; human inspection is the last resort.

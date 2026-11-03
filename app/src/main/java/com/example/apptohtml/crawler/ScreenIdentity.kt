@@ -34,6 +34,24 @@ data class ScreenNameIdentity(
 }
 
 /**
+ * Who settled a screen's identity: the crawler, because its own proposal held, or an operator, who
+ * wrote the traits and had the validation tool confirm they hold.
+ *
+ * Written on the `<traits>` block as `settled-by`, so an identity that asserts nothing has nobody to
+ * credit and "settled, but asserting nothing" cannot be written.
+ */
+enum class IdentityOrigin(val xmlValue: String) {
+    MACHINE("machine"),
+    OPERATOR("operator"),
+    ;
+
+    companion object {
+        /** The origin written as [value], or null when no origin is written that way. */
+        fun fromXml(value: String): IdentityOrigin? = entries.firstOrNull { it.xmlValue == value }
+    }
+}
+
+/**
  * The one structured identity of a screen, produced at capture for every screen — root and child
  * alike — and rebuilt from a live root whenever the crawler needs to ask "am I on this screen?".
  *
@@ -49,6 +67,9 @@ data class ScreenNameIdentity(
  * live tree by [TraitEvaluator] rather than compared with another identity. An identity with no
  * traits, or with negations alone, is *not settled yet* — never *matches everything* — and no
  * traits is what every identity carries until one is proposed or settled for it.
+ *
+ * [settledBy] records who settled [traits]. It is null while the identity asserts nothing, and also
+ * on a proposal not yet decided; a persisted identity with traits always carries one.
  */
 data class ScreenIdentity(
     val packageName: String?,
@@ -56,6 +77,7 @@ data class ScreenIdentity(
     val elements: Set<ScreenElementIdentity>,
     val name: ScreenNameIdentity? = null,
     val traits: List<Trait> = emptyList(),
+    val settledBy: IdentityOrigin? = null,
 ) {
     /**
      * The controls that identify this screen: exactly the elements its [HasControl] traits assert.
@@ -83,7 +105,7 @@ data class ScreenIdentity(
      * Equality treats [traits] as the order-free conjunction [TraitEvaluator] evaluates: two
      * identities asserting the same things are equal however the list is ordered or repeated. The
      * list itself keeps its order, so a writer still reproduces what it was given byte for byte.
-     * Every other field compares as a data class would.
+     * Every other field, [settledBy] included, compares as a data class would.
      */
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -92,7 +114,8 @@ data class ScreenIdentity(
             rootClassName == other.rootClassName &&
             elements == other.elements &&
             name == other.name &&
-            traits.toSet() == other.traits.toSet()
+            traits.toSet() == other.traits.toSet() &&
+            settledBy == other.settledBy
     }
 
     override fun hashCode(): Int {
@@ -101,6 +124,7 @@ data class ScreenIdentity(
         result = 31 * result + elements.hashCode()
         result = 31 * result + name.hashCode()
         result = 31 * result + traits.toSet().hashCode()
+        result = 31 * result + settledBy.hashCode()
         return result
     }
 
